@@ -1,0 +1,12 @@
+.DS_Store
+**/.env.local
+**/.logs/
+**/.sessions/
+**/.claw/
+**/.dclaw/agents/
+**/.dclaw/logs/
+**/.dclaw/sessions/
+**/.dclaw/tasks/
+**/.dclaw/todos/
+**/.dclaw/workers/
+**/.clawd-todos.json
