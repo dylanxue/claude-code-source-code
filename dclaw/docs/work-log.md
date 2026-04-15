@@ -1,0 +1,367 @@
+# 工作日志
+
+## 2026-04-15
+
+- 建立基础自动化测试骨架：
+  - `test/unit/read.test.ts`
+  - `test/unit/edit-write.test.ts`
+  - `test/unit/bash.test.ts`
+  - `test/integration/query-loop-permissions.test.ts`
+- 将自动化测试扩展到：
+  - `test/unit/glob-grep.test.ts`
+  - `test/unit/webfetch-ask.test.ts`
+- 继续将自动化测试扩展到：
+  - `Edit.replace_all`
+  - `Write` 对 partial read 的拦截
+  - `Read` 对 missing file 的校验
+  - `Bash` 的 read-only 分类
+  - `queryLoop` 下更细粒度的 permission mode 行为
+- 将 `Bash` 的只读识别扩展到：
+  - `pwd`
+  - `git status`
+  - `git diff`
+  - `git log`
+  - `git show`
+  - 安全的 `git branch` 只读变体
+- 将带输出重定向的 `Bash` 命令从只读自动放行中排除：
+  - `pwd > out.txt`
+  - `git status --short > out.txt`
+  - `grep foo file.txt >> out.txt`
+- 为输出重定向误判补上单测与权限集成测试，防止 `default` 模式误放行
+- 开始识别 `timeout / time / nice / stdbuf / nohup` 这类安全 wrapper，并在只读判定前剥离包装层
+- 为 wrapper 场景补上测试，确保 `timeout 5 pwd` 一类命令不会被误判成未知命令
+- 开始识别一小组 Claude Code 风格的安全环境变量前缀，例如 `TZ=UTC`、`NODE_ENV=production`
+- 为安全环境变量前缀补上测试，确保 `TZ=UTC pwd` 这类命令仍可走只读自动放行路径
+- 为 `Bash` 增加更接近 Claude Code 的人工审批原因判断：
+  - shell expansion 出现在输出重定向目标中时，要求人工审批
+  - 命令同时包含 `cd` 与输出重定向时，要求人工审批
+- 将上述审批原因接入 permission evaluator，而不是只做成 validate 报错
+- 为这两类 `Bash` 安全审批场景补上集成测试：
+  - 无审批宿主时应被拦下
+  - 有审批宿主且允许时，动态重定向命令可继续执行
+- 增加 `test/helpers/toolContext.ts`
+- 在 `package.json` 中接入 `npm test`
+- 调整 `tsconfig.json`，将 `test/**/*.ts` 纳入类型检查
+- 验证：
+  - `npm run check`
+  - `npm test`
+  - 当前共 37 条测试，全部通过
+- 将最小 permission evaluator 接入 `queryLoop`
+- 让 `default / accept-edits / plan / bypass-permissions` 真正影响工具执行链路
+- 当前权限模式行为：
+  - `bypass-permissions`：放行所有工具
+  - `plan`：仅放行只读工具
+  - `accept-edits`：自动放行 `Edit / Write`，其他变更型工具需审批
+  - `default`：只读工具自动放行，变更型工具尝试询问用户
+- 验证 `default` 模式下有交互宿主时，变更型工具会在允许后继续执行
+- 为 `Read` 补上更明确的 warning 语义：
+  - 空文件
+  - offset 越界
+  - 目录路径校验
+- 为 `Read` 增加 `isPartial` 输出标记，显式区分完整读取和分段读取
+- 为 `Edit / Write` 增加基础 `structuredPatch` 输出，使返回结果更接近 Claude Code 的 diff 语义
+- 将 `Edit` 的输出形态进一步向 Claude Code 收紧，补上：
+  - `oldString`
+  - `newString`
+  - `originalFile`
+  - `structuredPatch`
+  - `userModified`
+  - `replaceAll`
+- 将 `Bash.run_in_background` 从未实现推进到最小可用：
+  - 支持后台启动命令
+  - 返回 `backgroundTaskId`
+  - 返回 `persistedOutputPath`
+  - 将后台输出写入 `.dclaw/background-tasks/*.log`
+- 将 `Bash` 的大输出处理推进到“截断内联 + 完整输出落盘”
+- 为前台 `Bash` 大输出补上 `.dclaw/tool-results/*.log`
+- 将 `permissionMode` 接入 CLI 与 `ToolContext`
+- 为 `Bash.dangerouslyDisableSandbox` 接入最小模式约束：
+  - 默认模式阻止
+  - `bypass-permissions` 允许
+- 为 `Edit / Write` 补上最小 `gitDiff` 输出
+- 为 `gitDiff` 补上 synthetic diff 兜底，避免未跟踪文件拿不到结果
+- 回归验证：
+  - `npm run check`
+  - `executeSingleTurn` 下验证 `plan` 阻止 `Write`
+  - `executeSingleTurn` 下验证 `accept-edits` 放行 `Write`
+  - `executeSingleTurn` 下验证 `default` 阻止变更型 `Bash`
+  - `executeSingleTurn` 下验证 `default` 在有交互宿主时可放行 `Bash`
+  - 直接调用 `Read` 验证 `isPartial`
+  - 直接调用 `Read` 验证空文件 warning / offset 越界 warning / 目录校验
+  - 直接调用 `Edit / Write` 验证 `structuredPatch`
+  - 直接调用 `Bash` 验证 `run_in_background`
+  - 读取后台日志文件确认输出已落盘
+  - 直接调用 `Bash` 验证大输出时会返回 `persistedOutputPath`
+  - 直接调用 `Bash` 验证 `dangerouslyDisableSandbox` 在不同 permission mode 下的行为
+  - 在仓库内临时文件上验证 `Edit.gitDiff`
+- 将 `Bash` 的最小语义往 Claude Code 收紧一层：
+  - 增加默认 timeout 与最大 timeout 校验
+  - 增加 search/read/list 型命令判定，用于 `isReadOnly`
+  - 增加 silent command 判定，返回 `noOutputExpected`
+  - 增加 `interrupted / dangerouslyDisableSandbox / returnCodeInterpretation` 等更接近 Claude Code 的输出字段
+- 将 `Glob` 的默认结果限制收紧到 100 条，并补上 `truncated` 语义
+- 将 `Grep` 的默认 `head_limit` 收紧到 250，支持 `0` 表示 unlimited
+- 为 `Grep` 增加更接近 Claude Code 的输入字段：
+  - `-A / -B / -C / context`
+  - `-n`
+  - `type`
+  - `multiline`
+- 修正 `Grep` 在 `content` 模式关闭行号时的路径相对化问题
+- 回归验证：
+  - `npm run check`
+  - `tool:Bash command=pwd`
+  - `tool:Glob pattern=*.md path=/abs/path/to/docs`
+  - `tool:Grep pattern=Tool path=/abs/path/to/file`
+  - 直接调用工具验证 `Bash` timeout / `noOutputExpected` 与 `Grep -n=false`
+- 将 `Read` 的输出形态收紧到更接近 Claude Code 的 `type: text / file` 结构，并改成 1-based offset
+- 将 `readState` 扩展为记录 `content / timestamp / offset / limit`，为更稳的读后写约束打基础
+- 将 `Write / Edit` 的“文件在读取后被修改”判断从纯时间戳提升为“时间戳 + 内容对比”联合判断
+- 将 `Edit` 的关键失败语义前移到校验阶段，包括：未读先改、字符串未命中、多处命中但未开启 `replace_all`
+- 为 `queryLoop` 增加 tool call 异常捕获，避免单个工具抛错直接打断整个 CLI
+- 将 `dclaw` 默认工具名从早期占位实现收拢到 Claude Code 核心命名：`Read / Edit / Write / Bash / Glob / Grep`
+- 为 `Read` 增加最小读状态记录，并让 `Write` / `Edit` 具备基础的“先读后写”约束
+- 增加 `WebFetch` 最小工具实现，以及一个基于终端 TTY 的 `AskUserQuestion` 最小宿主
+- 为 `glob` / `grep` 增加 `rg` 缺失时的 Node fallback，避免本机未安装 ripgrep 时直接失败
+- 将 QueryEngine 的 tool 执行从单次 `tool_use -> tool_result` 推进到基础多轮 `assistant -> tool -> assistant` 闭环
+- 在 `src/core/queryLoop.ts` 中加入迭代式 loop，并将新增消息统一回填到 `QueryEngine`
+- 更新 `src/llm/providers/stub.ts`，让 stub provider 在收到 trailing `tool_result` 后返回最终 assistant 文本
+- 新增 `glob` 与 `grep` 两个只读基础工具，并注册到默认 tool registry
+- 为 Tool 协议补上 `validate / isEnabled / availableTools` 预留位，降低后续阶段 6 接入成本
+- 明确下一步将接入第一个真实 LLM provider，优先目标是 `Anthropic` 的最小非流式 provider
+- 更新阶段进展文档，准备下一步处理 tool contract 与权限接入点
+
+## 2026-04-15
+
+### 本次完成
+
+- 明确 `dclaw` 的产品目标和能力边界
+- 将 Claude Code 通用能力整理为 12 个核心阶段
+- 明确 `coding` 能力为后置场景阶段
+- 明确 `memory` 为核心能力
+- 建立 `dclaw/` 基础目录骨架
+- 初始化最小 TypeScript 工程
+- 编写以下文档：
+  - 总体架构
+  - 阶段规划
+  - MVP 技术设计
+  - Prompt 设计
+  - Tool 协议
+  - Memory 设计
+  - Agent 设计
+  - Skill 设计
+  - MCP / Plugin / Remote 设计
+- 将文档整理为编号版入口：
+  - `01-总体方案`
+  - `02-MVP设计`
+  - `03-扩展设计`
+- 初始化进展跟踪文档：
+  - `project-status.md`
+  - `dev-tasks.md`
+  - `work-log.md`
+- 实现 CLI 最小运行骨架：
+  - `parseArgs`
+  - `interactive`
+  - `headless`
+  - `doctor`
+  - `resume`
+  - `main`
+- 为 CLI 增加运行脚本
+- 安装 `tsx`
+- 验证以下命令可运行：
+  - `dclaw --help`
+  - `dclaw --doctor`
+  - `dclaw --print "hello dclaw"`
+  - `dclaw resume session-123`
+  - `dclaw "draft a plan"`
+- 实现最小消息协议：
+  - `Message`
+  - `ContentBlock`
+  - `text / tool_use / tool_result`
+- 实现最小 LLM 抽象：
+  - `LlmClient`
+  - `CreateMessageRequest`
+  - `CreateMessageResponse`
+  - `stub` provider
+- 实现最小 `QueryEngine`
+- 将 `interactive` 与 `--print` 入口接入 `QueryEngine`
+- 增加 `--provider` 参数，当前支持 `stub`
+- 验证 QueryEngine 链路：
+  - `dclaw --print "hello query engine"`
+  - `dclaw --provider stub --print "test provider"`
+  - `dclaw "interactive prompt"`
+- 拆出 `src/core/queryLoop.ts`
+- 建立最小 prompt 层：
+  - `src/prompt/types.ts`
+  - `src/prompt/contextAssembler.ts`
+  - `src/prompt/sections.ts`
+  - `src/prompt/systemPrompt.ts`
+- 将 CLI 改为：
+  - 先装配 prompt context
+  - 再构建 system prompt
+  - 再交给 QueryEngine
+- 验证 prompt 装配链路：
+  - `dclaw --print "prompt assembly check"`
+  - `dclaw --system-prompt "be terse" --print "override check"`
+  - `dclaw "interactive with prompt layer"`
+- 实现基础 `CLAUDE.md` 加载器：
+  - `~/.dclaw/CLAUDE.md`
+  - `<cwd>/CLAUDE.md`
+  - `<cwd>/CLAUDE.local.md`
+- 将 `CLAUDE.md` 内容作为独立 prompt section 注入
+- 调整 prompt sections：
+  - `System`
+  - `Doing Tasks`
+  - `Runtime Context`
+  - `CLAUDE.md Instructions`
+  - `User Override`
+- 调整 stub provider 输出 `system prompt chars`
+- 增加 fixture：
+  - `test/fixtures/claude-md-basic/CLAUDE.md`
+- 验证 `CLAUDE.md` 链路：
+  - `dclaw --print "baseline without fixture"`
+  - `dclaw --cwd test/fixtures/claude-md-basic --print "fixture prompt"`
+  - `dclaw --cwd test/fixtures/claude-md-basic "interactive fixture"`
+- 将 `CLAUDE.md` 发现升级为多层模式：
+  - 用户级 `~/.dclaw/CLAUDE.md`
+  - 从 cwd 向上查找 `<dir>/CLAUDE.md`
+  - 从 cwd 向上查找 `<dir>/.claude/CLAUDE.md`
+  - 从 cwd 向上查找 `<dir>/.claude/rules/*.md`
+  - 从 cwd 向上查找 `<dir>/CLAUDE.local.md`
+- 修正目录内加载顺序，确保 local 规则仍保持更高优先级
+- 增加树形 fixture：
+  - `test/fixtures/claude-md-tree/CLAUDE.md`
+  - `test/fixtures/claude-md-tree/.claude/CLAUDE.md`
+  - `test/fixtures/claude-md-tree/.claude/rules/root-rule.md`
+  - `test/fixtures/claude-md-tree/app/CLAUDE.md`
+  - `test/fixtures/claude-md-tree/app/.claude/rules/app-rule.md`
+  - `test/fixtures/claude-md-tree/app/CLAUDE.local.md`
+- 验证多层发现链路：
+  - `dclaw --cwd test/fixtures/claude-md-basic --print "basic fixture"`
+  - `dclaw --cwd test/fixtures/claude-md-tree/app --print "tree fixture"`
+  - `dclaw --cwd test/fixtures/claude-md-tree/app "interactive tree"`
+- 为 `CLAUDE.md` 增加基础 include 能力：
+  - 支持 `@path`
+  - 支持 `@./path`
+  - 支持 `@~/path`
+  - 支持 `@/absolute/path`
+- include 处理包含：
+  - 递归展开
+  - 去重
+  - 循环保护
+  - 在父文件前注入被包含文件
+- 将 include 语义修正得更接近 Claude Code：
+  - 不再删除原文件中的 `@include` 文本
+  - 在非代码块、非 HTML 注释区域提取 include 路径
+  - 支持更宽的文本文件扩展名集合
+- 修正一个 include 边界 bug：
+  - 之前代码块内部的 `@...` 仍可能被误提取
+  - 现在代码块内部内容会被正确跳过
+- 为 include 边界补充 fixture：
+  - `space note.md`
+  - `ignored-comment.md`
+  - `ignored-code.md`
+  - 并在 `CLAUDE.local.md` 中加入：
+    - 带转义空格和 `#fragment` 的 include
+    - HTML 注释中的 include
+    - fenced code block 中的 include
+- 验证 include 边界：
+  - `dclaw --cwd test/fixtures/claude-md-tree/app --print "include edge cases"`
+  - `dclaw --cwd test/fixtures/claude-md-tree/app "interactive include edge cases"`
+  - interactive 显示 `claude.md files loaded: 8`
+- 为 `interactive` 和 `--print` 增加 `--verbose` 下的 `CLAUDE.md` 加载顺序输出
+- 验证加载顺序：
+  - `dclaw --verbose --cwd test/fixtures/claude-md-tree/app --print "show order"`
+  - `dclaw --verbose --cwd test/fixtures/claude-md-tree/app "show order interactive"`
+- 验证结果显示当前顺序为：
+  - 根目录 project
+  - 根目录 `.claude/CLAUDE.md`
+  - 根目录 `rules`
+  - 子目录 include
+  - 子目录 `CLAUDE.md`
+  - 子目录 `rules`
+  - 子目录 local include
+  - 子目录 `CLAUDE.local.md`
+- 将 `CLAUDE.md` 加载顺序格式化抽成可复用工具
+- 在文档中明确当前基础版尚未覆盖的边界：
+  - managed memory
+  - frontmatter 条件规则
+  - instruction hooks
+  - excludes
+  - 更严格的叶子文本节点 include 语义
+- 回归验证：
+  - `dclaw --verbose --cwd test/fixtures/claude-md-tree/app --print "closure check"`
+- 切回主线，开始阶段 5
+- 新增工具层文件：
+  - `src/types/tool.ts`
+  - `src/tools/types.ts`
+  - `src/tools/registry.ts`
+  - `src/tools/index.ts`
+  - `src/tools/builtin/bash.ts`
+  - `src/tools/builtin/glob.ts`
+  - `src/tools/builtin/grep.ts`
+  - `src/tools/builtin/readFile.ts`
+- 为消息模型补充：
+  - `createToolUseMessage`
+  - `createToolResultMessage`
+  - `getToolUseBlocks`
+- 扩展 `stub` provider：
+  - 支持 `tool:<name> key=value` 形式返回 `tool_use`
+- 扩展 `QueryEngine/queryLoop`：
+  - 识别 `tool_use`
+  - 从 registry 查找工具
+  - 执行工具
+  - 写入 `tool_result`
+  - 在 assistant 无文本时回退显示 tool result
+- 验证最小工具链路：
+  - `dclaw --print "tool:Read file_path=/abs/path/to/file"`
+  - `dclaw --print "tool:Grep pattern=Tool path=/abs/path/to/file"`
+  - `dclaw --print "tool:Glob pattern=*.md path=/abs/path/to/dir"`
+- 为树形 fixture 增加 include 文件：
+  - `test/fixtures/claude-md-tree/app/included-note.md`
+  - 并在 `app/CLAUDE.md` 中引用
+- 验证 include 链路：
+  - `dclaw --cwd test/fixtures/claude-md-tree/app --print "include fixture"`
+  - `dclaw --cwd test/fixtures/claude-md-tree/app "interactive include"`
+  - interactive 显示 `claude.md files loaded: 7`
+
+### 当前代码状态
+
+- 工程可执行基础检查
+- CLI 最小入口已可运行
+- Query Engine 最小链路已实现
+- 默认 provider 为本地 `stub`
+- prompt 装配层已有最小实现
+- 基础 `CLAUDE.md` 加载已接入
+- 多层 `CLAUDE.md` 发现已接入
+- 基础 include 已接入
+- include 语义已更贴近 Claude Code
+- include 边界行为已进一步贴近 Claude Code
+- `CLAUDE.md` 加载顺序现在可直接观察
+- 当前 `CLAUDE.md` 基础版的完成边界已经明确
+- 最小工具主链路已经打通
+- `src/` 其余模块仍以骨架为主
+
+### 当前结论
+
+- 文档层已经可以支撑后续持续开发
+- 阶段 1 已基本完成
+- 阶段 2 已启动，并已跑通最小消息循环
+- 阶段 3 的 prompt 层已经有初始落点
+- 基础 `CLAUDE.md` 注入已可工作
+- 多层 `CLAUDE.md` 发现已可工作
+- 基础 include 已可工作
+- include 行为已更接近 Claude Code
+- include 边界规则已覆盖到代码块、注释、转义空格和片段标识
+- 当前优先级顺序可通过 `--verbose` 直接验证
+- 当前可以考虑把 `CLAUDE.md` 基础版视作一个阶段性完成点
+- 现在已经可以把主线切回 Tool 协议与基础工具
+- 下一步应继续推进完整 prompt section 和更严格的指令规则，不要在 stub 层停留太久
+
+### 下一步建议
+
+- 继续阶段 2
+- 准备阶段 3：System Prompt 与指令装配
+- 开始接入 `CLAUDE.md` 与更明确的 prompt sections
+- 下一步应继续推进阶段 3
+- 评估是否进入阶段 4 的完整指令系统
+- 继续完善 include 语义与优先级规则
