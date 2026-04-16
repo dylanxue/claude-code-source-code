@@ -14,6 +14,20 @@ export type ToolValidationResult =
   | { ok: true }
   | { ok: false; error: string }
 
+export type AskUserQuestionOption = {
+  label: string
+  description: string
+  preview?: string
+}
+
+export type AskUserQuestion = {
+  id?: string
+  question: string
+  header: string
+  options: AskUserQuestionOption[]
+  multiSelect?: boolean
+}
+
 export type ReadStateEntry = {
   content: string
   timestamp: number
@@ -28,14 +42,6 @@ export type ToolContext = {
   permissionMode: PermissionMode
   readState: Map<string, ReadStateEntry>
   askUserQuestions?: (
-    questions: Array<{
-      question: string
-      header: string
-      options: Array<{
-        label: string
-        description: string
-      }>
-      multiSelect?: boolean
-    }>,
+    questions: AskUserQuestion[],
   ) => Promise<Record<string, string>>
 }

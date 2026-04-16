@@ -10,7 +10,7 @@ export type ResolvedPermissionMode = {
   permissionModeSource: PermissionModeSource
 }
 
-const ALL_PERMISSION_MODES: PermissionMode[] = [
+export const ALL_PERMISSION_MODES: PermissionMode[] = [
   'default',
   'accept-edits',
   'bypass-permissions',

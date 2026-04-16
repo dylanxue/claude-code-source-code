@@ -62,6 +62,8 @@ export async function prepareCliRuntime(
     : undefined
   const engine = new QueryEngine({
     client: createLlmClient(runtime.provider, configured.env),
+    provider: runtime.provider,
+    modelLimitsEnv: configured.env,
     model: runtime.model,
     systemPrompt: buildSystemPrompt(promptContext),
     toolRegistry,

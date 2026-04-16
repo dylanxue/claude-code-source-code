@@ -1,3 +1,4 @@
+import { resolveModelLimits, type ModelLimits } from './modelLimits.js'
 import { resolveModelSelection, type ModelSelectionSource } from './modelSelection.js'
 import {
   resolveProviderConfig,
@@ -13,6 +14,7 @@ export type ResolvedLlmRuntimeConfig = {
   providerConfig: ResolvedProviderConfig
   model?: string
   modelSource: ModelSelectionSource
+  modelLimits?: ModelLimits
 }
 
 export function resolveLlmRuntimeConfig(
@@ -41,5 +43,13 @@ export function resolveLlmRuntimeConfig(
     providerConfig,
     model: modelSelection.model,
     modelSource: modelSelection.source,
+    modelLimits:
+      providerSelection.provider === 'stub'
+        ? undefined
+        : resolveModelLimits(
+            providerSelection.provider,
+            modelSelection.model,
+            env,
+          ),
   }
 }

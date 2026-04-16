@@ -1,5 +1,65 @@
 # 工作日志
 
+## 2026-04-17
+
+- 继续收口 `interactive / session / resume` 主线：
+  - 将 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
+  - 让 `resume` 在恢复 session 后继续进入同一套 REPL，而不是只停在 transcript 展示
+- 为 REPL 补上首批本地 slash commands，并逐步往 Claude Code 的命令面靠拢：
+  - `/help`
+  - `/session` / `/info`
+  - `/history`
+  - `/doctor`
+  - `/model [model]`
+  - `/permissions [mode]`
+  - `/config`
+  - `/transcript [N]`
+  - `/resume [session-id]`
+  - `/compact [instructions]`
+  - `/clear`
+  - `/cls`
+  - `/exit` / `/quit`
+- 明确 `/clear` 与 `/cls` 的语义分离：
+  - `/clear`：清空当前会话上下文并启动新 session
+  - `/cls`：只清屏，不影响当前 session
+- 为 `QueryEngine` 增加最小运行时可变能力：
+  - `setModel()`
+  - `setPermissionMode()`
+  - `resetMessages()`
+- 让 `/resume` 在不带参数时显示最近 sessions，便于在 REPL 内继续恢复历史会话
+- 让 `/config` 显示用户级 / workspace 级 `config.json` 路径、加载状态和 config-backed env keys 来源
+- 全面整理主文档、阶段文档、状态页与 MVP 设计文档，修正文档里残留的旧 permission mode 命名、旧 REPL 状态和旧实现快照
+- 为上述 REPL 行为补上测试：
+  - `test/unit/repl-commands.test.ts`
+  - `test/unit/repl.test.ts`
+  - `test/unit/interactive.test.ts`
+  - `test/unit/resume.test.ts`
+- 验证：
+  - `npm run check`
+  - `npx tsx --test test/unit/repl-commands.test.ts test/unit/repl.test.ts test/unit/interactive.test.ts test/unit/resume.test.ts`
+
+- 将 model limits 真正接入第一段运行时预算决策：
+  - `QueryEngine` 会根据当前 provider/model 动态解析 resolved model limits
+  - `queryLoop` 会基于 model limits 派生模型感知的 `tool result budget`
+  - 小上下文模型会更积极地将超大 `tool_result` 落盘并替换为文件引用 + preview
+- 修正 `tool result budget` 与模型预算接线中的一个关键语义问题：
+  - 工具默认 `maxResultSizeChars = Infinity` 不再覆盖掉 query-loop 级默认预算
+  - 未显式设置 tool-specific limit 时，会回落到全局/模型感知预算，而不是无限放行
+- 扩展测试覆盖：
+  - `test/unit/tool-result-budget.test.ts`
+  - `test/unit/runtime-config.test.ts`
+  - `test/unit/repl-commands.test.ts`
+- 验证：
+  - `npm test -- --run test/unit/tool-result-budget.test.ts test/unit/runtime-config.test.ts test/unit/repl-commands.test.ts`
+  - `npm run typecheck`
+- 当前结论：
+  - model limits 已不再只用于 provider 请求参数和 `doctor`
+  - 这轮已先接入 `tool_result` 预算层
+  - 更广的 compact / 上下文压缩 / 调度仍是后续工作
+- 阶段性整理文档口径：
+  - 这条线不再单独挂成一条横向 Todo
+  - 后续统一并入阶段 8 `compact / 上下文管理与自动压缩` 主线继续推进
+
 ## 2026-04-16
 
 - 对照本仓库内 Claude Code 源码，补查“大工具结果处理”链路，结论先落文档：
@@ -19,6 +79,20 @@
   - 超大 tool result 已会被替换成“落盘 + 文件引用 + preview”的模型侧输出，同时在 transcript / session 中保留原始结果或落盘记录
   - `Read` 已阻止超大文件在未指定 `limit` 时整段返回；`Grep / Glob` 与 fallback 搜索也已补上第一轮默认排除目录，并在显式目标路径下允许继续搜索这些目录
   - 这条线剩余的重点不再是“从 0 到 1 补 budget”，而是把现有首版实现继续推进到更可配置、模型感知、并能接到更广上下文 compact 的形态
+- 继续收口 `WebFetch / AskUserQuestion`：
+  - `WebFetch` 补上更稳的 URL/协议校验、非 localhost `http -> https` 规范化、跨 host 重定向提示、HTML/JSON 文本抽取，以及 `contentType / title / description / wasTruncated` 元信息
+  - `AskUserQuestion` 补上稳定 question id、唯一性校验、可选 `preview / annotations` 字段透传，以及按 id 优先的答案规范化
+  - 扩展测试：`test/unit/webfetch-ask.test.ts`
+  - 验证：`npm test -- --run dclaw/test/unit/webfetch-ask.test.ts`、`npm run typecheck`
+- 继续把 `WebFetch` 往 Claude Code 方向推一层：
+  - 不再只是把全文截断返回，而是会按 prompt 做轻量的相关段落打分与摘录
+  - 当 prompt 不够具体时，回退到页面前部内容，而不是伪装成“已理解 prompt”
+  - 扩展测试覆盖 prompt-relevant excerpt 与 generic fallback 两条路径
+  - 验证：`npm test -- --run dclaw/test/unit/webfetch-ask.test.ts`、`npm run typecheck`
+- 阶段性决定：
+  - `WebFetch / AskUserQuestion` 当前实现先停在这版
+  - 后续继续向 Claude Code 靠拢的打磨项统一下调到 `v0.2+ / 低优先级`
+  - 主要包括：`WebFetch` 的权限/安全链路、cache、binary content、更强 prompt 处理，以及 `AskUserQuestion` 的 richer host UI、preview 展示与 annotations 采集
 
 - 继续收口阶段 5 的 Tool 协议与核心工具语义：
   - 将 Tool 协议收紧为轻量版 `buildTool`

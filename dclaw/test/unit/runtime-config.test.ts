@@ -33,6 +33,11 @@ test('resolveLlmRuntimeConfig prefers cli provider and model overrides', () => {
   assert.equal(runtime.providerSource, 'cli')
   assert.equal(runtime.model, 'claude-test')
   assert.equal(runtime.modelSource, 'cli')
+  assert.deepEqual(runtime.modelLimits, {
+    contextWindow: 200_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 64_000,
+  })
 })
 
 test('resolveLlmRuntimeConfig can infer provider from compatible env values', () => {
@@ -51,6 +56,11 @@ test('resolveLlmRuntimeConfig can infer provider from compatible env values', ()
   assert.equal(runtime.modelSource, 'env')
   assert.equal(runtime.providerConfig.provider, 'openai')
   assert.equal(runtime.providerConfig.baseUrl, 'https://example.com/v1')
+  assert.deepEqual(runtime.modelLimits, {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_768,
+    maxOutputTokensUpperLimit: 32_768,
+  })
 })
 
 test('resolveLlmRuntimeConfig can use config.json-backed provider settings', async () => {
@@ -90,6 +100,11 @@ test('resolveLlmRuntimeConfig can use config.json-backed provider settings', asy
     assert.equal(runtime.providerConfig.baseUrl, 'https://example.test/v1')
     assert.equal(runtime.providerConfig.apiKey, 'config-key')
     assert.equal(runtime.providerConfig.apiStyle, 'chat-completions')
+    assert.deepEqual(runtime.modelLimits, {
+      contextWindow: 256_000,
+      maxOutputTokens: 32_768,
+      maxOutputTokensUpperLimit: 32_768,
+    })
   } finally {
     await rm(homeDir, { recursive: true, force: true })
     await rm(workspaceDir, { recursive: true, force: true })

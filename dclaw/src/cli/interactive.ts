@@ -4,7 +4,10 @@ import type { InteractiveCommand } from './types.js'
 import { formatVerboseContextLines } from './verboseEvents.js'
 import { runInteractiveReplLoop } from './repl.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
-import { maybeHandleReplCommand } from './replCommands.js'
+import {
+  maybeHandleReplCommand,
+  type ReplSessionState,
+} from './replCommands.js'
 
 export async function runInteractive(command: InteractiveCommand): Promise<void> {
   const {
@@ -23,6 +26,16 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     provider: runtime.provider,
     model: runtime.model,
   })
+  const replSession: ReplSessionState = {
+    sessionId: session.sessionId,
+    mode: 'interactive',
+    provider: runtime.provider,
+    providerSource: runtime.providerSource,
+    model: runtime.model,
+    modelSource: runtime.modelSource,
+    permissionMode,
+    permissionModeSource,
+  }
 
   const lines = [
     'dclaw interactive mode is ready.',
@@ -60,7 +73,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
         permissionModeSource,
         stream: command.options.stream,
         outputFormat: command.options.outputFormat,
-        sessionId: session.sessionId,
+        sessionId: replSession.sessionId,
         queryTracePath,
       }),
     )
@@ -83,7 +96,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
         await maybeHandleReplCommand(prompt, {
           engine,
           options: command.options,
-          mode: 'interactive',
+          session: replSession,
         })
       ) {
         return
@@ -91,7 +104,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
 
       await runInteractiveSessionPrompt({
         engine,
-        sessionId: session.sessionId,
+        sessionId: replSession.sessionId,
         prompt,
         stream: command.options.stream,
         verbose: command.options.verbose,

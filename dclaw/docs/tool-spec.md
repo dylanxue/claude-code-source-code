@@ -107,7 +107,10 @@ type ToolResult<T> = {
   - 已补上 `-A / -B / -C / context / -n / type / multiline` 的基础参数
   - 已补上 `totalFiles / totalMatches / searchRoot / engine / durationMs`
 - `WebFetch / AskUserQuestion`
-  - 仍处于最小实现阶段
+  - 已完成第一轮增强
+  - `WebFetch` 已补上协议校验、跨 host 重定向提示、HTML/JSON 正文提取、按 prompt 聚焦的相关摘录与更丰富结果元信息
+  - `AskUserQuestion` 已补上稳定 question id、唯一性校验、可选 preview/annotations 字段与答案规范化
+  - 进一步向 Claude Code 靠拢的打磨项已后置到 `v0.2+ / 低优先级`
 
 - Tool 协议层
   - 已补 `buildTool`

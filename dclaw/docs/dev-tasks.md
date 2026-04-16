@@ -2,19 +2,17 @@
 
 ## 当前迭代
 
-目标：进入 `v0.1` 收尾阶段，并行推进阶段 5、6、7；优先把 Tool、Permission、Session/Resume 主链路收口到“可持续使用”，而不是继续横向铺能力数量。
+目标：进入 `v0.1` 收尾阶段，并行推进阶段 5、6、7、8；优先把 Tool、Permission、Session/Resume 与首段上下文预算主链路收口到“可持续使用”，而不是继续横向铺能力数量。
 
 ## Todo
 
-- [ ] 细化 `WebFetch` / `AskUserQuestion` 的最小行为，使其更接近 Claude Code
 - [ ] 为更多 provider 预留统一配置与适配层
-- [ ] 将 model limits 接入更多运行时决策，而不只是 provider 请求参数和 doctor 输出
 - [ ] 梳理当前 Tool 协议与文档之间的差距
 - [ ] 为阶段 6 的 permission mode 接入设计更明确的 evaluator 位置
-- [ ] 把 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
 - [ ] 继续完善 session 列表、最近会话选择和更完整的 history 体验
 - [ ] 补齐 resume / transcript 的恢复语义，避免仅恢复消息数组而缺少更完整的会话视图
-- [ ] 将现有 `tool result budget / persistence` 从“首版可用”继续推进到更可配置、模型感知的上下文预算层
+- [ ] 继续扩展 REPL command 面，并逐步收口到更统一的 slash command 体系
+- [ ] 将现有 `tool result budget / persistence` 从“首版模型感知”继续推进到更可配置、覆盖更广上下文路径的预算层
 - [ ] 继续细化 `Bash / Glob / Grep` 的统计、分页、结果映射与模型侧压缩策略
 - [ ] 将“大工具结果处理”从当前 `tool_result` 路径继续扩展到更广的上下文压缩 / compact 逻辑
 - [ ] 继续细化 `Read / Grep` 在超大文件、超大命中集和更复杂文件语义下的剩余边界
@@ -24,10 +22,12 @@
 
 - [ ] 梳理 Claude Code 核心工具与 dclaw 当前实现之间的差距，并按优先级收口
 - [ ] 对照本仓库内 Claude Code 源码继续收口“大工具结果处理”链路的剩余部分：budget 参数化、上下文级 compact、以及 `Read / Grep` 的剩余特例
+- [ ] 将 model limits 的后续接线并入 compact 主线继续推进；当前已接入 `tool result budget`，下一步不再单列，而是放到更广的上下文预算 / 压缩 / 调度里实现
 
 ## Deferred
 
 - [ ] `Bash` 的真 sandbox、AST 级 shell 解析和更细粒度 permission 规则暂缓；当前仅在出现真实 bug 或明确需求时继续下探
+- [ ] `v0.2+ / 低优先级`：继续打磨 `WebFetch / AskUserQuestion`，重点放在 `WebFetch` 的权限/安全链路、cache、binary content 与更强的 prompt 处理，以及 `AskUserQuestion` 的 richer host UI、preview 展示与 annotations 采集
 - [ ] `v0.2+ / 低优先级`：在已有 provider 重试 / 限流 / 结构化错误基础上，继续细化 `Anthropic` 的更完整错误类型映射、可配置 token 参数与更长等待策略
 - [ ] `v0.2+ / 低优先级`：在已补 `verbosity / reasoning.effort / store / previous_response_id / parallel_tool_calls / max_tool_calls / include / truncation / metadata / text.format` 的基础上，继续扩展 `OpenAI Responses API` 的更多 request 参数与更广的事件覆盖
 - [ ] `v0.2+ / 低优先级`：将 provider / Responses 的 annotation、specialized output types 与更广事件覆盖继续接到 transcript / verbose / headless 展示层
@@ -107,6 +107,8 @@
 - [x] 在 `work-log.md` 记录实现结果
 - [x] 为 Tool 执行链路补上 `validate / isEnabled / availableTools` 预留位
 - [x] 增加 `WebFetch` 与 `AskUserQuestion` 的最小实现并接入默认工具集
+- [x] 为 `WebFetch` 补上更稳的 URL/协议校验、跨 host 重定向提示、HTML/JSON 内容提取与更丰富的结果元信息
+- [x] 为 `AskUserQuestion` 补上稳定 question id、唯一性校验、可选 preview/annotations 字段与答案规范化
 - [x] 接入第一个真实 LLM provider，替换当前仅有的 `stub` 执行路径
 - [x] 优先实现 `Anthropic` provider 的最小非流式 `createMessage` 调用
 - [x] 增加真实 LLM 所需的配置读取、API key 校验和错误分层
@@ -144,6 +146,7 @@
 - [x] 将 `outputSchema` 接入 `queryLoop` 运行时校验，拦截不合法的工具输出
 - [x] 为 Tool 协议补统一的结果体积元信息：`maxResultSizeChars`
 - [x] 在 `queryLoop` 发请求前增加统一的 tool result budget / persistence 层
+- [x] 基于 resolved model limits 为 `queryLoop` 派生模型感知的 `tool result budget`
 - [x] 为超大 tool result 设计统一的“落盘 + 文件引用 + preview”模型侧替换格式
 - [x] 为单条消息中的多个 `tool_result` 增加 aggregate budget，避免并行工具结果叠加后整体过大
 - [x] 将 `Read` 的输出形态收紧到更明确的 `type / file / didReadToEnd / warning` 结构
@@ -161,6 +164,21 @@
 - [x] 让 `interactive / --print / resume` 接入最小 session 持久化与恢复链路
 - [x] 让 `resume` 从占位输出推进到可在恢复历史消息后继续执行新的 prompt
 - [x] 将 `QueryEngine` 扩展为支持从恢复的 `initialMessages` 继续执行
+- [x] 把 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
+- [x] 为 REPL 增加首批本地 slash commands：
+  - `/help`
+  - `/session` / `/info`
+  - `/history`
+  - `/doctor`
+  - `/model [model]`
+  - `/permissions [mode]`
+  - `/config`
+  - `/transcript [N]`
+  - `/resume [session-id]`
+  - `/compact [instructions]`
+  - `/clear`
+  - `/cls`
+  - `/exit` / `/quit`
 - [x] 为 session / resume 增加自动化测试：
   - `test/unit/session.test.ts`
 - [x] 调整 headless / interactive 运行时最大 tool loop 轮数，减少过早回退到原始 tool result JSON
@@ -174,7 +192,7 @@
 - 阶段 5：Tool 协议与基础工具 `in progress`
 - 阶段 6：权限模式与 Hooks `in progress`
 - 阶段 7：Session、历史与恢复 `in progress`
-- 阶段 8：上下文管理与自动压缩 `not started`
+- 阶段 8：上下文管理与自动压缩 `in progress`
 - 阶段 9：Plan / Task / Todo `not started`
 - 阶段 10：Memory `not started`
 - 阶段 11：多代理、Worktree 与协作执行 `not started`

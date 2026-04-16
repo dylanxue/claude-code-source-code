@@ -3,7 +3,13 @@
 ## 当前快照
 
 - 当前处于 `v0.1` 后半段
-- 阶段判断：阶段 5 持续打磨中，阶段 6-7 已启动
+- 阶段判断：阶段 5 持续打磨中，阶段 6-8 已启动
+- 当前已落地的主链路包括：
+  - 真实 `Anthropic / OpenAI` provider
+  - `Read / Edit / Write / Bash / Glob / Grep / WebFetch / AskUserQuestion`
+  - 4 种 `permission mode`
+  - session store / resume / history
+  - interactive REPL 与首批 slash commands
 - 当前最值得先看的状态文档：
   - [project-status.md](./project-status.md)
   - [work-log.md](./work-log.md)

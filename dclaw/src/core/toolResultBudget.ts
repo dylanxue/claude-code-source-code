@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { ModelLimits } from '../llm/modelLimits.js'
 import { getToolResultsDir } from '../session/paths.js'
 import type { Message, ToolResultContentBlock } from '../types/message.js'
 
@@ -9,6 +10,13 @@ export const DEFAULT_MAX_TOOL_RESULTS_PER_TURN_CHARS = 200_000
 export const DEFAULT_PREVIEW_CHARS = 2_000
 export const PERSISTED_OUTPUT_TAG = '<persisted-output>'
 export const PERSISTED_OUTPUT_CLOSING_TAG = '</persisted-output>'
+const APPROX_CHARS_PER_TOKEN = 4
+const MAX_MODEL_AWARE_RESULT_SIZE_CHARS = 120_000
+const MAX_MODEL_AWARE_TOOL_RESULTS_PER_TURN_CHARS = 500_000
+const MIN_MODEL_AWARE_RESULT_SIZE_CHARS = 2_000
+const MIN_MODEL_AWARE_TOOL_RESULTS_PER_TURN_CHARS = 8_000
+const MIN_MODEL_AWARE_PREVIEW_CHARS = 500
+const MAX_MODEL_AWARE_PREVIEW_CHARS = 8_000
 
 export type PersistedToolResultOutput = {
   type: 'persisted_tool_result'
@@ -44,6 +52,13 @@ export type ToolResultBudgetResult = {
   replacements: ToolResultBudgetReplacement[]
 }
 
+export type ResolvedToolResultBudget = Required<
+  Pick<
+    ToolResultBudgetOptions,
+    'defaultMaxResultSizeChars' | 'maxToolResultsPerTurnChars' | 'previewChars'
+  >
+>
+
 type Candidate = {
   messageIndex: number
   blockIndex: number
@@ -62,6 +77,45 @@ function stringifyOutput(value: unknown): string {
     return JSON.stringify(value, null, 2)
   } catch {
     return String(value)
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+export function deriveToolResultBudgetFromModelLimits(
+  limits: ModelLimits,
+): ResolvedToolResultBudget {
+  const estimatedInputBudgetTokens = Math.max(
+    256,
+    limits.contextWindow - limits.maxOutputTokens,
+  )
+  const estimatedInputBudgetChars =
+    estimatedInputBudgetTokens * APPROX_CHARS_PER_TOKEN
+  const defaultMaxResultSizeChars = clamp(
+    Math.floor(estimatedInputBudgetChars * 0.1),
+    MIN_MODEL_AWARE_RESULT_SIZE_CHARS,
+    MAX_MODEL_AWARE_RESULT_SIZE_CHARS,
+  )
+  const maxToolResultsPerTurnChars = clamp(
+    Math.floor(estimatedInputBudgetChars * 0.35),
+    Math.max(
+      MIN_MODEL_AWARE_TOOL_RESULTS_PER_TURN_CHARS,
+      defaultMaxResultSizeChars * 2,
+    ),
+    MAX_MODEL_AWARE_TOOL_RESULTS_PER_TURN_CHARS,
+  )
+  const previewChars = clamp(
+    Math.floor(defaultMaxResultSizeChars * 0.1),
+    MIN_MODEL_AWARE_PREVIEW_CHARS,
+    MAX_MODEL_AWARE_PREVIEW_CHARS,
+  )
+
+  return {
+    defaultMaxResultSizeChars,
+    maxToolResultsPerTurnChars,
+    previewChars,
   }
 }
 
@@ -95,7 +149,7 @@ function getThreshold(
   defaultMaxResultSizeChars: number,
 ): number {
   if (!Number.isFinite(metadata.maxResultSizeChars)) {
-    return Number.POSITIVE_INFINITY
+    return defaultMaxResultSizeChars
   }
 
   return Math.min(metadata.maxResultSizeChars, defaultMaxResultSizeChars)
@@ -171,7 +225,7 @@ function collectCandidates(
       }
 
       const metadata = metadataByToolUseId.get(block.toolUseId)
-      if (!metadata || !Number.isFinite(metadata.maxResultSizeChars)) {
+      if (!metadata) {
         return
       }
 

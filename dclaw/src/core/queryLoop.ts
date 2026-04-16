@@ -1,4 +1,5 @@
 import type { LlmClient } from '../llm/types.js'
+import type { ModelLimits } from '../llm/modelLimits.js'
 import {
   getProviderErrorKind,
   getProviderErrorSubtype,
@@ -21,6 +22,7 @@ import type { Tool } from '../tools/types.js'
 import {
   applyToolResultBudget,
   type ToolResultBudgetMetadata,
+  type ToolResultBudgetOptions,
 } from './toolResultBudget.js'
 import { QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
@@ -28,11 +30,13 @@ import type { QueryTraceSink } from './queryTrace.js'
 export type QueryLoopRequest = {
   client: LlmClient
   model?: string
+  modelLimits?: ModelLimits
   systemPrompt?: string
   messages: Message[]
   toolRegistry: ToolRegistry
   toolContext: ToolContext
   maxIterations?: number
+  toolResultBudgetOptions?: ToolResultBudgetOptions
   queryTraceSink?: QueryTraceSink
   streamHandlers?: {
     onTextDelta?: (text: string) => void
@@ -226,6 +230,16 @@ export async function executeSingleTurn(
   let outputText = ''
   recordTrace(request.queryTraceSink, 'turn.start', {
     model: request.model ?? 'default',
+    modelLimits: request.modelLimits,
+    toolResultBudget: request.toolResultBudgetOptions
+      ? {
+          defaultMaxResultSizeChars:
+            request.toolResultBudgetOptions.defaultMaxResultSizeChars,
+          maxToolResultsPerTurnChars:
+            request.toolResultBudgetOptions.maxToolResultsPerTurnChars,
+          previewChars: request.toolResultBudgetOptions.previewChars,
+        }
+      : undefined,
     messageCount: workingMessages.length,
     availableTools: toolDefinitions.map(tool => tool.name),
     permissionMode: request.toolContext.permissionMode,
@@ -632,6 +646,7 @@ export async function executeSingleTurn(
       const budgetedToolResults = await applyToolResultBudget(
         toolResultMessages,
         toolResultMetadata,
+        request.toolResultBudgetOptions,
       )
       if (budgetedToolResults.replacements.length > 0) {
         recordTrace(

@@ -3,12 +3,13 @@
 ## 当前快照
 
 - 当前处于 `v0.1` 后半段
-- 当前主线：并行收尾阶段 5、6、7
+- 当前主线：并行收尾阶段 5、6、7，并启动阶段 8 的首段预算/压缩工作
 - 当前已知进展：
   - 阶段 1-2 已基本完成
   - 阶段 3-5 已打通最小主链路并持续收紧语义
   - 阶段 6 已接入最小 permission evaluator
-  - 阶段 7 已接入最小 session store 与 `resume`
+  - 阶段 7 已接入 session store、`resume`、history 与基础 REPL commands
+  - 阶段 8 已接入首段 model-aware `tool result budget`
 
 ## 核心 12 阶段
 
@@ -104,6 +105,11 @@
 - session hooks
 - function hooks
 
+当前实现补充：
+
+- 已支持 `default / accept-edits / plan / bypass-permissions`
+- 已接入 CLI、用户级与 workspace 级配置解析
+
 ### 阶段 7：Session、历史与恢复
 
 目标：
@@ -119,6 +125,12 @@
 - history
 - resume
 
+当前实现补充：
+
+- 已支持最小 session 持久化
+- 已支持恢复历史消息后继续执行 prompt
+- `interactive` 已推进到 REPL，并补上 `/history / resume / transcript / clear / compact` 等本地命令
+
 ### 阶段 8：上下文管理与自动压缩
 
 目标：
@@ -131,6 +143,12 @@
 - autocompact
 - summary
 - boundary
+
+当前实现补充：
+
+- 已接入首段 query-loop 级 `tool result budget / persistence`
+- 已开始基于 resolved model limits 派生模型感知预算
+- 更广的 compact / autocompact 仍未完成
 
 ### 阶段 9：Plan / Task / Todo 执行框架
 

@@ -3,7 +3,7 @@
 ## 当前状态
 
 - 项目名称：`dclaw`
-- 当前阶段：`v0.1` 后半段，阶段 5 持续打磨中，阶段 6-7 已启动
+- 当前阶段：`v0.1` 后半段，阶段 5 持续打磨中，阶段 6-8 已启动
 - 当前版本目标：`v0.1`
 - 总体状态：`in progress`
 
@@ -17,8 +17,8 @@
 | 4 | `CLAUDE.md` 指令系统 | in progress | 基础版多层发现、include、去重、顺序可观察性已可用 |
 | 5 | Tool 协议与基础工具 | in progress | 已补 `buildTool / outputSchema / result mapping / runtime output validation`，当前继续打磨 `Bash / Glob / Grep` 与模型侧结果收口 |
 | 6 | 权限模式与 Hooks | in progress | 已接入最小 permission evaluator，但 hooks 与细粒度规则仍未完成 |
-| 7 | Session、历史与恢复 | in progress | 已实现最小 session store、messages 持久化与 `resume` 恢复链路 |
-| 8 | 上下文管理与自动压缩 | not started | 后续阶段 |
+| 7 | Session、历史与恢复 | in progress | 已实现最小 session store、messages 持久化、`resume` 恢复链路与基础 REPL commands |
+| 8 | 上下文管理与自动压缩 | in progress | 已接入首段 model-aware tool result budget，后续继续在 compact 主线推进 |
 | 9 | Plan / Task / Todo | not started | 后续阶段 |
 | 10 | Memory | not started | 已完成方案设计，未编码 |
 | 11 | 多代理、Worktree 与协作执行 | not started | 已完成方案设计，未编码 |
@@ -88,6 +88,8 @@
 - 增加 `glob` / `grep` 两个只读基础工具
 - 为 Tool 执行链路补上 `validate / isEnabled / availableTools` 预留位
 - 增加 `WebFetch` 与 `AskUserQuestion` 的最小实现并接入默认工具集
+- 为 `WebFetch` 补上更稳的 URL/协议校验、跨 host 重定向提示、HTML/JSON 内容提取与更丰富的结果元信息
+- 为 `AskUserQuestion` 补上稳定 question id、唯一性校验、可选 preview/annotations 字段与答案规范化
 - 将 `Bash` 的 timeout / interrupted / noOutputExpected / 只读判定语义往 Claude Code 收紧一层
 - 将 `Bash` 补上最小 `run_in_background` 能力，并将后台输出落盘到 `<DCLAW_HOME>/background-tasks/`
 - 将 `Bash` 补上大输出落盘能力，并返回 `persistedOutputPath`
@@ -135,32 +137,55 @@
 - 让 `interactive / --print / resume` 接入最小 session 持久化与恢复链路
 - 让 `resume` 支持在恢复历史消息后继续执行新的 prompt
 - 将 `QueryEngine` 扩展为支持从恢复的 `initialMessages` 继续执行
+- 将 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
+- 为 REPL 增加首批本地 slash commands：
+  - `/help`
+  - `/session` / `/info`
+  - `/history`
+  - `/doctor`
+  - `/model [model]`
+  - `/permissions [mode]`
+  - `/config`
+  - `/transcript [N]`
+  - `/resume [session-id]`
+  - `/compact [instructions]`
+  - `/clear`
+  - `/cls`
+  - `/exit` / `/quit`
 - 将 headless / interactive 运行时的最大 tool loop 轮数从默认最小值上调，减少过早回退到原始 tool result JSON 的情况
+- 将 `QueryEngine` 扩展为支持最小运行时变更：
+  - `setModel()`
+  - `setPermissionMode()`
+  - `resetMessages()`
 
 ## 当前风险与注意事项
 
 - 当前已完成 Query Engine 最小链路和基础 prompt/`CLAUDE.md` 注入，已进入基础多轮 tool loop
 - 当前 tool loop 已有基础多轮 assistant->tool->assistant 闭环，并已补上最小 permission evaluator，但还没有更细粒度规则
 - 当前 `permission mode` 已不再只是 CLI 临时参数，也支持用户级与 workspace 级默认配置
+- 当前 `config.json` 已不再只承载 `permissionMode`，也可承载 provider / api key / query trace / model 等运行时配置，并在 `doctor` 中显示来源
 - 当前工具层已经不只是“名字和最小链路对齐”，而是完成了第一轮协议收口：`buildTool`、显式 `input/output schema`、内部/模型结果分层、运行时 output 校验都已接入
 - 当前 `Read / Edit / Write` 已完成第一轮语义收紧，具备更明确的 partial read、warning、stale read 拦截、`noop` 与 patch/diff 输出；但和 Claude Code 的完整 diff / patch /复杂文件支持还有明显差距
 - 当前 `Bash / Glob / Grep` 已补上较完整的结果边界信息；其中 `Bash` 已具备只读判定、关键 shell 边界覆盖、结果持久化与可观测性，`Glob / Grep` 也已补上统计、分页和执行来源字段，但模型侧结果映射仍比 Claude Code 更薄
 - 当前 `dclaw` 已补上第一轮“超大 tool result 处理”链路：`queryLoop` 在发起下一次 LLM 请求前会统一执行 tool result budget / persistence，支持 `maxResultSizeChars`、单轮 aggregate budget，以及“落盘 + 文件引用 + preview”的模型侧替换格式
-- 当前这条“大工具结果处理”链路的剩余差距主要在于：预算策略仍是固定常量、尚未和 model limits / compact 逻辑系统打通、且当前主要覆盖 `tool_result` 路径而不是更广的上下文压缩
+- 当前这条“大工具结果处理”链路已开始接入 model limits：`queryLoop` 会基于 resolved model limits 派生模型感知的 `tool result budget`，对小上下文模型更积极地做结果持久化
+- 当前这条链路的剩余差距主要在于：预算参数仍较粗，且这部分工作已明确并入 compact 主线继续推进；更广的上下文压缩逻辑与真实请求调度仍未充分消费 model limits
 - 当前 `Bash` 既有工具内前台/后台输出落盘，也已经能接入 query loop 级的统一 tool result 替换；剩余问题主要是模型侧结果映射和更细的压缩策略还偏薄
 - 当前 `Read` 已收紧默认读取边界：超大文件在未指定 `limit` 时不会整段直接返回；剩余问题主要在更智能的分块/引导和更复杂文件语义支持
 - 当前 `Grep / Glob` 与 fallback 搜索已补上第一轮默认排除目录，并在显式目标路径下允许继续搜索这些目录；剩余问题在于这套排除规则仍是本地实现的务实名单，还没完全对齐 Claude Code 那种更依赖 VCS / ignore 语义的模型
-- 当前 `WebFetch / AskUserQuestion` 仍然只是最小实现
+- 当前 `WebFetch / AskUserQuestion` 已完成第一轮增强：`WebFetch` 不再只是简单去标签，而是会做协议校验、跨 host 重定向提示、HTML/JSON 规范化、基础 metadata 提取，以及按 prompt 聚焦相关摘录；`AskUserQuestion` 也已补上稳定 id、唯一性校验和 richer schema 透传
+- 这两个工具的后续深化已下调到 `v0.2+ / 低优先级`：`WebFetch` 主要剩权限/安全链路、cache、binary content 与更强 prompt 处理，`AskUserQuestion` 主要剩 richer host UI、preview 展示与 annotations 采集
 - 当前 `LLM` 层已同时支持 `stub`、`Anthropic`、`OpenAI`，默认联调已可以直接走真实 provider
 - 当前 `Anthropic` 与 `OpenAI` provider 已补上基础 streaming、重试、限流处理、结构化错误分类，以及 CLI / SSE 错误出口
 - 当前 provider 重试策略已覆盖 `408 / 409 / 429 / 529 / 5xx`、瞬时网络错误、`Retry-After`、`x-should-retry` 与 Anthropic 的 unified rate limit reset；更细的 provider 专属错误语义和更长等待策略已下调到 `v0.2+ / 低优先级`
 - 当前 `OpenAI` provider 已支持 `responses / chat-completions`，并已补齐 `verbosity`、两批关键 Responses request 参数，以及关键流式事件兼容；当前已覆盖 `response.output_text.*`、`response.output_text.annotation.added`、`response.content_part.*`、`response.refusal.*`、`response.reasoning_summary_text.*`、`response.function_call_arguments.*`、`response.output_item.*` 与 `response.done/completed`，其余更多参数、更多 output 类型与更广事件面已下调到 `v0.2+ / 低优先级`
-- 当前 model limits 已有基础配置层，并补上 `MiniMax / Kimi / GLM` 内置 defaults，但上下文预算、自动压缩阈值和真实请求调度还未系统接入
+- 当前 model limits 已有基础配置层，并补上 `MiniMax / Kimi / GLM` 内置 defaults；其中 `tool result budget` 已开始消费这些 limits，后续将继续在 compact 章节里推进更广的上下文预算、自动压缩阈值和真实请求调度
 - 当前自动化测试已覆盖 `Read / Edit / Write / Bash / Glob / Grep / WebFetch / AskUserQuestion`、权限执行链路、provider 重试/错误分类，以及 CLI 失败路径，但整体覆盖面仍然有限
 - 文档约束已经较明确，后续开发需尽量遵守，不要边写边扩大范围
 - 当前 `CLAUDE.md` 仍是基础版实现，未覆盖完整 include 语义和所有优先级细节
 - 当前 `CLAUDE.md` 尚未覆盖 managed memory、frontmatter 条件规则、instruction hooks 等细节
-- 当前 session / resume 仍是最小实现，尚未覆盖 session 列表、最近会话选择、history 检索与更完整的 transcript 恢复语义
+- 当前 session / resume 已不再只是“最小恢复链路”，而是具备基础 REPL、history、recent session 提示与本地会话命令；但离完整会话管理体验仍有明显距离
+- 当前 REPL 命令面已经覆盖 `/doctor / model / permissions / config / resume / compact / clear` 等第一批高频能力，但还不是 Claude Code 那种统一的完整 slash command 框架
 - 阶段 1 开始后，应持续维护本文件状态
 
 ## 下一步
@@ -173,22 +198,22 @@
 
 - 优先细化已有核心工具语义，而不是继续横向补更多工具
 - 继续收口 `Bash / Glob / Grep` 的统计、分页、结果映射与模型侧压缩策略
-- 将现有 tool result budget / persistence 从“首版可用”继续推进到更可配置、模型感知的上下文预算层
+- 将现有 tool result budget / persistence 从“首版模型感知”继续推进到更可配置、覆盖更广上下文路径的预算层
 - 将“大工具结果处理”从当前 `tool_result` 路径继续扩展到更广的上下文压缩 / compact 逻辑
 - 继续细化 `Read / Grep` 在超大文件、超大命中集和更复杂文件语义下的剩余边界
-- 再补 `WebFetch / AskUserQuestion`
+- `WebFetch / AskUserQuestion` 的后续深化已下调到 `v0.2+ / 低优先级`
 - `Bash` 暂时以 bugfix 为主，不继续主动深挖真 sandbox / AST 级 shell 解析这类深水区能力
 - `Read / Edit / Write` 转入 bugfix + 小步增强，继续向 Claude Code 的更完整 diff / patch / 文件类型支持靠近
 - 把 session / resume 从“最小可用”推进到“可持续使用”：
   - session 列表 / 最近会话选择
   - 更完整的 transcript / history 恢复
-  - interactive 真正 REPL 化，而不是仅依赖单次 prompt
+  - 继续扩展 REPL command 面，逐步向 Claude Code 的统一 slash command 体系靠拢
 - 为后续更多 provider 抽象出更明确的 request/response 适配层
 - provider 深化项已下调到 `v0.2+ / 低优先级`：
   - `Anthropic` 更完整错误类型映射、可配置 token 参数与更长等待策略
   - `OpenAI Responses API` 更多 request 参数、更多 output 类型与更广流式事件覆盖
   - 将 `text` 内容块上的 annotation 继续接到 transcript / verbose / headless 输出层，而不只是保留在消息模型里
-- 将 model limits 继续接入上下文管理、budget 估算和后续 compact 逻辑
+- 在 compact 主线中继续将 model limits 接入更广的上下文管理、budget 估算、compact 逻辑和真实请求调度
 - 为后续权限模式与 hooks 接入 tool 执行链路预留接口
 - 继续完善 tool contract
 - 继续把结构化 provider 错误接到更细的 headless / interactive 提示文案与恢复策略

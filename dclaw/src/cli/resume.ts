@@ -5,7 +5,10 @@ import { formatTranscript } from '../session/transcript.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { runInteractiveReplLoop } from './repl.js'
-import { maybeHandleReplCommand } from './replCommands.js'
+import {
+  maybeHandleReplCommand,
+  type ReplSessionState,
+} from './replCommands.js'
 import { prepareCliRuntime } from './runtime.js'
 import type { ResumeCommand } from './types.js'
 import { formatVerboseContextLines } from './verboseEvents.js'
@@ -68,6 +71,16 @@ export async function runResume(command: ResumeCommand): Promise<void> {
   const persistedToolResultInfo =
     getPersistedToolResultInfoFromMeta(resumed.meta.persistedToolResults) ??
     getPersistedToolResultInfo(resumed.messages)
+  const replSession: ReplSessionState = {
+    sessionId: resumed.meta.sessionId,
+    mode: 'resume',
+    provider: runtime.provider,
+    providerSource: runtime.providerSource,
+    model: runtime.model,
+    modelSource: runtime.modelSource,
+    permissionMode,
+    permissionModeSource,
+  }
 
   const lines = [
     'dclaw resume mode is ready.',
@@ -114,7 +127,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         permissionModeSource,
         stream: command.options.stream,
         outputFormat: command.options.outputFormat,
-        sessionId: command.sessionId,
+        sessionId: replSession.sessionId,
         queryTracePath,
       }),
     )
@@ -151,7 +164,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         await maybeHandleReplCommand(prompt, {
           engine,
           options: command.options,
-          mode: 'resume',
+          session: replSession,
         })
       ) {
         return
@@ -159,7 +172,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
 
       await runInteractiveSessionPrompt({
         engine,
-        sessionId: resumed.meta.sessionId,
+        sessionId: replSession.sessionId,
         prompt,
         stream: command.options.stream,
         verbose: command.options.verbose,

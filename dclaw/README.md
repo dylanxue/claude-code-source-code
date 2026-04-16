@@ -66,10 +66,14 @@ dclaw/
 - TypeScript 基础工程已初始化
 - CLI 与最小 Query Engine 已可运行
 - Prompt / `CLAUDE.md` 基础链路已接入
+- 已接入真实 `Anthropic / OpenAI` provider，并支持基础 streaming / SSE
 - Tool registry 与基础工具链路已接入，并进入语义收紧阶段
-- 最小 permission mode 已接入 tool 执行链路
-- 最小 session store / transcript 持久化 / `resume` 恢复链路已打通
-- 当前仍处于 `v0.1` 收尾阶段，REPL、history、compact、memory、多代理、MCP / skills / plugins 等能力尚未进入完成态
+- `Read / Edit / Write / Bash / Glob / Grep / WebFetch / AskUserQuestion` 已有最小可用实现
+- 4 种 `permission mode` 已真正接入 tool 执行链路，并支持 CLI / 用户级 / workspace 级配置
+- session store / transcript 持久化 / `resume` 恢复链路已打通
+- `interactive` 已推进到真正可用的 REPL，并补上首批本地 slash commands
+- model limits 已接入 provider 配置与首段 model-aware `tool result budget`
+- 当前仍处于 `v0.1` 收尾阶段，history、compact、memory、多代理、MCP / skills / plugins 等能力尚未进入完成态
 
 ## 测试
 
@@ -80,8 +84,9 @@ dclaw/
 - `Bash`
 - `Glob / Grep`
 - `WebFetch / AskUserQuestion`
+- `Anthropic / OpenAI` provider
 - `queryLoop` 下的 permission mode 集成行为
-- `session / resume`
+- `session / resume / REPL commands`
 
 当前测试也覆盖了一批关键边界：
 
@@ -209,6 +214,56 @@ SSE 模式下当前会输出：
 ```bash
 npm run start -- --print --provider openai --output-format sse "Reply with exactly: ok"
 ```
+
+## Interactive / REPL
+
+`interactive` 入口现在已经不是“单次 prompt 占位”，而是一个最小可用的 REPL。
+
+支持的方式：
+
+- 直接进入 REPL：
+
+```bash
+npm run start
+```
+
+- 先执行初始 prompt，再继续留在 REPL：
+
+```bash
+npm run start -- "summarize this repo"
+```
+
+- 恢复一个已有 session 后继续在 REPL 中交互：
+
+```bash
+npm run start -- resume <session-id>
+```
+
+当前内建 REPL commands 包括：
+
+- `/help`
+- `/session` / `/info`
+- `/history`
+- `/doctor`
+- `/model [model]`
+- `/permissions [mode]`
+- `/config`
+- `/transcript [N]`
+- `/resume [session-id]`
+- `/compact [instructions]`
+- `/clear`
+- `/cls`
+- `/exit` / `/quit`
+
+其中几个和 Claude Code 对齐时容易混淆的语义是：
+
+- `/clear`
+  - 清空当前会话上下文，并启动一个新的空 session
+- `/cls`
+  - 只清屏，不影响当前 session
+- `/resume`
+  - 带 `session-id` 时切到该会话
+  - 不带参数时显示最近的 sessions，便于继续恢复
 
 ## Permission Mode 配置
 

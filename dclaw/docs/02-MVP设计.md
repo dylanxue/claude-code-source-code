@@ -6,7 +6,7 @@ MVP 的目标不是一次做成“成熟完整的 Claude Code”，而是先做�
 
 MVP 应该满足：
 
-- 可以在终端中交互
+- 可以在终端中多轮交互
 - 可以在 headless 模式运行
 - 可以调用基础工具
 - 可以读项目级指令
@@ -59,6 +59,11 @@ MVP 只需要重点实现这些目录：
 - `resume`
 - `doctor`
 
+当前实现状态补充：
+
+- `interactive` 已不是占位入口，而是最小可用 REPL
+- 已支持首批本地 REPL commands，包括 `/help / history / doctor / model / permissions / config / resume / compact / clear`
+
 ### 4.2 Query Engine
 
 负责：
@@ -102,9 +107,14 @@ MVP 只需要重点实现这些目录：
 MVP 模式建议：
 
 - `default`
-- `auto`
+- `accept-edits`
 - `plan`
-- `bypass`
+- `bypass-permissions`
+
+当前实现补充：
+
+- 这 4 种模式均已接入工具执行链路
+- 当前还没有 hooks 和更细粒度规则
 
 ### 4.6 Session
 
@@ -133,7 +143,7 @@ MVP 模式建议：
 
 1. 能跑通一次完整的 tool-use 循环。
 2. `--print` 模式可独立运行。
-3. 支持恢复 session。
+3. 支持恢复 session，并在恢复后继续执行新的 prompt。
 4. 能读取项目级 `CLAUDE.md`。
 5. 危险工具可被权限系统拦截。
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   applyToolResultBudget,
+  deriveToolResultBudgetFromModelLimits,
   type PersistedToolResultOutput,
 } from '../../src/core/toolResultBudget.js'
 import { executeSingleTurn } from '../../src/core/queryLoop.js'
@@ -40,6 +41,25 @@ test('buildTool defaults maxResultSizeChars to infinity', () => {
   })
 
   assert.equal(tool.maxResultSizeChars, Number.POSITIVE_INFINITY)
+})
+
+test('deriveToolResultBudgetFromModelLimits scales budgets with context size', () => {
+  const small = deriveToolResultBudgetFromModelLimits({
+    contextWindow: 4_096,
+    maxOutputTokens: 1_024,
+    maxOutputTokensUpperLimit: 2_048,
+  })
+  const large = deriveToolResultBudgetFromModelLimits({
+    contextWindow: 1_048_576,
+    maxOutputTokens: 32_768,
+    maxOutputTokensUpperLimit: 32_768,
+  })
+
+  assert.ok(small.defaultMaxResultSizeChars < large.defaultMaxResultSizeChars)
+  assert.ok(
+    small.maxToolResultsPerTurnChars < large.maxToolResultsPerTurnChars,
+  )
+  assert.ok(small.previewChars <= large.previewChars)
 })
 
 test('applyToolResultBudget persists the largest outputs when the turn aggregate budget is exceeded', async () => {
@@ -101,6 +121,29 @@ class ToolThenAnswerClient implements LlmClient {
     if (this.requests.length === 1) {
       return {
         message: createToolUseMessage('assistant', 'Huge', {}),
+      }
+    }
+
+    return {
+      message: createTextMessage('assistant', 'done'),
+    }
+  }
+}
+
+class NamedToolThenAnswerClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+
+  constructor(private readonly toolName: string) {}
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+
+    if (this.requests.length === 1) {
+      return {
+        message: createToolUseMessage('assistant', this.toolName, {}),
       }
     }
 
@@ -188,6 +231,84 @@ test('query loop replaces oversized tool results before sending the next llm req
       (resultBlock.output as PersistedToolResultOutput).type,
       'persisted_tool_result',
     )
+  } finally {
+    process.env.DCLAW_HOME = originalDclawHome
+    await rm(dclawHome, { recursive: true, force: true })
+  }
+})
+
+test('query loop uses model-aware budgets to persist results more aggressively for smaller models', async () => {
+  const registry = new ToolRegistry()
+  registry.register(
+    buildTool({
+      name: 'Medium',
+      description: 'Returns a medium payload for budget testing.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          value: { type: 'string' },
+        },
+        required: ['value'],
+        additionalProperties: false,
+      },
+      async call() {
+        return {
+          ok: true,
+          output: {
+            value: 'y'.repeat(6_000),
+          },
+          summary: 'medium result',
+        }
+      },
+      isReadOnly() {
+        return true
+      },
+    }),
+  )
+
+  const client = new NamedToolThenAnswerClient('Medium')
+  const dclawHome = await mkdtemp(join(tmpdir(), 'dclaw-query-budget-small-'))
+  const originalDclawHome = process.env.DCLAW_HOME
+  process.env.DCLAW_HOME = dclawHome
+
+  try {
+    const result = await executeSingleTurn({
+      client,
+      model: 'tiny-test-model',
+      modelLimits: {
+        contextWindow: 4_096,
+        maxOutputTokens: 1_024,
+        maxOutputTokensUpperLimit: 2_048,
+      },
+      toolResultBudgetOptions: deriveToolResultBudgetFromModelLimits({
+        contextWindow: 4_096,
+        maxOutputTokens: 1_024,
+        maxOutputTokensUpperLimit: 2_048,
+      }),
+      messages: [createTextMessage('user', 'please use the Medium tool')],
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        availableTools: ['Medium'],
+      }),
+    })
+
+    const toolResultMessage = client.requests[1]?.messages.find(
+      message =>
+        message.role === 'user' &&
+        message.content.some(block => block.type === 'tool_result'),
+    )
+    const block = toolResultMessage?.content[0]
+    assert.ok(block && block.type === 'tool_result')
+    assert.equal(
+      (block.output as PersistedToolResultOutput).type,
+      'persisted_tool_result',
+    )
+    assert.equal(result.outputText, 'done')
   } finally {
     process.env.DCLAW_HOME = originalDclawHome
     await rm(dclawHome, { recursive: true, force: true })

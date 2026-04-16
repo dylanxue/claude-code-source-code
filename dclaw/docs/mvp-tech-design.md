@@ -63,9 +63,9 @@ MVP 应满足：
 
 当前实现状态：
 
-- 已有 `client.ts` 和 `stub` provider 用于联调主链路
-- 下一步需要接入第一个真实 provider
-- 优先顺序：先做 `Anthropic` 的最小非流式 `createMessage`，再补 streaming 和更多 provider
+- 已有 `stub`、`Anthropic`、`OpenAI` 三类 provider
+- `Anthropic` 与 `OpenAI` 已支持基础 streaming
+- `OpenAI` 已支持 `responses / chat-completions`
 
 ### 3.3 Query Engine
 
@@ -113,7 +113,7 @@ MVP 只实现：
 
 文件：
 
-- `src/tools/base.ts`
+- `src/tools/types.ts`
 - `src/tools/registry.ts`
 - `src/tools/builtin/*`
 
@@ -132,15 +132,20 @@ MVP 工具顺序：
 
 文件：
 
-- `src/permissions/modes.ts`
+- `src/cli/permissionModeConfig.ts`
 - `src/permissions/evaluator.ts`
 
 MVP 模式：
 
 - `default`
-- `auto`
+- `accept-edits`
 - `plan`
-- `bypass`
+- `bypass-permissions`
+
+当前实现补充：
+
+- 这 4 种模式均已接入工具执行链路
+- 当前仍缺 hooks 与更细粒度规则
 
 ### 3.8 Session / Resume
 
@@ -149,6 +154,10 @@ MVP 模式：
 - `src/session/store.ts`
 - `src/session/resume.ts`
 - `src/session/paths.ts`
+- `src/session/history.ts`
+- `src/session/transcript.ts`
+- `src/cli/repl.ts`
+- `src/cli/replCommands.ts`
 
 存储建议：
 
@@ -188,6 +197,7 @@ MVP 模式：
 MVP 后优先做：
 
 1. 完整 `CLAUDE.md` 发现与 include
-2. task / plan mode
-3. compact
-4. memory
+2. compact / 更广上下文压缩
+3. 更完整的 history / resume / slash command 体系
+4. task / plan mode
+5. memory

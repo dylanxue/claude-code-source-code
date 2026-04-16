@@ -1,25 +1,15 @@
 import { createInterface } from 'node:readline/promises'
+import type { AskUserQuestion, AskUserQuestionOption } from '../types/tool.js'
 
-type AskOption = {
-  label: string
-  description: string
-}
-
-type AskQuestion = {
-  question: string
-  header: string
-  options: AskOption[]
-  multiSelect?: boolean
-}
-
-function formatOption(index: number, option: AskOption): string {
+function formatOption(index: number, option: AskUserQuestionOption): string {
   return `${index + 1}. ${option.label} - ${option.description}`
 }
 
-function parseAnswer(
-  raw: string,
-  question: AskQuestion,
-): string | undefined {
+function getQuestionAnswerKey(question: AskUserQuestion): string {
+  return question.id?.trim() || question.question
+}
+
+function parseAnswer(raw: string, question: AskUserQuestion): string | undefined {
   const trimmed = raw.trim()
   if (!trimmed) {
     return undefined
@@ -52,7 +42,7 @@ function parseAnswer(
 }
 
 export async function askUserQuestionsInteractively(
-  questions: AskQuestion[],
+  questions: AskUserQuestion[],
 ): Promise<Record<string, string>> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error('AskUserQuestion requires an interactive TTY')
@@ -86,7 +76,7 @@ export async function askUserQuestionsInteractively(
         answer = parseAnswer(raw, question)
       }
 
-      answers[question.question] = answer
+      answers[getQuestionAnswerKey(question)] = answer
     }
   } finally {
     rl.close()
