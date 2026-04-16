@@ -9,7 +9,7 @@
 1. [01-总体方案](./01-总体方案.md)
 2. [02-MVP设计](./02-MVP设计.md)
 3. [03-扩展设计](./03-扩展设计.md)
-
+4. [04-并行开发规范](./04.并行开发规范.md)
 ### 进展记录
 
 - [project-status.md](./project-status.md)
@@ -23,7 +23,6 @@
 - [architecture.md](./architecture.md)
 - [phases.md](./phases.md)
 - [mvp-tech-design.md](./mvp-tech-design.md)
-- [parallel-dev-plan.md](./parallel-dev-plan.md)
 - [prompt-system.md](./prompt-system.md)
 - [tool-spec.md](./tool-spec.md)
 - [memory-spec.md](./memory-spec.md)
