@@ -7,12 +7,15 @@ import {
 import { resolveModelLimits } from '../modelLimits.js'
 import {
   getHttpErrorMessage,
-  normalizeBaseUrl,
   readSseEvents,
   stringifyJson,
-  trimOrUndefined,
   type SseEvent,
 } from '../providerUtils.js'
+import {
+  resolveAnthropicProviderConfig,
+  type AnthropicProviderConfig as AnthropicConfig,
+} from '../providerConfig.js'
+import { resolveModelSelection } from '../modelSelection.js'
 import type {
   CreateMessageRequest,
   CreateMessageResponse,
@@ -20,14 +23,10 @@ import type {
   LlmClient,
   LlmToolDefinition,
 } from '../types.js'
-
-const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
 const ANTHROPIC_VERSION = '2023-06-01'
-
-type AnthropicConfig = {
-  apiKey?: string
-  baseUrl: string
-  defaultModel?: string
+export {
+  resolveAnthropicProviderConfig as resolveAnthropicConfig,
+  type AnthropicConfig,
 }
 
 type AnthropicMessage = {
@@ -121,23 +120,6 @@ export type AnthropicLlmClientOptions = {
   defaultModel?: string
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
-}
-
-export function resolveAnthropicConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): AnthropicConfig {
-  return {
-    apiKey:
-      trimOrUndefined(env.DCLAW_ANTHROPIC_API_KEY) ??
-      trimOrUndefined(env.ANTHROPIC_API_KEY),
-    baseUrl: normalizeBaseUrl(
-      env.DCLAW_ANTHROPIC_BASE_URL ?? env.ANTHROPIC_BASE_URL,
-      DEFAULT_ANTHROPIC_BASE_URL,
-    ),
-    defaultModel:
-      trimOrUndefined(env.DCLAW_ANTHROPIC_MODEL) ??
-      trimOrUndefined(env.ANTHROPIC_MODEL),
-  }
 }
 
 function stringifyToolResultOutput(value: unknown): string {
@@ -249,14 +231,10 @@ export class AnthropicLlmClient implements LlmClient {
   private readonly env: NodeJS.ProcessEnv
 
   constructor(options: AnthropicLlmClientOptions = {}) {
-    const config = resolveAnthropicConfig(options.env)
-    this.apiKey = trimOrUndefined(options.apiKey) ?? config.apiKey
-    this.baseUrl = normalizeBaseUrl(
-      options.baseUrl ?? config.baseUrl,
-      DEFAULT_ANTHROPIC_BASE_URL,
-    )
-    this.defaultModel =
-      trimOrUndefined(options.defaultModel) ?? config.defaultModel
+    const config = resolveAnthropicProviderConfig(options.env)
+    this.apiKey = options.apiKey ?? config.apiKey
+    this.baseUrl = options.baseUrl ?? config.baseUrl
+    this.defaultModel = options.defaultModel ?? config.defaultModel
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
   }
@@ -270,7 +248,7 @@ export class AnthropicLlmClient implements LlmClient {
       )
     }
 
-    const model = trimOrUndefined(request.model) ?? this.defaultModel
+    const { model } = resolveModelSelection(request.model, this.defaultModel)
     if (!model) {
       throw new Error(
         'Anthropic model is required. Pass --model or set ANTHROPIC_MODEL / DCLAW_ANTHROPIC_MODEL.',
@@ -317,7 +295,7 @@ export class AnthropicLlmClient implements LlmClient {
       )
     }
 
-    const model = trimOrUndefined(request.model) ?? this.defaultModel
+    const { model } = resolveModelSelection(request.model, this.defaultModel)
     if (!model) {
       throw new Error(
         'Anthropic model is required. Pass --model or set ANTHROPIC_MODEL / DCLAW_ANTHROPIC_MODEL.',

@@ -1,5 +1,6 @@
 import { QueryEngine } from '../core/queryEngine.js'
 import { createLlmClient } from '../llm/client.js'
+import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import {
   formatClaudeMdLoadOrder,
   loadClaudeMdEntries,
@@ -17,6 +18,7 @@ function writeSseEvent(event: string, payload: unknown): void {
 
 export async function runHeadless(command: PrintCommand): Promise<void> {
   const prompt = command.prompt?.trim()
+  const runtime = resolveLlmRuntimeConfig(command.options)
 
   if (!prompt) {
     process.stdout.write('No prompt provided.\n')
@@ -26,8 +28,8 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
   const claudeMdEntries = await loadClaudeMdEntries(command.options.cwd)
   const promptContext = assemblePromptContext({
     cwd: command.options.cwd,
-    provider: command.options.provider,
-    model: command.options.model,
+    provider: runtime.provider,
+    model: runtime.model,
     mode: 'print',
     userSystemPrompt: command.options.systemPrompt,
     claudeMdEntries,
@@ -35,8 +37,8 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
 
   const toolRegistry = createDefaultToolRegistry()
   const engine = new QueryEngine({
-    client: createLlmClient(command.options.provider),
-    model: command.options.model,
+    client: createLlmClient(runtime.provider),
+    model: runtime.model,
     systemPrompt: buildSystemPrompt(promptContext),
     toolRegistry,
     toolContext: {

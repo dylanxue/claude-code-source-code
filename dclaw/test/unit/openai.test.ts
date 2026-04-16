@@ -23,6 +23,7 @@ test('resolveOpenAiConfig reads dclaw env vars first', () => {
   })
 
   assert.deepEqual(config, {
+    provider: 'openai',
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com/v1',
     defaultModel: 'primary-model',

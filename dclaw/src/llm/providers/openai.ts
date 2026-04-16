@@ -6,12 +6,16 @@ import {
 import { resolveModelLimits } from '../modelLimits.js'
 import {
   getHttpErrorMessage,
-  normalizeBaseUrl,
   readSseEvents,
   stringifyJson,
-  trimOrUndefined,
   type SseEvent,
 } from '../providerUtils.js'
+import {
+  resolveOpenAiProviderConfig,
+  type OpenAiApiStyle,
+  type OpenAiProviderConfig as OpenAiConfig,
+} from '../providerConfig.js'
+import { resolveModelSelection } from '../modelSelection.js'
 import type {
   CreateMessageRequest,
   CreateMessageResponse,
@@ -19,16 +23,10 @@ import type {
   LlmClient,
   LlmToolDefinition,
 } from '../types.js'
-
-const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
-
-type OpenAiApiStyle = 'responses' | 'chat-completions'
-
-type OpenAiConfig = {
-  apiKey?: string
-  baseUrl: string
-  defaultModel?: string
-  apiStyle: OpenAiApiStyle
+export {
+  resolveOpenAiProviderConfig as resolveOpenAiConfig,
+  type OpenAiApiStyle,
+  type OpenAiConfig,
 }
 
 type OpenAiResponsesInputItem =
@@ -152,50 +150,6 @@ export type OpenAiLlmClientOptions = {
   apiStyle?: OpenAiApiStyle
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
-}
-
-function inferOpenAiApiStyle(
-  baseUrl: string,
-  env: NodeJS.ProcessEnv,
-): OpenAiApiStyle {
-  const explicit =
-    trimOrUndefined(env.DCLAW_OPENAI_API_STYLE) ??
-    trimOrUndefined(env.OPENAI_API_STYLE)
-
-  if (explicit === 'responses' || explicit === 'chat-completions') {
-    return explicit
-  }
-
-  if (trimOrUndefined(env.MODEL_PROVIDER) === 'openai-compatible') {
-    return 'chat-completions'
-  }
-
-  try {
-    const url = new URL(baseUrl)
-    return url.hostname === 'api.openai.com' ? 'responses' : 'chat-completions'
-  } catch {
-    return 'chat-completions'
-  }
-}
-
-export function resolveOpenAiConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): OpenAiConfig {
-  const baseUrl = normalizeBaseUrl(
-    env.DCLAW_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL,
-    DEFAULT_OPENAI_BASE_URL,
-  )
-
-  return {
-    apiKey:
-      trimOrUndefined(env.DCLAW_OPENAI_API_KEY) ??
-      trimOrUndefined(env.OPENAI_API_KEY),
-    baseUrl,
-    defaultModel:
-      trimOrUndefined(env.DCLAW_OPENAI_MODEL) ??
-      trimOrUndefined(env.OPENAI_MODEL),
-    apiStyle: inferOpenAiApiStyle(baseUrl, env),
-  }
 }
 
 function toResponsesInputItem(
@@ -510,14 +464,10 @@ export class OpenAiLlmClient implements LlmClient {
   private readonly env: NodeJS.ProcessEnv
 
   constructor(options: OpenAiLlmClientOptions = {}) {
-    const config = resolveOpenAiConfig(options.env)
-    this.apiKey = trimOrUndefined(options.apiKey) ?? config.apiKey
-    this.baseUrl = normalizeBaseUrl(
-      options.baseUrl ?? config.baseUrl,
-      DEFAULT_OPENAI_BASE_URL,
-    )
-    this.defaultModel =
-      trimOrUndefined(options.defaultModel) ?? config.defaultModel
+    const config = resolveOpenAiProviderConfig(options.env)
+    this.apiKey = options.apiKey ?? config.apiKey
+    this.baseUrl = options.baseUrl ?? config.baseUrl
+    this.defaultModel = options.defaultModel ?? config.defaultModel
     this.apiStyle = options.apiStyle ?? config.apiStyle
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
@@ -735,7 +685,7 @@ export class OpenAiLlmClient implements LlmClient {
       )
     }
 
-    const model = trimOrUndefined(request.model) ?? this.defaultModel
+    const { model } = resolveModelSelection(request.model, this.defaultModel)
     if (!model) {
       throw new Error(
         'OpenAI model is required. Pass --model or set OPENAI_MODEL / DCLAW_OPENAI_MODEL.',

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { SUPPORTED_LLM_PROVIDERS } from '../llm/client.js'
+import type { LlmProviderName } from '../llm/providerNames.js'
 import type { ParsedCliCommand } from './types.js'
 
 export class CliArgumentError extends Error {
@@ -26,7 +27,7 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   const options = {
     cwd: baseCwd,
     model: undefined as string | undefined,
-    provider: 'stub' as (typeof SUPPORTED_LLM_PROVIDERS)[number],
+    provider: undefined as LlmProviderName | undefined,
     outputFormat: 'text' as 'text' | 'sse',
     permissionMode: 'default' as
       | 'default'

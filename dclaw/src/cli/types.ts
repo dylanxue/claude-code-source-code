@@ -1,11 +1,11 @@
-import type { LlmProviderName } from '../llm/client.js'
+import type { LlmProviderName } from '../llm/providerNames.js'
 
 export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume'
 
 export type CommonCliOptions = {
   cwd: string
   model?: string
-  provider: LlmProviderName
+  provider?: LlmProviderName
   permissionMode: 'default' | 'accept-edits' | 'bypass-permissions' | 'plan'
   systemPrompt?: string
   stream: boolean

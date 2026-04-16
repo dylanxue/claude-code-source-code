@@ -1,5 +1,6 @@
 import { QueryEngine } from '../core/queryEngine.js'
 import { createLlmClient } from '../llm/client.js'
+import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import {
   formatClaudeMdLoadOrder,
   loadClaudeMdEntries,
@@ -11,11 +12,12 @@ import { askUserQuestionsInteractively } from './askUserQuestions.js'
 import type { InteractiveCommand } from './types.js'
 
 export async function runInteractive(command: InteractiveCommand): Promise<void> {
+  const runtime = resolveLlmRuntimeConfig(command.options)
   const claudeMdEntries = await loadClaudeMdEntries(command.options.cwd)
   const promptContext = assemblePromptContext({
     cwd: command.options.cwd,
-    provider: command.options.provider,
-    model: command.options.model,
+    provider: runtime.provider,
+    model: runtime.model,
     mode: 'interactive',
     userSystemPrompt: command.options.systemPrompt,
     claudeMdEntries,
@@ -23,8 +25,8 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
 
   const toolRegistry = createDefaultToolRegistry()
   const engine = new QueryEngine({
-    client: createLlmClient(command.options.provider),
-    model: command.options.model,
+    client: createLlmClient(runtime.provider),
+    model: runtime.model,
     systemPrompt: buildSystemPrompt(promptContext),
     toolRegistry,
     toolContext: {
@@ -39,8 +41,10 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
   const lines = [
     'dclaw interactive mode is ready.',
     `cwd: ${command.options.cwd}`,
-    `provider: ${command.options.provider}`,
-    `model: ${command.options.model ?? 'default'}`,
+    `provider: ${runtime.provider}`,
+    `provider source: ${runtime.providerSource}`,
+    `model: ${runtime.model ?? 'default'}`,
+    `model source: ${runtime.modelSource}`,
     `permission mode: ${command.options.permissionMode}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
   ]

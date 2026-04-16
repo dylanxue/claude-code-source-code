@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import type { LlmProviderName } from './client.js'
+import type { LlmProviderName } from './providerNames.js'
 import { trimOrUndefined } from './providerUtils.js'
 
 export type ModelLimits = {
@@ -355,6 +355,9 @@ function getProviderDefaults(provider: LlmProviderName): ModelLimits {
     case 'stub':
       return DEFAULT_ANTHROPIC_LIMITS
   }
+
+  const unsupportedProvider: never = provider
+  throw new Error(`Unsupported provider: ${unsupportedProvider}`)
 }
 
 function getProviderRules(provider: LlmProviderName): ModelLimitRule[] {
@@ -366,6 +369,9 @@ function getProviderRules(provider: LlmProviderName): ModelLimitRule[] {
     case 'stub':
       return []
   }
+
+  const unsupportedProvider: never = provider
+  throw new Error(`Unsupported provider: ${unsupportedProvider}`)
 }
 
 function normalizeModelName(model: string | undefined): string {

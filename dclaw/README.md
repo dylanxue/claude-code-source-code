@@ -102,6 +102,13 @@ npm test
 - `anthropic`
 - `openai`
 
+运行时配置现在按更接近 Claude Code 的分层来解析：
+
+- `provider selection`：CLI `--provider` 优先，否则尝试 `DCLAW_PROVIDER` / `LLM_PROVIDER` / `MODEL_PROVIDER`
+- `provider config`：按 provider 分别解析 `api key / base url / api style`
+- `model selection`：CLI `--model` 优先，否则回退到 provider 默认模型
+- `model limits`：最后再按 provider + model 解析 token 配额
+
 真实 provider 会先从当前工作目录加载 `.env`，再加载 `.env.local`，随后再读取当前 shell 环境：
 
 - `ANTHROPIC_API_KEY` / `DCLAW_ANTHROPIC_API_KEY`
@@ -150,6 +157,11 @@ npm test
 ```bash
 npm run start -- --doctor --provider openai
 ```
+
+如果不显式传 `--provider`，`doctor` 也会尝试从环境推断 provider，并显示：
+
+- `provider source`
+- `model source`
 
 当前内置也补了一批兼容模型的默认 limits，`openai` 和 `anthropic` 两侧都可直接使用这些模型名：
 

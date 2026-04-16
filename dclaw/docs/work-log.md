@@ -29,6 +29,24 @@
   - `GLM`
 - 将 `Kimi / MiniMax / GLM` 兼容模型 limits 提升为双 provider 共享规则，避免只在单边 provider 生效
 - 补上 `minimax-m2.5` 的内置 limits
+- 继续把 `dclaw` 的 LLM 配置层往 Claude Code 的分层方式收：
+  - `src/llm/providerNames.ts`
+  - `src/llm/providerSelection.ts`
+  - `src/llm/providerConfig.ts`
+  - `src/llm/modelSelection.ts`
+  - `src/llm/runtimeConfig.ts`
+- 将原本散在 provider 实现里的 `provider / base_url / model` 解析逻辑拆开：
+  - provider 选择
+  - provider config 解析
+  - model 选择
+  - model limits 解析
+- 让 CLI `doctor / interactive / headless` 使用统一的 runtime config 解析结果
+- 支持在未显式传 `--provider` 时，从环境变量推断 provider：
+  - `DCLAW_PROVIDER`
+  - `LLM_PROVIDER`
+  - `MODEL_PROVIDER`
+- 为新的 runtime config 解析链路补上单测：
+  - `test/unit/runtime-config.test.ts`
 - 本轮实现继续优先参考仓库内 Claude Code 源码，尤其是模型配置和 provider 适配思路
 - 增加自动化测试：
   - `test/unit/anthropic-stream.test.ts`

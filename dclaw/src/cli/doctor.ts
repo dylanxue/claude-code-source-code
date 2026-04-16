@@ -4,8 +4,7 @@ import {
   getModelLimitsConfigPath,
   resolveModelLimits,
 } from '../llm/modelLimits.js'
-import { resolveAnthropicConfig } from '../llm/providers/anthropic.js'
-import { resolveOpenAiConfig } from '../llm/providers/openai.js'
+import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import type { DoctorCommand } from './types.js'
 
 function statusLine(label: string, value: string): string {
@@ -22,7 +21,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     statusLine('cwd', cwd),
     statusLine('cwd exists', existsSync(cwd) ? 'yes' : 'no'),
     statusLine('mode', 'doctor'),
-    statusLine('provider', command.options.provider),
+    statusLine('provider override', command.options.provider ?? 'none'),
     statusLine('model override', command.options.model ?? 'none'),
     statusLine(
       'system prompt',
@@ -30,30 +29,34 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     ),
   ]
 
-  if (command.options.provider === 'anthropic') {
-    const config = resolveAnthropicConfig()
-    const resolvedModel = command.options.model ?? config.defaultModel
+  const runtime = resolveLlmRuntimeConfig(command.options)
+  lines.push(statusLine('provider', runtime.provider))
+  lines.push(statusLine('provider source', runtime.providerSource))
+
+  if (runtime.providerConfig.provider === 'anthropic') {
+    const config = runtime.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
     lines.push(statusLine('base url', config.baseUrl))
     lines.push(statusLine('default model', config.defaultModel ?? 'none'))
-    lines.push(statusLine('resolved model', resolvedModel ?? 'none'))
+    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
+    lines.push(statusLine('model source', runtime.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
-    if (resolvedModel) {
-      appendModelLimits(lines, 'anthropic', resolvedModel)
+    if (runtime.model) {
+      appendModelLimits(lines, 'anthropic', runtime.model)
     }
   }
 
-  if (command.options.provider === 'openai') {
-    const config = resolveOpenAiConfig()
-    const resolvedModel = command.options.model ?? config.defaultModel
+  if (runtime.providerConfig.provider === 'openai') {
+    const config = runtime.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
     lines.push(statusLine('base url', config.baseUrl))
     lines.push(statusLine('api style', config.apiStyle))
     lines.push(statusLine('default model', config.defaultModel ?? 'none'))
-    lines.push(statusLine('resolved model', resolvedModel ?? 'none'))
+    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
+    lines.push(statusLine('model source', runtime.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
-    if (resolvedModel) {
-      appendModelLimits(lines, 'openai', resolvedModel)
+    if (runtime.model) {
+      appendModelLimits(lines, 'openai', runtime.model)
     }
   }
 

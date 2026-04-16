@@ -23,6 +23,7 @@ test('resolveAnthropicConfig reads dclaw env vars first', () => {
   })
 
   assert.deepEqual(config, {
+    provider: 'anthropic',
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com',
     defaultModel: 'primary-model',
