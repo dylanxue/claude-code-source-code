@@ -23,6 +23,7 @@
 - [architecture.md](./architecture.md)
 - [phases.md](./phases.md)
 - [mvp-tech-design.md](./mvp-tech-design.md)
+- [parallel-dev-plan.md](./parallel-dev-plan.md)
 - [prompt-system.md](./prompt-system.md)
 - [tool-spec.md](./tool-spec.md)
 - [memory-spec.md](./memory-spec.md)
