@@ -5,7 +5,7 @@ import {
   type Message,
 } from '../types/message.js'
 import type { ToolRegistry } from '../tools/registry.js'
-import { executeSingleTurn } from './queryLoop.js'
+import { executeSingleTurn, type QueryLoopRequest } from './queryLoop.js'
 
 export type QueryEngineOptions = {
   client: LlmClient
@@ -22,6 +22,8 @@ export type QueryResult = {
   messages: Message[]
   outputText: string
 }
+
+export type QueryStreamHandlers = NonNullable<QueryLoopRequest['streamHandlers']>
 
 export class QueryEngine {
   private readonly client: LlmClient
@@ -47,6 +49,13 @@ export class QueryEngine {
   }
 
   async submitUserPrompt(prompt: string): Promise<QueryResult> {
+    return this.submitUserPromptWithHandlers(prompt)
+  }
+
+  async submitUserPromptWithHandlers(
+    prompt: string,
+    streamHandlers?: QueryStreamHandlers,
+  ): Promise<QueryResult> {
     const userMessage = createTextMessage('user', prompt)
     this.messages.push(userMessage)
 
@@ -58,6 +67,7 @@ export class QueryEngine {
       toolRegistry: this.toolRegistry,
       toolContext: this.toolContext,
       maxIterations: this.maxIterations,
+      streamHandlers,
     })
 
     this.messages.push(...response.addedMessages)

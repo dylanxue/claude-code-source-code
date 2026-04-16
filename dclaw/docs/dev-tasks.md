@@ -15,9 +15,11 @@
 - [ ] 继续细化 `Bash` 的输出重定向语义，尤其是 fd redirection、force clobber 和更复杂的 target 解析
 - [ ] 继续细化 `Glob` / `Grep` 的 schema、permission 接入、fallback 语义与结果结构
 - [ ] 细化 `WebFetch` / `AskUserQuestion` 的最小行为，使其更接近 Claude Code
-- [ ] 接入第一个真实 LLM provider，替换当前仅有的 `stub` 执行路径
-- [ ] 优先实现 `Anthropic` provider 的最小非流式 `createMessage` 调用
-- [ ] 增加真实 LLM 所需的配置读取、API key 校验和错误分层
+- [ ] 继续细化 `Anthropic` provider 的重试和更完整错误语义
+- [ ] 继续细化 `OpenAI` provider 的 `responses` 流式事件、reasoning、verbosity 与更多 Responses 参数
+- [ ] 为 tool 定义补更明确的 schema，而不是当前的通用 object 兜底
+- [ ] 为更多 provider 预留统一配置与适配层
+- [ ] 将 model limits 接入更多运行时决策，而不只是 provider 请求参数和 doctor 输出
 - [ ] 梳理当前 Tool 协议与文档之间的差距
 - [ ] 为阶段 6 的 permission mode 接入设计更明确的 evaluator 位置
 - [ ] 扩展自动化测试覆盖到更多 `Bash` sandbox 行为与更复杂的文件语义
@@ -86,6 +88,22 @@
 - [x] 在 `work-log.md` 记录实现结果
 - [x] 为 Tool 执行链路补上 `validate / isEnabled / availableTools` 预留位
 - [x] 增加 `WebFetch` 与 `AskUserQuestion` 的最小实现并接入默认工具集
+- [x] 接入第一个真实 LLM provider，替换当前仅有的 `stub` 执行路径
+- [x] 优先实现 `Anthropic` provider 的最小非流式 `createMessage` 调用
+- [x] 增加真实 LLM 所需的配置读取、API key 校验和错误分层
+- [x] 将 CLI `--provider` 扩展为支持 `anthropic`
+- [x] 为 `doctor` 增加 `Anthropic` 配置诊断输出
+- [x] 接入第二个真实 LLM provider：`OpenAI`
+- [x] 为 `OpenAI` provider 实现最小 `Responses API` 调用
+- [x] 将 CLI `--provider` 扩展为支持 `openai`
+- [x] 增加模型 token limit 配置层，支持内置默认值、环境变量覆盖和外部 JSON 覆盖
+- [x] 为 `doctor` 增加解析后 model limits 的诊断输出
+- [x] 为 `OpenAI` provider 增加 `chat/completions` 兼容调用
+- [x] 增加 `.env` / `.env.local` 自动加载
+- [x] 为 `Anthropic` 与 `OpenAI` provider 补上基础 streaming
+- [x] 为 CLI 增加 `--stream` 与 `--output-format sse`
+- [x] 为 `MiniMax / Kimi / GLM` 补上内置 model limits
+- [x] 用本地 provider 配置完成基础 smoke test
 
 ## Backlog
 

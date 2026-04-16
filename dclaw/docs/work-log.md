@@ -1,5 +1,130 @@
 # 工作日志
 
+## 2026-04-16
+
+- 继续扩展真实 LLM provider：
+  - `src/llm/providers/anthropic.ts`
+  - `src/llm/providers/openai.ts`
+- 为 `OpenAI` provider 增加两条 API 适配路径：
+  - `responses`
+  - `chat/completions`
+- 增加 `OPENAI_API_STYLE` / `DCLAW_OPENAI_API_STYLE`，并为 `openai-compatible` 场景补自动推断
+- 为 provider 请求层补上基础 streaming 能力：
+  - `Anthropic` SSE
+  - `OpenAI chat/completions` SSE
+- 在 `queryLoop` / `QueryEngine` 中加入流式回调通路，允许边收边打印
+- 为 CLI 增加：
+  - `--stream`
+  - `--output-format sse`
+- 在 headless 输出中增加 SSE 事件：
+  - `assistant.delta`
+  - `tool.use`
+  - `tool.result`
+  - `response.complete`
+- 新增 `.env` / `.env.local` 自动加载：
+  - `src/llm/env.ts`
+- 扩展内置 model limits，补上兼容模型默认值：
+  - `MiniMax`
+  - `Kimi`
+  - `GLM`
+- 将 `Kimi / MiniMax / GLM` 兼容模型 limits 提升为双 provider 共享规则，避免只在单边 provider 生效
+- 补上 `minimax-m2.5` 的内置 limits
+- 本轮实现继续优先参考仓库内 Claude Code 源码，尤其是模型配置和 provider 适配思路
+- 增加自动化测试：
+  - `test/unit/anthropic-stream.test.ts`
+- 扩展现有测试：
+  - `test/unit/openai.test.ts`
+  - `test/unit/model-limits.test.ts`
+  - `test/unit/cli.test.ts`
+- 修复 `Anthropic` 流式收尾阶段对稀疏 SSE block index 的处理，避免真实兼容接口在结束阶段抛错
+- 使用本地 `.env.local` 里的真实配置完成 smoke test：
+  - `npm run start -- --doctor --provider openai`
+  - `npm run start -- --doctor --provider anthropic`
+  - `npm run start -- --print --provider openai "Reply with exactly: openai smoke ok"`
+  - `npm run start -- --print --provider anthropic "Reply with exactly: anthropic smoke ok"`
+  - `npm run start -- --print --provider openai --output-format sse "Reply with exactly: openai sse ok"`
+  - `npm run start -- --print --provider anthropic --stream "Reply with exactly: anthropic stream ok"`
+- 验证：
+  - `npm run check`
+  - `npm test`
+  - 当前共 61 条测试，全部通过
+
+- 继续扩展真实 LLM provider：
+  - `src/llm/providers/openai.ts`
+- 为 `OpenAI` provider 实现最小 `Responses API` 调用：
+  - `instructions`
+  - `input`
+  - `tools`
+  - `max_output_tokens`
+  - `function_call / function_call_output` 映射
+- 为 provider 层抽出公共工具：
+  - `src/llm/providerUtils.ts`
+- 新增模型 token limit 配置层：
+  - `src/llm/modelLimits.ts`
+- 设计遵循 Claude Code 的基本思路：
+  - 先有内置默认模型限制
+  - 再允许环境变量覆盖
+  - 再允许外部配置注入
+- 为 `Anthropic` provider 接入解析后的 `max_tokens`
+- 为 `OpenAI` provider 接入解析后的 `max_output_tokens`
+- 为 model limits 提供两类覆盖入口：
+  - 全局环境变量
+  - `DCLAW_MODEL_LIMITS_JSON` / `DCLAW_MODEL_LIMITS_FILE`
+- 默认模型 limits 文件路径：
+  - `~/.dclaw/model-limits.json`
+- 将 `doctor` 扩展为在 `anthropic / openai` 下输出：
+  - resolved model
+  - limits config path
+  - context window
+  - max output
+  - max output cap
+- 增加自动化测试：
+  - `test/unit/openai.test.ts`
+  - `test/unit/model-limits.test.ts`
+- 扩展现有测试：
+  - `test/unit/cli.test.ts`
+  - `test/unit/anthropic.test.ts`
+- 本次 provider/token limit 设计参考了仓库内 Claude Code 现有实现，重点对齐：
+  - `src/utils/context.ts`
+  - `src/utils/model/providers.ts`
+  - `src/utils/model/configs.ts`
+- 仅在必要处补查 OpenAI 官方文档，确认：
+  - Responses API 的 function calling 形态
+  - 一批常用 OpenAI 模型的 context window / max output token 参考值
+- 接入第一个真实 LLM provider：
+  - `src/llm/providers/anthropic.ts`
+- 为 `Anthropic` provider 实现最小非流式 `createMessage`：
+  - 调用 `/v1/messages`
+  - 支持 `system`
+  - 支持基础消息映射
+  - 支持 `tool_use / tool_result` 映射
+- 为 `LLM` 抽象补上 `tools` 定义透传，允许真实 provider 感知当前可用工具
+- 在 `queryLoop` 中将当前 enabled tool 列表转换为 provider 可消费的 tool definitions
+- 将 `--provider` 扩展为支持：
+  - `stub`
+  - `anthropic`
+- 为 `Anthropic` 配置增加最小读取逻辑：
+  - `DCLAW_ANTHROPIC_API_KEY`
+  - `ANTHROPIC_API_KEY`
+  - `DCLAW_ANTHROPIC_BASE_URL`
+  - `ANTHROPIC_BASE_URL`
+  - `DCLAW_ANTHROPIC_MODEL`
+  - `ANTHROPIC_MODEL`
+- 为缺少 API key、缺少 model、HTTP 错误和空响应补上更明确的失败语义
+- 扩展 `doctor` 输出，在 `--provider anthropic` 时显示：
+  - api key 是否已配置
+  - base url
+  - default model
+- 增加自动化测试：
+  - `test/unit/anthropic.test.ts`
+  - `test/unit/cli.test.ts`
+- 顺手将 `Bash.run_in_background` 测试从固定 sleep 改成轮询等待，降低慢机环境下的偶发失败
+- 验证：
+  - `npm install`
+  - `npm run check`
+  - `npm test`
+  - 当前共 44 条测试，全部通过
+
 ## 2026-04-15
 
 - 建立基础自动化测试骨架：

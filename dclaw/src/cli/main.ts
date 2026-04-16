@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadEnvFiles } from '../llm/env.js'
 import { runDoctor } from './doctor.js'
 import { runHeadless } from './headless.js'
 import { runInteractive } from './interactive.js'
@@ -53,6 +54,7 @@ async function dispatch(command: ParsedCliCommand): Promise<void> {
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
+    loadEnvFiles(process.cwd())
     const parsed = parseArgs(argv)
     const command = await resolvePrompt(parsed)
     await dispatch(command)
@@ -79,4 +81,3 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 }
 
 void main()
-

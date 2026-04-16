@@ -33,9 +33,19 @@ test('Bash run_in_background returns task metadata and writes output to disk', a
   assert.ok(result.output.backgroundTaskId)
   assert.ok(result.output.persistedOutputPath)
 
-  await new Promise(resolve => setTimeout(resolve, 300))
   const outputPath = result.output.persistedOutputPath!
-  const output = await readFile(outputPath, 'utf8')
+  const deadline = Date.now() + 2_000
+  let output = ''
+
+  while (Date.now() < deadline) {
+    output = await readFile(outputPath, 'utf8')
+    if (/123/.test(output)) {
+      break
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+
   assert.match(output, /123/)
 
   await rm(outputPath, { force: true })

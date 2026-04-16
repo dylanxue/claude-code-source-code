@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import { SUPPORTED_LLM_PROVIDERS } from '../llm/client.js'
 import type { ParsedCliCommand } from './types.js'
 
 export class CliArgumentError extends Error {
@@ -25,12 +26,14 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   const options = {
     cwd: baseCwd,
     model: undefined as string | undefined,
-    provider: 'stub' as const,
+    provider: 'stub' as (typeof SUPPORTED_LLM_PROVIDERS)[number],
+    outputFormat: 'text' as 'text' | 'sse',
     permissionMode: 'default' as
       | 'default'
       | 'accept-edits'
       | 'bypass-permissions'
       | 'plan',
+    stream: false,
     systemPrompt: undefined as string | undefined,
     verbose: false,
   }
@@ -54,6 +57,24 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
       case '-d':
         options.verbose = true
         break
+      case '--stream':
+        options.stream = true
+        break
+      case '--output-format': {
+        const result = takeValue(args, i, arg)
+        if (result.value !== 'text' && result.value !== 'sse') {
+          throw new CliArgumentError(
+            'Unsupported output format: ' +
+              `${result.value}. Supported formats: text, sse`,
+          )
+        }
+        options.outputFormat = result.value
+        if (result.value === 'sse') {
+          options.stream = true
+        }
+        i = result.nextIndex
+        break
+      }
       case '--model': {
         const result = takeValue(args, i, arg)
         options.model = result.value
@@ -62,12 +83,16 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
       }
       case '--provider': {
         const result = takeValue(args, i, arg)
-        if (result.value !== 'stub') {
+        if (
+          !SUPPORTED_LLM_PROVIDERS.includes(
+            result.value as (typeof SUPPORTED_LLM_PROVIDERS)[number],
+          )
+        ) {
           throw new CliArgumentError(
-            `Unsupported provider: ${result.value}. Supported providers: stub`,
+            `Unsupported provider: ${result.value}. Supported providers: ${SUPPORTED_LLM_PROVIDERS.join(', ')}`,
           )
         }
-        options.provider = result.value
+        options.provider = result.value as (typeof SUPPORTED_LLM_PROVIDERS)[number]
         i = result.nextIndex
         break
       }
@@ -152,8 +177,10 @@ export function formatHelp(): string {
     'Options:',
     '  -p, --print               Run in headless print mode',
     '  --doctor                  Show environment diagnostics',
-    '  --provider <name>         Select provider (currently: stub)',
+    `  --provider <name>         Select provider (${SUPPORTED_LLM_PROVIDERS.join(', ')})`,
     '  --model <name>            Override the model name',
+    '  --stream                  Stream assistant output as it arrives',
+    '  --output-format <format>  Output format for --print (text, sse)',
     '  --permission-mode <mode>  Select permission mode',
     '  --system-prompt <text>    Append a one-off system prompt',
     '  --cwd <path>              Override working directory',

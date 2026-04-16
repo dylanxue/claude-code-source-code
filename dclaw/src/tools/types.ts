@@ -7,6 +7,7 @@ import type {
 export interface Tool<I = unknown, O = unknown> {
   name: string
   description: string
+  inputSchema?: Record<string, unknown>
   call(input: I, context: ToolContext): Promise<ToolResult<O>>
   validate?(
     input: I,

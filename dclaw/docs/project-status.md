@@ -41,6 +41,24 @@
 - 跑通 `interactive / --print / --doctor / resume` 四条入口
 - 实现最小消息协议
 - 实现最小 LLM client/provider 抽象
+- 接入第一个真实 LLM provider：`Anthropic`
+- 接入第二个真实 LLM provider：`OpenAI`
+- 为 `Anthropic` provider 补上最小非流式 `createMessage` 调用
+- 为 `OpenAI` provider 补上 `Responses API` 与 `chat/completions` 两条调用路径
+- 为真实 LLM 接入补上基础配置读取、API key 校验与错误分层
+- 增加 `.env` / `.env.local` 自动加载，允许直接用本地 provider 配置联调
+- 将 tool definitions 接入 LLM 请求层，为真实 provider 的 tool_use 预留协议
+- 将 CLI `--provider` 扩展为支持 `anthropic`
+- 将 CLI `--provider` 扩展为支持 `openai`
+- 将 `doctor` 扩展为输出 `Anthropic` 关键配置状态
+- 增加模型 token limit 配置层，支持内置默认值、环境变量覆盖和外部 JSON 覆盖
+- 为 `MiniMax / Kimi / GLM` 补上内置 model limits，并让兼容模型可同时命中 `openai / anthropic` 两侧 provider
+- 将 `doctor` 扩展为输出解析后的 model limits
+- 将 `OpenAI` provider 扩展为支持 `responses / chat-completions` 两种 API style 自动适配
+- 为 `Anthropic` 与 `OpenAI` provider 补上基础 streaming
+- 为 CLI 增加 `--stream` 与 `--output-format sse`
+- 为 headless 输出增加 SSE 事件流
+- 使用本地 `.env.local` 配置完成 `OpenAI` 与 `Anthropic` 的真实 smoke test
 - 实现最小 QueryEngine 并接入 CLI
 - 拆出 `queryLoop`
 - 建立最小 prompt context / system prompt 装配层
@@ -91,7 +109,10 @@
 - 当前 `Read / Edit / Write` 已进入“基础语义收紧”阶段，并补上了基础 `structuredPatch`、最小 `gitDiff` 与更明确的 warning 语义，但和 Claude Code 的完整 diff / patch /复杂文件支持还有明显差距
 - 当前 `Bash / Glob / Grep` 已补上部分核心语义；`Bash` 已有最小后台任务、大输出落盘、mode 级 unsandboxed 入口和最小 permission evaluator，但真正的 sandbox 行为和更细粒度 permission 规则仍未接入
 - 当前 `WebFetch / AskUserQuestion` 仍然只是最小实现
-- 当前 `LLM` 层仍以 `stub` provider 为主，真实模型服务尚未接入
+- 当前 `LLM` 层已同时支持 `stub`、`Anthropic`、`OpenAI`，默认联调已可以直接走真实 provider
+- 当前已接入 `Anthropic` 与 `OpenAI` 的基础 streaming，但仍未补重试、速率限制处理与更细粒度错误分类
+- 当前 `OpenAI` provider 已支持 `responses / chat-completions`，但 `responses` 路径的真实流式事件兼容仍待继续补齐
+- 当前 model limits 已有基础配置层，并补上 `MiniMax / Kimi / GLM` 内置 defaults，但上下文预算、自动压缩阈值和真实请求调度还未系统接入
 - 当前自动化测试已覆盖 `Read / Edit / Write / Bash / Glob / Grep / WebFetch / AskUserQuestion` 与权限执行链路，并包含一批关键边界场景，但整体覆盖面仍然有限
 - 文档约束已经较明确，后续开发需尽量遵守，不要边写边扩大范围
 - 当前 `CLAUDE.md` 仍是基础版实现，未覆盖完整 include 语义和所有优先级细节
@@ -111,8 +132,9 @@
 - 再补 `WebFetch / AskUserQuestion`
 - 下一批优先补 `Bash` 的权限接入点、sandbox 行为和更稳的结果持久化语义
 - 同步继续细化 `Read / Edit / Write`，向 Claude Code 的更完整 diff / patch / 文件类型支持靠近
-- 接入第一个真实 LLM provider，结束当前仅靠 `stub` provider 的状态
-- 优先实现 `Anthropic` provider 的最小非流式调用链路
-- 为真实 LLM 接入补配置读取、key 校验与错误处理
+- 继续细化 `Anthropic` provider，补重试、可配置 token 参数与更稳的错误处理
+- 继续细化 `OpenAI` provider，补 `responses` 流式事件、reasoning / verbosity 等更细粒度参数支持
+- 为后续更多 provider 抽象出更明确的 request/response 适配层
+- 将 model limits 继续接入上下文管理、budget 估算和后续 compact 逻辑
 - 为后续权限模式与 hooks 接入 tool 执行链路预留接口
 - 继续完善 tool contract

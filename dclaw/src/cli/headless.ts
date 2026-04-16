@@ -10,6 +10,11 @@ import { createDefaultToolRegistry } from '../tools/index.js'
 import { askUserQuestionsInteractively } from './askUserQuestions.js'
 import type { PrintCommand } from './types.js'
 
+function writeSseEvent(event: string, payload: unknown): void {
+  process.stdout.write(`event: ${event}\n`)
+  process.stdout.write(`data: ${JSON.stringify(payload)}\n\n`)
+}
+
 export async function runHeadless(command: PrintCommand): Promise<void> {
   const prompt = command.prompt?.trim()
 
@@ -42,12 +47,50 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
       askUserQuestions: askUserQuestionsInteractively,
     },
   })
-  const result = await engine.submitUserPrompt(prompt)
+  let streamedText = ''
+  const result = command.options.stream
+    ? await engine.submitUserPromptWithHandlers(prompt, {
+        onTextDelta(text) {
+          streamedText += text
+          if (command.options.outputFormat === 'sse') {
+            writeSseEvent('assistant.delta', { text })
+            return
+          }
+
+          process.stdout.write(text)
+        },
+        onToolUse(toolUse) {
+          if (command.options.outputFormat === 'sse') {
+            writeSseEvent('tool.use', toolUse)
+          }
+        },
+        onToolResult(toolResult) {
+          if (command.options.outputFormat === 'sse') {
+            writeSseEvent('tool.result', toolResult)
+          }
+        },
+      })
+    : await engine.submitUserPrompt(prompt)
 
   if (command.options.verbose && claudeMdEntries.length > 0) {
     const debugLines = [...formatClaudeMdLoadOrder(claudeMdEntries), '']
     process.stdout.write(debugLines.join('\n') + '\n')
   }
 
-  process.stdout.write(result.outputText + '\n')
+  if (command.options.outputFormat === 'sse') {
+    writeSseEvent('response.complete', {
+      outputText: result.outputText,
+      iterations: result.messages.length,
+    })
+    return
+  }
+
+  if (!command.options.stream || streamedText.length === 0) {
+    process.stdout.write(result.outputText + '\n')
+    return
+  }
+
+  if (!streamedText.endsWith('\n')) {
+    process.stdout.write('\n')
+  }
 }

@@ -41,6 +41,7 @@ dclaw/
 2. 通用能力优先：不要把 coding 逻辑写死进核心模块。
 3. 可恢复优先：所有长生命周期能力都应支持持久化与恢复。
 4. 文档先行：每个核心模块在编码前先固定职责与边界。
+5. 严格向claude code靠拢：所有决策，都优先参考本项目目录的claude code源码实现，不要凭空想象
 
 ## 建议的实现顺序
 
@@ -91,4 +92,87 @@ dclaw/
 ```bash
 npm run check
 npm test
+```
+
+## Provider 与模型配额
+
+当前 `dclaw` 已支持：
+
+- `stub`
+- `anthropic`
+- `openai`
+
+真实 provider 会先从当前工作目录加载 `.env`，再加载 `.env.local`，随后再读取当前 shell 环境：
+
+- `ANTHROPIC_API_KEY` / `DCLAW_ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL` / `DCLAW_ANTHROPIC_MODEL`
+- `OPENAI_API_KEY` / `DCLAW_OPENAI_API_KEY`
+- `OPENAI_MODEL` / `DCLAW_OPENAI_MODEL`
+- `OPENAI_BASE_URL` / `DCLAW_OPENAI_BASE_URL`
+- `OPENAI_API_STYLE` / `DCLAW_OPENAI_API_STYLE`
+
+其中 `openai` provider 当前同时支持两种请求风格：
+
+- `responses`
+- `chat-completions`
+
+默认会优先根据 `OPENAI_API_STYLE` 显式配置判断；未配置时会按 base URL 和 `MODEL_PROVIDER=openai-compatible` 做兼容推断。
+
+模型 token limit 采用“内置默认值 + 覆盖”的方式：
+
+- 全局覆盖：
+  - `DCLAW_MAX_CONTEXT_TOKENS`
+  - `DCLAW_MAX_OUTPUT_TOKENS`
+  - `DCLAW_MAX_OUTPUT_TOKENS_UPPER_LIMIT`
+- 模型级覆盖：
+  - `DCLAW_MODEL_LIMITS_JSON`
+  - `DCLAW_MODEL_LIMITS_FILE`
+  - 默认文件路径：`~/.dclaw/model-limits.json`
+
+示例：
+
+```json
+{
+  "providers": {
+    "openai": {
+      "gpt-5": {
+        "contextWindow": 900000,
+        "maxOutputTokens": 96000,
+        "maxOutputTokensUpperLimit": 128000
+      }
+    }
+  }
+}
+```
+
+可用以下命令查看当前 provider、默认模型和解析后的 token limit：
+
+```bash
+npm run start -- --doctor --provider openai
+```
+
+当前内置也补了一批兼容模型的默认 limits，`openai` 和 `anthropic` 两侧都可直接使用这些模型名：
+
+- `MiniMax`: `minimax-m2.7`, `minimax-m2.5`, `minimax-m2`
+- `Moonshot / Kimi`: `kimi-k2.5`, `kimi-k2`
+- `Zhipu / GLM`: `glm-4.5`, `glm-4.5-air`, `glm-4.5-flash`
+
+## Streaming 与 SSE
+
+`dclaw` 现在支持基础流式返回：
+
+- `--stream`：直接输出文本增量
+- `--output-format sse`：按 SSE 事件格式输出
+
+SSE 模式下当前会输出：
+
+- `assistant.delta`
+- `tool.use`
+- `tool.result`
+- `response.complete`
+
+示例：
+
+```bash
+npm run start -- --print --provider openai --output-format sse "Reply with exactly: ok"
 ```

@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "eventsource-parser": "^3.0.6",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }

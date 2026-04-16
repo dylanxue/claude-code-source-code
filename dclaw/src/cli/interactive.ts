@@ -42,6 +42,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     `provider: ${command.options.provider}`,
     `model: ${command.options.model ?? 'default'}`,
     `permission mode: ${command.options.permissionMode}`,
+    `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
   ]
 
   if (command.options.systemPrompt) {
@@ -60,6 +61,19 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
 
   lines.push('')
   if (command.prompt) {
+    if (command.options.stream) {
+      process.stdout.write(lines.join('\n') + '\n')
+      const result = await engine.submitUserPromptWithHandlers(command.prompt, {
+        onTextDelta(text) {
+          process.stdout.write(text)
+        },
+      })
+      if (!result.outputText.endsWith('\n')) {
+        process.stdout.write('\n')
+      }
+      return
+    }
+
     const result = await engine.submitUserPrompt(command.prompt)
     lines.push('assistant response:')
     lines.push(result.outputText)
