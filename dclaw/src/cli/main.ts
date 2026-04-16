@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { loadEnvFiles } from '../llm/env.js'
+import { getCliErrorOutput } from './errorFormatting.js'
 import { runDoctor } from './doctor.js'
 import { runHeadless } from './headless.js'
 import { runHistory } from './history.js'
@@ -61,10 +62,12 @@ async function dispatch(command: ParsedCliCommand): Promise<void> {
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
+  let command: ParsedCliCommand | undefined
+
   try {
     loadEnvFiles(process.cwd())
     const parsed = parseArgs(argv)
-    const command = await resolvePrompt(parsed)
+    command = await resolvePrompt(parsed)
     await dispatch(command)
   } catch (error) {
     if (error instanceof CliArgumentError) {
@@ -81,11 +84,25 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return
     }
 
-    const message =
-      error instanceof Error ? error.message : 'Unknown CLI failure'
-    process.stderr.write(`CLI failed: ${message}\n`)
+    const output = getCliErrorOutput(command, error)
+    if (output.stream === 'stdout') {
+      process.stdout.write(output.text)
+    } else {
+      process.stderr.write(output.text)
+    }
     process.exitCode = 1
   }
 }
 
-void main()
+function isDirectExecution(): boolean {
+  const argv1 = process.argv[1]
+  if (!argv1) {
+    return false
+  }
+
+  return import.meta.url === pathToFileURL(argv1).href
+}
+
+if (isDirectExecution()) {
+  void main()
+}

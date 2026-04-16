@@ -25,8 +25,10 @@ function normalizeBooleanEnv(value: string | undefined): boolean {
   return normalized === '1' || normalized === 'true' || normalized === 'yes'
 }
 
-export function shouldEnableQueryTrace(verbose: boolean): boolean {
-  return verbose || normalizeBooleanEnv(process.env.DCLAW_QUERY_TRACE)
+export function shouldEnableQueryTrace(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return normalizeBooleanEnv(env.DCLAW_QUERY_TRACE)
 }
 
 export function createQueryTraceFilePath(

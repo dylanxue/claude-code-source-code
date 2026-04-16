@@ -52,6 +52,25 @@ test('runResume prints restored transcript when no prompt is provided', async ()
             input: { file_path: '/tmp/example.txt' },
           },
         ]),
+        createMessage('user', [
+          {
+            type: 'tool_result',
+            toolUseId: 'tool_1',
+            output: {
+              type: 'persisted_tool_result',
+              toolName: 'Read',
+              summary: 'Read output persisted',
+              filepath: '/tmp/dclaw/tool-results/read.txt',
+              originalSizeChars: 123456,
+              preview: 'preview',
+              truncated: true,
+            },
+            rawOutput: {
+              ok: true,
+              summary: 'Read /tmp/example.txt',
+            },
+          },
+        ]),
       ],
       env,
     )
@@ -63,8 +82,8 @@ test('runResume prints restored transcript when no prompt is provided', async ()
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        outputFormat: 'text',
         verbose: false,
+        outputFormat: 'text',
       },
     })
   } finally {
@@ -74,9 +93,22 @@ test('runResume prints restored transcript when no prompt is provided', async ()
   }
 
   const text = output.join('')
+  assert.match(text, /persisted tool results: 1/)
+  assert.match(
+    text,
+    /last persisted tool result: \/tmp\/dclaw\/tool-results\/read\.txt/,
+  )
   assert.match(text, /restored transcript:/)
   assert.match(text, /user: Inspect the file/)
   assert.match(text, /assistant: Need to inspect first\./)
   assert.match(text, /\[reasoning\] Inspect before using Read\./)
   assert.match(text, /\[tool use\] Read /)
+  assert.match(
+    text,
+    /tool result \(tool_1\): Read \/tmp\/example\.txt \[model output persisted to \/tmp\/dclaw\/tool-results\/read\.txt\]/,
+  )
+  assert.match(
+    text,
+    /Interactive REPL requires a TTY when no prompt is provided\./,
+  )
 })

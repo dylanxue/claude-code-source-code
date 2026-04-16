@@ -1,4 +1,5 @@
 import type { LlmProviderName } from '../llm/providerNames.js'
+import type { PermissionMode } from '../types/tool.js'
 
 export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume' | 'history'
 
@@ -6,11 +7,11 @@ export type CommonCliOptions = {
   cwd: string
   model?: string
   provider?: LlmProviderName
-  permissionMode: 'default' | 'accept-edits' | 'bypass-permissions' | 'plan'
+  permissionMode?: PermissionMode
   systemPrompt?: string
   stream: boolean
-  outputFormat: 'text' | 'sse'
   verbose: boolean
+  outputFormat: 'text' | 'sse'
 }
 
 export type InteractiveCommand = {

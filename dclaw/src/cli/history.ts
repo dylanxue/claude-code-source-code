@@ -33,8 +33,15 @@ export async function runHistory(command: HistoryCommand): Promise<void> {
     if (session.lastBashSandboxMode) {
       lines.push(`   last bash sandbox: ${session.lastBashSandboxMode}`)
     }
-    if (command.options.verbose) {
-      lines.push(`   resume: dclaw resume ${session.meta.sessionId}`)
+    if (session.persistedToolResultCount > 0) {
+      lines.push(
+        `   persisted tool results: ${session.persistedToolResultCount}`,
+      )
+      if (session.lastPersistedToolResultPath) {
+        lines.push(
+          `   last persisted tool result: ${session.lastPersistedToolResultPath}`,
+        )
+      }
     }
     if (index < sessions.length - 1) {
       lines.push('')

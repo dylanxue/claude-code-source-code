@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getBackgroundTasksDir,
+  getDclawConfigPath,
   getDclawHomeDir,
   getQueryTracesDir,
   getSessionsDir,
@@ -55,4 +56,14 @@ test('query trace, background tasks, and tool results use configured DCLAW_HOME'
   assert.equal(getQueryTracesDir(env), '/tmp/dev-dclaw/query-traces')
   assert.equal(getBackgroundTasksDir(env), '/tmp/dev-dclaw/background-tasks')
   assert.equal(getToolResultsDir(env), '/tmp/dev-dclaw/tool-results')
+})
+
+test('getDclawConfigPath uses configured DCLAW_HOME', () => {
+  assert.equal(
+    getDclawConfigPath({
+      HOME: '/tmp/example-home',
+      DCLAW_HOME: '/tmp/dev-dclaw',
+    } as NodeJS.ProcessEnv),
+    '/tmp/dev-dclaw/config.json',
+  )
 })

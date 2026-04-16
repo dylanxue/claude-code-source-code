@@ -9,6 +9,7 @@ export interface Tool<I = unknown, O = unknown> {
   description: string
   inputSchema: Record<string, unknown>
   outputSchema?: Record<string, unknown>
+  maxResultSizeChars: number
   call(input: I, context: ToolContext): Promise<ToolResult<O>>
   mapToolResult(result: ToolResult<O>): unknown
   validate(
@@ -20,6 +21,7 @@ export interface Tool<I = unknown, O = unknown> {
 }
 
 type DefaultableToolKeys =
+  | 'maxResultSizeChars'
   | 'mapToolResult'
   | 'validate'
   | 'isEnabled'
@@ -32,6 +34,7 @@ export type ToolDef<I = unknown, O = unknown> = Omit<
   Partial<Pick<Tool<I, O>, DefaultableToolKeys>>
 
 const TOOL_DEFAULTS = {
+  maxResultSizeChars: Number.POSITIVE_INFINITY,
   mapToolResult: <O>(result: ToolResult<O>): unknown => result.output,
   validate: (
     _input?: unknown,

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import type { Message } from '../types/message.js'
 import {
   getSessionDir,
@@ -10,6 +11,14 @@ import {
 
 export type SessionMode = 'interactive' | 'print'
 
+export type SessionPersistedToolResultRecord = {
+  toolUseId: string
+  toolName: string
+  filepath: string
+  originalSizeChars: number
+  recordedAt: string
+}
+
 export type SessionMeta = {
   sessionId: string
   cwd: string
@@ -18,6 +27,7 @@ export type SessionMeta = {
   model?: string
   createdAt: string
   updatedAt: string
+  persistedToolResults: SessionPersistedToolResultRecord[]
 }
 
 export type CreateSessionInput = {
@@ -40,6 +50,41 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
   } catch {
     return null
   }
+}
+
+function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
+  return {
+    ...meta,
+    persistedToolResults: Array.isArray(meta.persistedToolResults)
+      ? meta.persistedToolResults
+      : [],
+  }
+}
+
+function collectPersistedToolResultRecords(
+  messages: Message[],
+  recordedAt: string,
+): SessionPersistedToolResultRecord[] {
+  const records: SessionPersistedToolResultRecord[] = []
+
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (
+        block.type === 'tool_result' &&
+        isPersistedToolResultOutput(block.output)
+      ) {
+        records.push({
+          toolUseId: block.toolUseId,
+          toolName: block.output.toolName,
+          filepath: block.output.filepath,
+          originalSizeChars: block.output.originalSizeChars,
+          recordedAt,
+        })
+      }
+    }
+  }
+
+  return records
 }
 
 async function writeSessionMeta(
@@ -83,6 +128,7 @@ export async function createSession(
     model: input.model,
     createdAt: now,
     updatedAt: now,
+    persistedToolResults: [],
   }
 
   await writeSessionMeta(meta, env)
@@ -94,7 +140,8 @@ export async function loadSessionMeta(
   sessionId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SessionMeta | null> {
-  return readJsonFile<SessionMeta>(getSessionMetaPath(sessionId, env))
+  const meta = await readJsonFile<SessionMeta>(getSessionMetaPath(sessionId, env))
+  return meta ? normalizeSessionMeta(meta) : null
 }
 
 export async function loadSessionMessages(
@@ -131,10 +178,17 @@ export async function appendSessionMessages(
     return
   }
 
+  const now = new Date().toISOString()
+  const persistedToolResults = collectPersistedToolResultRecords(messages, now)
+
   await writeSessionMeta(
     {
       ...meta,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      persistedToolResults: [
+        ...meta.persistedToolResults,
+        ...persistedToolResults,
+      ],
     },
     env,
   )

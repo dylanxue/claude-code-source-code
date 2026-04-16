@@ -48,6 +48,15 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
             type: 'tool_result',
             toolUseId: 'tool_1',
             output: {
+              type: 'persisted_tool_result',
+              toolName: 'Read',
+              summary: 'Read output persisted',
+              filepath: '/tmp/dclaw/tool-results/read.txt',
+              originalSizeChars: 123456,
+              preview: 'hello',
+              truncated: true,
+            },
+            rawOutput: {
               ok: true,
               summary: 'Ran pwd',
               output: {
@@ -67,7 +76,13 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
     assert.equal(sessions[0]?.lastUserText, 'second')
     assert.equal(sessions[0]?.lastAssistantText, '[tool use] Read')
     assert.equal(sessions[0]?.lastBashSandboxMode, 'restricted')
+    assert.equal(sessions[0]?.persistedToolResultCount, 1)
+    assert.equal(
+      sessions[0]?.lastPersistedToolResultPath,
+      '/tmp/dclaw/tool-results/read.txt',
+    )
     assert.equal(sessions[1]?.meta.sessionId, 'session-one')
+    assert.equal(sessions[1]?.persistedToolResultCount, 0)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }
@@ -113,6 +128,15 @@ test('runHistory prints recent sessions', async () => {
             type: 'tool_result',
             toolUseId: 'tool_2',
             output: {
+              type: 'persisted_tool_result',
+              toolName: 'Bash',
+              summary: 'Bash output persisted',
+              filepath: '/tmp/dclaw/tool-results/bash.txt',
+              originalSizeChars: 654321,
+              preview: 'preview',
+              truncated: true,
+            },
+            rawOutput: {
               ok: true,
               summary: 'Ran Bash',
               output: {
@@ -131,8 +155,8 @@ test('runHistory prints recent sessions', async () => {
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
+        verbose: false,
         outputFormat: 'text',
-        verbose: true,
       },
     })
   } finally {
@@ -147,5 +171,9 @@ test('runHistory prints recent sessions', async () => {
   assert.match(text, /last user: Inspect the file/)
   assert.match(text, /last assistant: \[reasoning\] Inspect before using Read\./)
   assert.match(text, /last bash sandbox: danger-full-access/)
-  assert.match(text, /resume: dclaw resume session-history/)
+  assert.match(text, /persisted tool results: 1/)
+  assert.match(
+    text,
+    /last persisted tool result: \/tmp\/dclaw\/tool-results\/bash\.txt/,
+  )
 })

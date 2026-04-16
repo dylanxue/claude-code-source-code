@@ -2,6 +2,24 @@
 
 ## 2026-04-16
 
+- 对照本仓库内 Claude Code 源码，补查“大工具结果处理”链路，结论先落文档：
+  - Claude Code 有统一的 tool result budget / persistence，不只依赖工具各自截断
+  - query loop 在真正发请求前会先执行消息级 budget，超阈值结果会落盘并替换成文件引用 + preview
+  - `dclaw` 当前还没有这层统一预算；provider 发送给模型的仍是 `tool_result.output` 的直接序列化
+  - `Bash` 目前只有工具内局部大输出落盘，`Read` 仍是主要大结果风险点，`Grep` / fallback 搜索仍缺默认排除目录
+- 基于上述对照，明确下一批优先级：
+  - 在 `queryLoop` 发请求前增加统一的 tool result budget / persistence
+  - 为 Tool 协议补 `maxResultSizeChars` 一类结果体积元信息
+  - 单独收紧 `Read` 的默认读取边界
+  - 为 `Grep` / fallback 搜索补默认排除目录，但文档结论需保持严格：Claude Code 目前源码里能明确确认的是 VCS 目录排除、ignore 规则接入和 ripgrep 默认 ignore，不额外宣称其内建了完整常见构建目录名单
+  - 后续实现继续优先参考本仓库内 Claude Code 源码，不额外猜测产品行为
+- 回看当前实现后，修正文档里已经过时的判断：
+  - `src/core/toolResultBudget.ts` 与 `src/core/queryLoop.ts` 已经接入统一的 tool result budget / persistence
+  - Tool 已具备 `maxResultSizeChars`，并且单轮内多个 `tool_result` 已有 aggregate budget
+  - 超大 tool result 已会被替换成“落盘 + 文件引用 + preview”的模型侧输出，同时在 transcript / session 中保留原始结果或落盘记录
+  - `Read` 已阻止超大文件在未指定 `limit` 时整段返回；`Grep / Glob` 与 fallback 搜索也已补上第一轮默认排除目录，并在显式目标路径下允许继续搜索这些目录
+  - 这条线剩余的重点不再是“从 0 到 1 补 budget”，而是把现有首版实现继续推进到更可配置、模型感知、并能接到更广上下文 compact 的形态
+
 - 继续收口阶段 5 的 Tool 协议与核心工具语义：
   - 将 Tool 协议收紧为轻量版 `buildTool`
   - 统一默认 `validate / isEnabled / isReadOnly`
@@ -202,6 +220,145 @@
   - `npm run check`
   - `npm test`
   - 当前共 44 条测试，全部通过
+
+- 继续对照本仓库内 Claude Code 源码，收口 provider 重试、限流与错误语义：
+  - `src/llm/providerUtils.ts`
+  - `src/llm/providers/anthropic.ts`
+  - `src/llm/providers/openai.ts`
+- 为 `Anthropic` 与 `OpenAI` provider 补上统一重试入口：
+  - 默认 `maxRetries = 2`，总尝试次数最多 3 次
+  - 支持环境变量 `DCLAW_LLM_MAX_RETRIES` 与 client 构造参数覆盖
+  - 默认重试 `408 / 409 / 429 / 529 / 5xx`
+  - 默认将瞬时网络 `TypeError` 视为可重试错误
+  - `AbortError` 与显式 `NonRetryableError` 不重试
+- 为重试策略补上更接近 Claude Code 的服务端优先规则：
+  - 优先尊重 `x-should-retry`
+  - 优先尊重 `Retry-After`
+  - `Anthropic 429` 优先使用 `anthropic-ratelimit-unified-reset`
+  - 默认退避为 `500ms` 起步的指数退避，最大 `8s`，附加最多 25% 抖动
+- 将流式请求的自动重试收紧为仅在收到首个 SSE 事件前允许重放，避免重复文本与重复 tool call
+- 继续补齐 `OpenAI Responses API` 的流式事件兼容：
+  - `response.output_text.*`
+  - `response.reasoning_summary_text.*`
+  - `response.function_call_arguments.*`
+  - `response.output_item.*`
+  - `response.done` 回退收尾
+- 为 provider 错误补上结构化分类与细节字段：
+  - `kind`
+  - `errorType`
+  - `errorCode`
+  - `retryDirective`
+  - 当前稳定区分：`auth / rate_limit / overloaded / bad_request / server_error / network / unknown`
+- 为 CLI 补上统一错误格式化出口：
+  - 新增 `src/cli/errorFormatting.ts`
+  - 普通模式输出结构化 stderr 前缀
+  - `--print --output-format sse` 输出 `response.error`
+- 将 `src/cli/main.ts` 收紧为仅在直接执行时才 `void main()`，避免导入测试时副作用运行
+- 为 CLI 失败路径补上子进程级集成测试：
+  - `test/unit/error-formatting.test.ts`
+  - `test/unit/main.test.ts`
+  - 覆盖普通 stderr 与 SSE `response.error` 两条真实命令出口
+- 扩展与新增 provider 相关测试：
+  - `test/unit/openai.test.ts`
+  - `test/unit/anthropic.test.ts`
+  - `test/unit/anthropic-stream.test.ts`
+  - `test/unit/error-formatting.test.ts`
+  - `test/unit/main.test.ts`
+- 当前 provider 阶段性结论：
+  - `Anthropic / OpenAI` 的真实请求、基础 streaming、重试/限流、结构化错误、CLI/SSE 错误出口，以及 `OpenAI Responses API` 的关键参数与关键事件兼容已经达到 `v0.1` 阶段可用线
+  - provider 剩余深化项暂不继续抢主线优先级，统一下调到 `v0.2+ / 低优先级`
+  - 下调项包括：`Anthropic` 更细错误语义与更长等待策略、`OpenAI Responses API` 更多参数/更多 output 类型/更广事件覆盖、以及 annotation/specialized output 在 transcript / verbose / headless 展示层的进一步接入
+- 验证：
+  - `npm test -- --run dclaw/test/unit/openai.test.ts dclaw/test/unit/anthropic.test.ts dclaw/test/unit/anthropic-stream.test.ts`
+  - `npm test -- --run dclaw/test/unit/error-formatting.test.ts`
+  - `npm test -- --run dclaw/test/unit/main.test.ts dclaw/test/unit/history.test.ts`
+  - `npm run typecheck`
+
+- 明确 provider 下一优先级：
+  - 先补齐 `OpenAI Responses API` 的 `verbosity`
+  - 再补更多 request 参数与更广的事件覆盖
+  - 实现时继续优先参考仓库内 Claude Code 的 provider 适配思路，并在必要处对照 OpenAI 官方文档确认字段形态
+
+- 继续细化 `OpenAI Responses API` 参数面与流式兼容：
+  - 在 `src/llm/types.ts` 中增加 `providerOptions.openai`
+  - 为 `OpenAI` provider 接入首批更细 request 参数：
+    - `text.verbosity`
+    - `reasoning.effort`
+    - `store`
+    - `previous_response_id`
+    - `parallel_tool_calls`
+    - `max_tool_calls`
+  - 增加 `DCLAW_OPENAI_VERBOSITY` / `OPENAI_VERBOSITY`
+  - 增加 `DCLAW_OPENAI_REASONING_EFFORT` / `OPENAI_REASONING_EFFORT`
+  - 增加 `DCLAW_OPENAI_STORE` / `OPENAI_STORE`
+  - 为 Responses 流式回放补上基于 `response.output_item.*` 的 message item 文本回退路径，避免只依赖 `response.output_text.*`
+- 继续补测试：
+  - `test/unit/openai.test.ts`
+  - 验证 env 默认值解析
+  - 验证 request 级 OpenAI options 会真实进入 `/responses` body
+  - 验证 message item 流式输出在没有 `response.output_text.delta` 时也能回退生成 assistant 文本
+- 参考：
+  - 仓库内 Claude Code 的 provider 适配与重试实现
+  - OpenAI 官方文档的 Responses 迁移指南与模型文档，用于确认 `Responses API` 顶层形态、`store` 语义与 GPT-5 推理相关配置能力
+- 验证：
+  - `npm test -- --run dclaw/test/unit/openai.test.ts`
+  - `npm run typecheck`
+
+- 继续扩展 `OpenAI Responses API` 的流式事件覆盖：
+  - 补上 `response.content_part.added`
+  - 补上 `response.content_part.done`
+  - 补上 `response.refusal.delta`
+  - 补上 `response.refusal.done`
+  - 让 message item 中的 `refusal` 内容也能回退成 assistant 文本，而不是只识别 `output_text`
+- 扩展测试：
+  - `test/unit/openai.test.ts`
+  - 验证 `content_part` 流式事件在没有 `output_text.delta` 时也能正确生成文本
+  - 验证 `refusal` 流式事件能正确累积并形成最终 assistant 文本
+- 验证：
+  - `npm test -- --run dclaw/test/unit/openai.test.ts`
+  - `npm run typecheck`
+
+- 继续扩展 `OpenAI Responses API` 的第二批 request 参数支持：
+  - `include`
+  - `truncation`
+  - `metadata`
+  - `text.format`
+- 将上述新事件真正接到流式文本输出：
+  - `response.content_part.added` 现在会实时触发文本 delta
+  - `response.refusal.delta` 现在会实时触发文本 delta
+  - `done` 事件仅在前面没有增量输出时才回退补发，避免重复文本
+- 顺手收紧测试：
+  - `test/unit/main.test.ts` 更新到当前 CLI 错误上下文输出形态
+- 验证：
+  - `npm test -- --run dclaw/test/unit/openai.test.ts dclaw/test/unit/main.test.ts`
+  - `npm run typecheck`
+
+- 继续扩展 `OpenAI Responses API` 的 annotation 保留链路：
+  - 在 `src/types/message.ts` 的 `text` block 上增加 `annotations`
+  - 非流式保留 `output_text.annotations`
+  - 流式保留 `response.output_text.annotation.added`
+  - 最终 assistant message 中的文本块可携带 annotation 元数据，而不只是纯字符串
+- 当前 provider 阶段性进展总结：
+  - `Anthropic` 与 `OpenAI` 均已支持真实请求、基础 streaming、工具调用映射与 model limits
+  - provider 层已补齐基础重试、限流处理、服务端重试指令、结构化错误分类与 CLI/SSE 错误出口
+  - `OpenAI Responses API` 已具备两批 request 参数支持，以及一批关键流式事件兼容：
+    - `response.output_text.*`
+    - `response.output_text.annotation.added`
+    - `response.content_part.*`
+    - `response.refusal.*`
+    - `response.reasoning_summary_text.*`
+    - `response.function_call_arguments.*`
+    - `response.output_item.*`
+    - `response.done`
+    - `response.completed`
+  - 当前主要剩余缺口：
+    - 更多 Responses request 参数
+    - 更多 output item / specialized output 类型
+    - 更广的事件覆盖
+    - 将 text annotation 继续接到 transcript / verbose / headless 展示层
+- 验证：
+  - `npm test -- --run dclaw/test/unit/openai.test.ts`
+  - `npm run typecheck`
 
 ## 2026-04-15
 

@@ -6,9 +6,14 @@ import {
 } from '../../types/message.js'
 import { resolveModelLimits } from '../modelLimits.js'
 import {
-  getHttpErrorMessage,
+  getAnthropicRateLimitResetDelayMs,
+  getHttpErrorDetails,
+  NonRetryableError,
   readSseEvents,
+  RetryableHttpError,
+  type SleepImpl,
   stringifyJson,
+  withRetry,
   type SseEvent,
 } from '../providerUtils.js'
 import {
@@ -152,6 +157,9 @@ export type AnthropicLlmClientOptions = {
   defaultModel?: string
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
+  maxRetries?: number
+  sleepImpl?: SleepImpl
+  nowImpl?: () => number
 }
 
 function stringifyToolResultOutput(value: unknown): string {
@@ -278,10 +286,6 @@ function parseAnthropicContent(
   return content
 }
 
-async function getErrorMessage(response: Response): Promise<string> {
-  return getHttpErrorMessage(response)
-}
-
 export class AnthropicLlmClient implements LlmClient {
   readonly providerName = 'anthropic'
 
@@ -290,6 +294,9 @@ export class AnthropicLlmClient implements LlmClient {
   private readonly defaultModel?: string
   private readonly fetchImpl: typeof fetch
   private readonly env: NodeJS.ProcessEnv
+  private readonly maxRetries: number
+  private readonly sleepImpl?: SleepImpl
+  private readonly nowImpl: () => number
 
   constructor(options: AnthropicLlmClientOptions = {}) {
     const config = resolveAnthropicProviderConfig(options.env)
@@ -298,44 +305,35 @@ export class AnthropicLlmClient implements LlmClient {
     this.defaultModel = options.defaultModel ?? config.defaultModel
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
+    this.maxRetries = options.maxRetries ?? getMaxRetriesFromEnv(this.env)
+    this.sleepImpl = options.sleepImpl
+    this.nowImpl = options.nowImpl ?? Date.now
   }
 
   async createMessage(
     request: CreateMessageRequest,
   ): Promise<CreateMessageResponse> {
-    if (!this.apiKey) {
-      throw new Error(
-        'Anthropic API key is required. Set ANTHROPIC_API_KEY or DCLAW_ANTHROPIC_API_KEY.',
-      )
-    }
+    const { model, limits } = this.resolveRequestContext(request)
+    const parsed = await this.withRetry(async () => {
+      const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.apiKey!,
+          'anthropic-version': ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify(
+          this.buildRequestBody(request, model, limits.maxOutputTokens),
+        ),
+      })
 
-    const { model } = resolveModelSelection(request.model, this.defaultModel)
-    if (!model) {
-      throw new Error(
-        'Anthropic model is required. Pass --model or set ANTHROPIC_MODEL / DCLAW_ANTHROPIC_MODEL.',
-      )
-    }
+      if (!response.ok) {
+        throw await this.createRequestError(response)
+      }
 
-    const limits = resolveModelLimits('anthropic', model, this.env)
-
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify(this.buildRequestBody(request, model, limits.maxOutputTokens)),
+      return (await response.json()) as AnthropicResponse
     })
 
-    if (!response.ok) {
-      const message = await getErrorMessage(response)
-      throw new Error(
-        `Anthropic request failed (${response.status} ${response.statusText}): ${message}`,
-      )
-    }
-
-    const parsed = (await response.json()) as AnthropicResponse
     const content = parseAnthropicContent(parsed)
     if (content.length === 0) {
       throw new Error('Anthropic response did not contain supported content blocks')
@@ -350,50 +348,75 @@ export class AnthropicLlmClient implements LlmClient {
     request: CreateMessageRequest,
     callbacks: CreateMessageStreamCallbacks,
   ): Promise<CreateMessageResponse> {
-    if (!this.apiKey) {
-      throw new Error(
-        'Anthropic API key is required. Set ANTHROPIC_API_KEY or DCLAW_ANTHROPIC_API_KEY.',
-      )
-    }
+    const { model, limits } = this.resolveRequestContext(request)
+    return this.withRetry(async () => {
+      const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.apiKey!,
+          'anthropic-version': ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+          ...this.buildRequestBody(request, model, limits.maxOutputTokens),
+          stream: true,
+        }),
+      })
 
-    const { model } = resolveModelSelection(request.model, this.defaultModel)
-    if (!model) {
-      throw new Error(
-        'Anthropic model is required. Pass --model or set ANTHROPIC_MODEL / DCLAW_ANTHROPIC_MODEL.',
-      )
-    }
-
-    const limits = resolveModelLimits('anthropic', model, this.env)
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        ...this.buildRequestBody(request, model, limits.maxOutputTokens),
-        stream: true,
-      }),
-    })
-
-    if (!response.ok) {
-      const message = await getErrorMessage(response)
-      throw new Error(
-        `Anthropic request failed (${response.status} ${response.statusText}): ${message}`,
-      )
-    }
-
-    const blocks: StreamingAnthropicBlockState[] = []
-    await readSseEvents(response, (event: SseEvent) => {
-      if (event.data === '[DONE]') {
-        return
+      if (!response.ok) {
+        throw await this.createRequestError(response)
       }
 
-      this.applyStreamEvent(blocks, callbacks, event)
-    })
+      const blocks: StreamingAnthropicBlockState[] = []
+      let sawStreamEvent = false
+      try {
+        await readSseEvents(response, (event: SseEvent) => {
+          if (event.data === '[DONE]') {
+            return
+          }
 
+          sawStreamEvent = true
+          this.applyStreamEvent(blocks, callbacks, event)
+        })
+      } catch (error) {
+        if (sawStreamEvent) {
+          throw new NonRetryableError(error)
+        }
+        throw error
+      }
+
+      const content = this.buildStreamingContent(blocks)
+      if (content.length === 0) {
+        throw new Error('Anthropic streaming response did not contain supported content')
+      }
+
+      return {
+        message: createMessage('assistant', content),
+      }
+    })
+  }
+
+  private buildRequestBody(
+    request: CreateMessageRequest,
+    model: string,
+    maxTokens: number,
+  ): AnthropicRequestBody {
+    return {
+      model,
+      max_tokens: maxTokens,
+      system: request.systemPrompt,
+      messages: request.messages
+        .filter(message => message.role !== 'system')
+        .map(toAnthropicMessage),
+      tools: toAnthropicTools(request.tools),
+    }
+  }
+
+  private buildStreamingContent(
+    blocks: StreamingAnthropicBlockState[],
+  ): ContentBlock[] {
     const content: ContentBlock[] = []
+
     for (const block of blocks) {
       if (!block) {
         continue
@@ -445,29 +468,59 @@ export class AnthropicLlmClient implements LlmClient {
       }
     }
 
-    if (content.length === 0) {
-      throw new Error('Anthropic streaming response did not contain supported content')
+    return content
+  }
+
+  private async createRequestError(response: Response): Promise<RetryableHttpError> {
+    const details = await getHttpErrorDetails(response)
+    return new RetryableHttpError(
+      'Anthropic',
+      response.status,
+      response.statusText,
+      details,
+      response.headers,
+    )
+  }
+
+  private resolveRequestContext(request: CreateMessageRequest): {
+    model: string
+    limits: ReturnType<typeof resolveModelLimits>
+  } {
+    if (!this.apiKey) {
+      throw new Error(
+        'Anthropic API key is required. Set ANTHROPIC_API_KEY or DCLAW_ANTHROPIC_API_KEY, or configure ANTHROPIC_API_KEY in .dclaw/config.json.',
+      )
+    }
+
+    const { model } = resolveModelSelection(request.model, this.defaultModel)
+    if (!model) {
+      throw new Error(
+        'Anthropic model is required. Pass --model or set ANTHROPIC_MODEL / DCLAW_ANTHROPIC_MODEL.',
+      )
     }
 
     return {
-      message: createMessage('assistant', content),
+      model,
+      limits: resolveModelLimits('anthropic', model, this.env),
     }
   }
 
-  private buildRequestBody(
-    request: CreateMessageRequest,
-    model: string,
-    maxTokens: number,
-  ): AnthropicRequestBody {
-    return {
-      model,
-      max_tokens: maxTokens,
-      system: request.systemPrompt,
-      messages: request.messages
-        .filter(message => message.role !== 'system')
-        .map(toAnthropicMessage),
-      tools: toAnthropicTools(request.tools),
-    }
+  private withRetry<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
+    return withRetry(operation, {
+      maxRetries: this.maxRetries,
+      sleepImpl: this.sleepImpl,
+      getDelayMs: error => {
+        if (!(error instanceof RetryableHttpError) || error.status !== 429) {
+          return undefined
+        }
+
+        const resetDelayMs = getAnthropicRateLimitResetDelayMs(
+          error.headers,
+          this.nowImpl(),
+        )
+        return resetDelayMs ?? undefined
+      },
+    })
   }
 
   private applyStreamEvent(
@@ -492,6 +545,9 @@ export class AnthropicLlmClient implements LlmClient {
           type: 'text',
           text: contentBlock.text ?? '',
         }
+        if (typeof contentBlock.text === 'string' && contentBlock.text.length > 0) {
+          callbacks.onTextDelta?.(contentBlock.text)
+        }
       }
 
       if (contentBlock.type === 'tool_use') {
@@ -509,6 +565,15 @@ export class AnthropicLlmClient implements LlmClient {
           type: 'thinking',
           thinking: contentBlock.thinking ?? '',
           signature: contentBlock.signature,
+        }
+        if (
+          typeof contentBlock.thinking === 'string' &&
+          contentBlock.thinking.length > 0
+        ) {
+          callbacks.onReasoningDelta?.({
+            kind: 'thinking',
+            text: contentBlock.thinking,
+          })
         }
       }
 
@@ -543,6 +608,10 @@ export class AnthropicLlmClient implements LlmClient {
         typeof delta.thinking === 'string'
       ) {
         block.thinking += delta.thinking
+        callbacks.onReasoningDelta?.({
+          kind: 'thinking',
+          text: delta.thinking,
+        })
       }
 
       if (
@@ -562,4 +631,18 @@ export class AnthropicLlmClient implements LlmClient {
       }
     }
   }
+}
+
+function getMaxRetriesFromEnv(env: NodeJS.ProcessEnv): number {
+  const raw = env.DCLAW_LLM_MAX_RETRIES
+  if (!raw) {
+    return 2
+  }
+
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 2
+  }
+
+  return Math.floor(parsed)
 }

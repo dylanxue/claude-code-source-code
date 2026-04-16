@@ -1,4 +1,8 @@
 import type { Message } from '../types/message.js'
+import {
+  isPersistedToolResultOutput,
+  type PersistedToolResultOutput,
+} from '../core/toolResultBudget.js'
 
 export type FormatTranscriptOptions = {
   includeThinking?: boolean
@@ -28,9 +32,13 @@ function summarizeToolResult(output: unknown): string {
     const candidate = output as {
       summary?: unknown
       error?: unknown
+      filepath?: unknown
       output?: {
         sandboxMode?: unknown
       }
+    }
+    if (isPersistedToolResultOutput(output)) {
+      return `persisted large tool result -> ${output.filepath}`
     }
     const sandboxSuffix =
       typeof candidate.output?.sandboxMode === 'string'
@@ -64,8 +72,11 @@ function formatMessage(message: Message, includeThinking: boolean): string[] {
       if (block.type !== 'tool_result') {
         continue
       }
+      const persistedSuffix = isPersistedToolResultOutput(block.output)
+        ? ` [model output persisted to ${(block.output as PersistedToolResultOutput).filepath}]`
+        : ''
       lines.push(
-        `tool result (${block.toolUseId}): ${summarizeToolResult(block.rawOutput ?? block.output)}`,
+        `tool result (${block.toolUseId}): ${summarizeToolResult(block.rawOutput ?? block.output)}${persistedSuffix}`,
       )
     }
 

@@ -4,7 +4,12 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
-import { fallbackGrep, type FallbackGrepMatch } from './fileSearch.js'
+import {
+  DEFAULT_EXCLUDED_SEARCH_DIRECTORIES,
+  fallbackGrep,
+  shouldApplyDefaultSearchExclusions,
+  type FallbackGrepMatch,
+} from './fileSearch.js'
 import {
   isAbsoluteToolPath,
   toAbsoluteToolPath,
@@ -359,6 +364,7 @@ function shapeFallbackGrepOutput(
 export const grepTool: Tool<GrepToolInput, GrepToolOutput> = buildTool({
   name: 'Grep',
   description: 'Search file contents with regex.',
+  maxResultSizeChars: 20_000,
   inputSchema: {
     type: 'object',
     properties: {
@@ -522,6 +528,12 @@ export const grepTool: Tool<GrepToolInput, GrepToolOutput> = buildTool({
     const searchRoot = getSearchRoot(input.path, context.cwd)
     const args = ['--color', 'never']
     const showLineNumbers = mode === 'content' && input['-n'] !== false
+
+    if (shouldApplyDefaultSearchExclusions(input.path)) {
+      for (const directory of DEFAULT_EXCLUDED_SEARCH_DIRECTORIES) {
+        args.push('--glob', `!${directory}`)
+      }
+    }
 
     if (isTruthy(input['-i'])) {
       args.push('-i')

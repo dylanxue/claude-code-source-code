@@ -1,6 +1,18 @@
+export type TextAnnotation = {
+  type?: string
+  startIndex?: number
+  endIndex?: number
+  title?: string
+  url?: string
+  fileId?: string
+  filename?: string
+  raw?: Record<string, unknown>
+}
+
 export type TextContentBlock = {
   type: 'text'
   text: string
+  annotations?: TextAnnotation[]
 }
 
 export type ThinkingContentBlock = {

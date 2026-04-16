@@ -1,5 +1,12 @@
 import type { LlmClient } from '../llm/types.js'
 import {
+  getProviderErrorKind,
+  getProviderErrorSubtype,
+  type ProviderErrorKind,
+  type ProviderErrorSubtype,
+  stringifyJson,
+} from '../llm/providerUtils.js'
+import {
   createToolResultMessage,
   getTextContent,
   getToolUseBlocks,
@@ -11,6 +18,11 @@ import { evaluateToolPermission } from '../permissions/evaluator.js'
 import type { ToolRegistry } from '../tools/registry.js'
 import { validateJsonSchema } from '../tools/schema.js'
 import type { Tool } from '../tools/types.js'
+import {
+  applyToolResultBudget,
+  type ToolResultBudgetMetadata,
+} from './toolResultBudget.js'
+import { QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
 
 export type QueryLoopRequest = {
@@ -24,6 +36,11 @@ export type QueryLoopRequest = {
   queryTraceSink?: QueryTraceSink
   streamHandlers?: {
     onTextDelta?: (text: string) => void
+    onReasoningDelta?: (delta: {
+      iteration: number
+      kind: 'reasoning' | 'thinking'
+      text: string
+    }) => void
     onAssistantMessage?: (message: {
       iteration: number
       id: string
@@ -41,6 +58,22 @@ export type QueryLoopRequest = {
       toolUseId: string
       output: unknown
     }) => void
+    onLlmError?: (error: {
+      iteration: number
+      streaming: boolean
+      phase: 'before_response' | 'during_stream'
+      kind: ProviderErrorKind
+      subtype: ProviderErrorSubtype
+      errorName?: string
+      message: string
+      streamedTextChars: number
+      streamedReasoningChars: number
+      lastTextDelta?: string
+      lastReasoningDelta?: {
+        kind: 'reasoning' | 'thinking'
+        text: string
+      }
+    }) => void
   }
 }
 
@@ -53,10 +86,7 @@ export type QueryLoopResult = {
 }
 
 function stringifyOutput(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-  return JSON.stringify(value, null, 2)
+  return stringifyJson(value)
 }
 
 function truncateForTrace(value: string, maxLength: number = 2_000): string {
@@ -220,45 +250,116 @@ export async function executeSingleTurn(
       const useStreaming = Boolean(
         request.streamHandlers && request.client.createMessageStream,
       )
+      let streamedTextChars = 0
+      let streamedReasoningChars = 0
+      let lastTextDelta: string | undefined
+      let lastReasoningDelta:
+        | {
+            kind: 'reasoning' | 'thinking'
+            text: string
+          }
+        | undefined
       recordTrace(
         request.queryTraceSink,
         'llm.request',
         {
+          model: request.model ?? 'default',
           streaming: useStreaming,
+          systemPrompt: request.systemPrompt,
           messageCount: workingMessages.length,
+          messages: workingMessages,
           toolNames: toolDefinitions.map(tool => tool.name),
         },
         iteration,
       )
 
-      const streamedResponse =
-        useStreaming
-          ? await request.client.createMessageStream!.call(
-              request.client,
-              {
+      let streamedResponse
+      try {
+        streamedResponse =
+          useStreaming
+            ? await request.client.createMessageStream!.call(
+                request.client,
+                {
+                  model: request.model,
+                  systemPrompt: request.systemPrompt,
+                  messages: workingMessages,
+                  tools: toolDefinitions,
+                },
+                {
+                  onTextDelta: text => {
+                    streamedTextChars += text.length
+                    lastTextDelta = text
+                    recordTrace(
+                      request.queryTraceSink,
+                      'llm.text.delta',
+                      { text },
+                      iteration,
+                    )
+                    request.streamHandlers?.onTextDelta?.(text)
+                  },
+                  onReasoningDelta: delta => {
+                    streamedReasoningChars += delta.text.length
+                    lastReasoningDelta = delta
+                    recordTrace(
+                      request.queryTraceSink,
+                      'llm.reasoning.delta',
+                      {
+                        kind: delta.kind,
+                        text: truncateForTrace(delta.text, 500),
+                      },
+                      iteration,
+                    )
+                    request.streamHandlers?.onReasoningDelta?.({
+                      iteration,
+                      kind: delta.kind,
+                      text: delta.text,
+                    })
+                  },
+                },
+              )
+            : await request.client.createMessage({
                 model: request.model,
                 systemPrompt: request.systemPrompt,
                 messages: workingMessages,
                 tools: toolDefinitions,
-              },
-              {
-                onTextDelta: text => {
-                  recordTrace(
-                    request.queryTraceSink,
-                    'llm.text.delta',
-                    { text },
-                    iteration,
-                  )
-                  request.streamHandlers?.onTextDelta?.(text)
+              })
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown LLM error'
+        const llmError = {
+          iteration,
+          streaming: useStreaming,
+          phase:
+            streamedTextChars > 0 || streamedReasoningChars > 0
+              ? 'during_stream'
+              : 'before_response',
+          kind: getProviderErrorKind(error),
+          subtype: getProviderErrorSubtype(error),
+          errorName: error instanceof Error ? error.name : undefined,
+          message: errorMessage,
+          streamedTextChars,
+          streamedReasoningChars,
+          ...(lastTextDelta === undefined
+            ? {}
+            : { lastTextDelta: truncateForTrace(lastTextDelta, 500) }),
+          ...(lastReasoningDelta === undefined
+            ? {}
+            : {
+                lastReasoningDelta: {
+                  kind: lastReasoningDelta.kind,
+                  text: truncateForTrace(lastReasoningDelta.text, 500),
                 },
-              },
-            )
-          : await request.client.createMessage({
-              model: request.model,
-              systemPrompt: request.systemPrompt,
-              messages: workingMessages,
-              tools: toolDefinitions,
-            })
+              }),
+        } as const
+        recordTrace(
+          request.queryTraceSink,
+          'llm.error',
+          llmError,
+          iteration,
+        )
+        request.streamHandlers?.onLlmError?.(llmError)
+        throw new QueryLoopLlmError(error, llmError)
+      }
       const assistantMessage = streamedResponse.message
       lastAssistantMessage = assistantMessage
       workingMessages.push(assistantMessage)
@@ -276,6 +377,8 @@ export async function executeSingleTurn(
         'llm.response',
         {
           assistantMessage: summarizeMessageForTrace(assistantMessage),
+          fullAssistantMessage: assistantMessage,
+          outputText: getTextContent(assistantMessage),
           toolUseCount: toolUseBlocks.length,
         },
         iteration,
@@ -323,6 +426,7 @@ export async function executeSingleTurn(
       }
 
       const toolResultMessages: Message[] = []
+      const toolResultMetadata = new Map<string, ToolResultBudgetMetadata>()
       for (const block of toolUseBlocks) {
         const tool = request.toolRegistry.get(block.name)
         if (!tool) {
@@ -476,6 +580,10 @@ export async function executeSingleTurn(
             result,
           )
           toolResultMessages.push(toolResultMessage)
+          toolResultMetadata.set(block.id, {
+            toolName: tool.name,
+            maxResultSizeChars: tool.maxResultSizeChars,
+          })
           recordTrace(
             request.queryTraceSink,
             'tool.call.result',
@@ -485,6 +593,8 @@ export async function executeSingleTurn(
               ok: result.ok,
               summary: result.summary,
               sandboxMode: getSandboxModeFromToolOutput(result.output),
+              mappedOutput: mappedResult,
+              result,
               outputPreview: truncateForTrace(stringifyOutput(result.output)),
             },
             iteration,
@@ -519,15 +629,36 @@ export async function executeSingleTurn(
         }
       }
 
-      lastToolResultMessages = toolResultMessages
-      workingMessages.push(...toolResultMessages)
-      addedMessages.push(...toolResultMessages)
+      const budgetedToolResults = await applyToolResultBudget(
+        toolResultMessages,
+        toolResultMetadata,
+      )
+      if (budgetedToolResults.replacements.length > 0) {
+        recordTrace(
+          request.queryTraceSink,
+          'iteration.tool_results.persisted',
+          {
+            count: budgetedToolResults.replacements.length,
+            toolUseIds: budgetedToolResults.replacements.map(
+              replacement => replacement.toolUseId,
+            ),
+            toolNames: budgetedToolResults.replacements.map(
+              replacement => replacement.toolName,
+            ),
+          },
+          iteration,
+        )
+      }
+
+      lastToolResultMessages = budgetedToolResults.messages
+      workingMessages.push(...budgetedToolResults.messages)
+      addedMessages.push(...budgetedToolResults.messages)
       recordTrace(
         request.queryTraceSink,
         'iteration.tool_results',
         {
-          count: toolResultMessages.length,
-          toolUseIds: toolResultMessages
+          count: budgetedToolResults.messages.length,
+          toolUseIds: budgetedToolResults.messages
             .map(message => message.content[0])
             .filter(
               (

@@ -1,9 +1,11 @@
 import { readdir } from 'node:fs/promises'
+import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { getTextContent, type Message } from '../types/message.js'
 import { getSessionsDir } from './paths.js'
 import {
   loadSessionMessages,
   loadSessionMeta,
+  type SessionPersistedToolResultRecord,
   type SessionMeta,
 } from './store.js'
 
@@ -13,6 +15,8 @@ export type SessionHistoryEntry = {
   lastUserText?: string
   lastAssistantText?: string
   lastBashSandboxMode?: string
+  persistedToolResultCount: number
+  lastPersistedToolResultPath?: string
 }
 
 function truncate(value: string, maxLength: number = 120): string {
@@ -74,7 +78,9 @@ function getLastBashSandboxMode(messages: Message[]): string | undefined {
         continue
       }
 
-      const sandboxMode = extractSandboxModeFromToolResult(block.output)
+      const sandboxMode = extractSandboxModeFromToolResult(
+        block.rawOutput ?? block.output,
+      )
       if (sandboxMode) {
         return sandboxMode
       }
@@ -82,6 +88,44 @@ function getLastBashSandboxMode(messages: Message[]): string | undefined {
   }
 
   return undefined
+}
+
+function getPersistedToolResultInfo(messages: Message[]): {
+  count: number
+  lastPath?: string
+} {
+  let count = 0
+  let lastPath: string | undefined
+
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (
+        block.type === 'tool_result' &&
+        isPersistedToolResultOutput(block.output)
+      ) {
+        count += 1
+        lastPath = block.output.filepath
+      }
+    }
+  }
+
+  return { count, lastPath }
+}
+
+function getPersistedToolResultInfoFromMeta(
+  records: SessionPersistedToolResultRecord[] | undefined,
+): {
+  count: number
+  lastPath?: string
+} | null {
+  if (!records || records.length === 0) {
+    return null
+  }
+
+  return {
+    count: records.length,
+    lastPath: records.at(-1)?.filepath,
+  }
 }
 
 function compareUpdatedAtDesc(left: SessionMeta, right: SessionMeta): number {
@@ -115,6 +159,9 @@ export async function listSessionHistory(
   return Promise.all(
     metas.map(async meta => {
       const messages = await loadSessionMessages(meta.sessionId, env)
+      const persistedToolResultInfo =
+        getPersistedToolResultInfoFromMeta(meta.persistedToolResults) ??
+        getPersistedToolResultInfo(messages)
       const lastUserMessage = [...messages]
         .reverse()
         .find(message => message.role === 'user' && hasTextContent(message))
@@ -132,6 +179,8 @@ export async function listSessionHistory(
           ? summarizeMessage(lastAssistantMessage)
           : undefined,
         lastBashSandboxMode: getLastBashSandboxMode(messages),
+        persistedToolResultCount: persistedToolResultInfo.count,
+        lastPersistedToolResultPath: persistedToolResultInfo.lastPath,
       }
     }),
   )

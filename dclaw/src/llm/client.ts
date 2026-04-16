@@ -14,8 +14,8 @@ export function createLlmClient(
     case 'stub':
       return new StubLlmClient()
     case 'anthropic':
-      return new AnthropicLlmClient()
+      return new AnthropicLlmClient({ env })
     case 'openai':
-      return new OpenAiLlmClient()
+      return new OpenAiLlmClient({ env })
   }
 }

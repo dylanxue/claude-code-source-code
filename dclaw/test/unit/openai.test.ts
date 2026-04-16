@@ -7,10 +7,16 @@ import {
   createTextMessage,
   createToolResultMessage,
 } from '../../src/types/message.js'
+import type { PersistedToolResultOutput } from '../../src/core/toolResultBudget.js'
 import {
   OpenAiLlmClient,
   resolveOpenAiConfig,
 } from '../../src/llm/providers/openai.js'
+import {
+  getProviderErrorKind,
+  getProviderErrorSubtype,
+  RetryableHttpError,
+} from '../../src/llm/providerUtils.js'
 
 test('resolveOpenAiConfig reads dclaw env vars first', () => {
   const config = resolveOpenAiConfig({
@@ -27,8 +33,105 @@ test('resolveOpenAiConfig reads dclaw env vars first', () => {
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com/v1',
     defaultModel: 'primary-model',
+    defaultModelSource: 'env',
     apiStyle: 'chat-completions',
+    defaultTextVerbosity: undefined,
+    defaultReasoningEffort: undefined,
+    defaultStore: undefined,
   })
+})
+
+test('resolveOpenAiConfig reads Responses defaults from env', () => {
+  const config = resolveOpenAiConfig({
+    OPENAI_API_STYLE: 'responses',
+    OPENAI_VERBOSITY: 'medium',
+    OPENAI_REASONING_EFFORT: 'high',
+    OPENAI_STORE: 'false',
+  })
+
+  assert.deepEqual(config, {
+    provider: 'openai',
+    apiKey: undefined,
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: undefined,
+    defaultModelSource: undefined,
+    apiStyle: 'responses',
+    defaultTextVerbosity: 'medium',
+    defaultReasoningEffort: 'high',
+    defaultStore: false,
+  })
+})
+
+test('OpenAiLlmClient formats persisted tool results as readable file references', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'ok',
+              },
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'chat-completions',
+    })
+
+    await client.createMessage({
+      model: 'gpt-4.1',
+      messages: [
+        createToolResultMessage('user', 'tool_big', {
+          type: 'persisted_tool_result',
+          toolName: 'Huge',
+          summary: 'Huge output persisted',
+          filepath: '/tmp/dclaw/tool-results/result.txt',
+          originalSizeChars: 123456,
+          preview: 'first lines',
+          truncated: true,
+        } satisfies PersistedToolResultOutput),
+      ],
+    })
+
+    const body = capturedBody as {
+      messages?: Array<{ role: string; content?: string }>
+    }
+    assert.equal(body.messages?.[0]?.role, 'tool')
+    assert.match(body.messages?.[0]?.content ?? '', /<persisted-output>/)
+    assert.match(body.messages?.[0]?.content ?? '', /Output too large \(123456 chars\)/)
+    assert.match(body.messages?.[0]?.content ?? '', /Full output saved to: \/tmp\/dclaw\/tool-results\/result.txt/)
+    assert.match(body.messages?.[0]?.content ?? '', /Preview \(first 11 chars\):/)
+    assert.match(body.messages?.[0]?.content ?? '', /<\/persisted-output>/)
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
 })
 
 test('OpenAiLlmClient supports Responses API requests', async () => {
@@ -56,7 +159,21 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
             {
               type: 'message',
               role: 'assistant',
-              content: [{ type: 'output_text', text: 'hello from responses' }],
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'hello from responses',
+                  annotations: [
+                    {
+                      type: 'url_citation',
+                      start_index: 0,
+                      end_index: 5,
+                      title: 'Example',
+                      url: 'https://example.com',
+                    },
+                  ],
+                },
+              ],
             },
             {
               type: 'function_call',
@@ -101,6 +218,33 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
     const result = await client.createMessage({
       model: 'gpt-5',
       systemPrompt: 'be concise',
+      providerOptions: {
+        openai: {
+          verbosity: 'high',
+          reasoningEffort: 'minimal',
+          previousResponseId: 'resp_prev_123',
+          store: true,
+          parallelToolCalls: false,
+          maxToolCalls: 1,
+          include: ['output_text.annotations'],
+          truncation: 'auto',
+          metadata: {
+            source: 'unit-test',
+          },
+          textFormat: {
+            type: 'json_schema',
+            name: 'answer',
+            schema: {
+              type: 'object',
+              properties: {
+                result: { type: 'string' },
+              },
+              required: ['result'],
+              additionalProperties: false,
+            },
+          },
+        },
+      },
       tools: [
         {
           name: 'Read',
@@ -147,7 +291,26 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
         encryptedContent: 'enc_123',
         status: 'completed',
       },
-      { type: 'text', text: 'hello from responses' },
+      {
+        type: 'text',
+        text: 'hello from responses',
+        annotations: [
+          {
+            type: 'url_citation',
+            startIndex: 0,
+            endIndex: 5,
+            title: 'Example',
+            url: 'https://example.com',
+            raw: {
+              type: 'url_citation',
+              start_index: 0,
+              end_index: 5,
+              title: 'Example',
+              url: 'https://example.com',
+            },
+          },
+        ],
+      },
       {
         type: 'tool_use',
         id: 'call_123',
@@ -160,6 +323,33 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
       model: 'gpt-5',
       instructions: 'be concise',
       max_output_tokens: 777,
+      previous_response_id: 'resp_prev_123',
+      store: true,
+      parallel_tool_calls: false,
+      max_tool_calls: 1,
+      include: ['output_text.annotations'],
+      truncation: 'auto',
+      metadata: {
+        source: 'unit-test',
+      },
+      text: {
+        verbosity: 'high',
+        format: {
+          type: 'json_schema',
+          name: 'answer',
+          schema: {
+            type: 'object',
+            properties: {
+              result: { type: 'string' },
+            },
+            required: ['result'],
+            additionalProperties: false,
+          },
+        },
+      },
+      reasoning: {
+        effort: 'minimal',
+      },
       stream: false,
       tools: [
         {
@@ -212,6 +402,260 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
   }
 })
 
+test('OpenAiLlmClient preserves Responses API output text annotations in streaming mode', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","output_index":0,"delta":"hello annotated"}\n\n',
+    )
+    response.write(
+      'event: response.output_text.annotation.added\ndata: {"type":"response.output_text.annotation.added","output_index":0,"annotation":{"type":"url_citation","start_index":0,"end_index":5,"title":"Example","url":"https://example.com"}}\n\n',
+    )
+    response.write(
+      'event: response.done\ndata: {"type":"response.done","response":{"output":[]}}\n\n',
+    )
+    response.write('data: [DONE]\n\n')
+    response.end()
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {},
+    )
+
+    assert.ok(result)
+    assert.deepEqual(result.message.content, [
+      {
+        type: 'text',
+        text: 'hello annotated',
+        annotations: [
+          {
+            type: 'url_citation',
+            startIndex: 0,
+            endIndex: 5,
+            title: 'Example',
+            url: 'https://example.com',
+            raw: {
+              type: 'url_citation',
+              start_index: 0,
+              end_index: 5,
+              title: 'Example',
+              url: 'https://example.com',
+            },
+          },
+        ],
+      },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient supports Responses API message item streaming without output_text deltas', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write(
+        'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from message item"}]}}\n\n',
+      )
+      response.write(
+        'event: response.done\ndata: {"type":"response.done","response":{"output":[]}}\n\n',
+      )
+      response.write('data: [DONE]\n\n')
+      response.end()
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+      env: {
+        OPENAI_VERBOSITY: 'low',
+        OPENAI_REASONING_EFFORT: 'medium',
+        OPENAI_STORE: 'false',
+      },
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {},
+    )
+
+    assert.ok(result)
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'hello from message item' },
+    ])
+    assert.deepEqual(capturedBody, {
+      model: 'gpt-5',
+      input: [{ role: 'user', content: 'hello' }],
+      max_output_tokens: 128000,
+      text: {
+        verbosity: 'low',
+      },
+      reasoning: {
+        effort: 'medium',
+      },
+      store: false,
+      stream: true,
+    })
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient supports Responses API content_part streaming events', async () => {
+  const deltas: string[] = []
+
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(
+      'event: response.content_part.added\ndata: {"type":"response.content_part.added","output_index":0,"part":{"type":"output_text","text":"hello "}}\n\n',
+    )
+    response.write(
+      'event: response.content_part.done\ndata: {"type":"response.content_part.done","output_index":0,"part":{"type":"output_text","text":"hello content part"}}\n\n',
+    )
+    response.write(
+      'event: response.done\ndata: {"type":"response.done","response":{"output":[]}}\n\n',
+    )
+    response.write('data: [DONE]\n\n')
+    response.end()
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onTextDelta(text) {
+          deltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.deepEqual(deltas, ['hello '])
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'hello content part' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient supports Responses API refusal streaming events', async () => {
+  const deltas: string[] = []
+
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(
+      'event: response.refusal.delta\ndata: {"type":"response.refusal.delta","output_index":0,"delta":"Cannot "}\n\n',
+    )
+    response.write(
+      'event: response.refusal.done\ndata: {"type":"response.refusal.done","output_index":0,"refusal":"Cannot help with that."}\n\n',
+    )
+    response.write(
+      'event: response.done\ndata: {"type":"response.done","response":{"output":[]}}\n\n',
+    )
+    response.write('data: [DONE]\n\n')
+    response.end()
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onTextDelta(text) {
+          deltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.deepEqual(deltas, ['Cannot '])
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'Cannot help with that.' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
 test('OpenAiLlmClient supports chat completions requests', async () => {
   let capturedBody: unknown
 
@@ -230,6 +674,7 @@ test('OpenAiLlmClient supports chat completions requests', async () => {
             {
               message: {
                 role: 'assistant',
+                reasoning_content: 'Need to inspect before using the tool.',
                 content: 'hello from chat completions',
                 tool_calls: [
                   {
@@ -312,6 +757,10 @@ test('OpenAiLlmClient supports chat completions requests', async () => {
     })
 
     assert.deepEqual(result.message.content, [
+      {
+        type: 'thinking',
+        thinking: 'Need to inspect before using the tool.',
+      },
       { type: 'text', text: 'hello from chat completions' },
       {
         type: 'tool_use',
@@ -384,7 +833,10 @@ test('OpenAiLlmClient supports chat completions SSE streaming', async () => {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     response.write(
-      'data: {"choices":[{"delta":{"content":"hello "}}]}\n\n',
+      'data: {"choices":[{"delta":{"reasoning_content":"Need to "}}]}\n\n',
+    )
+    response.write(
+      'data: {"choices":[{"delta":{"reasoning_content":"inspect. ","content":"hello "}}]}\n\n',
     )
     response.write(
       'data: {"choices":[{"delta":{"content":"stream","tool_calls":[{"index":0,"id":"call_stream_1","type":"function","function":{"name":"Read","arguments":"{\\"file_path\\":\\"/tmp/"}}]}}]}\n\n',
@@ -426,6 +878,7 @@ test('OpenAiLlmClient supports chat completions SSE streaming', async () => {
     assert.ok(result)
     assert.deepEqual(deltas, ['hello ', 'stream'])
     assert.deepEqual(result.message.content, [
+      { type: 'thinking', thinking: 'Need to inspect. ' },
       { type: 'text', text: 'hello stream' },
       {
         type: 'tool_use',
@@ -516,6 +969,170 @@ test('OpenAiLlmClient supports Responses API SSE streaming', async () => {
   }
 })
 
+test('OpenAiLlmClient preserves incremental Responses API reasoning and tool-call SSE events', async () => {
+  const deltas: string[] = []
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    const writeEvent = (eventName: string, payload: unknown) => {
+      response.write(`event: ${eventName}\n`)
+      response.write(`data: ${JSON.stringify(payload)}\n\n`)
+    }
+
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      writeEvent('response.output_item.added', {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: {
+          type: 'reasoning',
+          id: 'rs_stream_1',
+          summary: [],
+          status: 'in_progress',
+        },
+      })
+      writeEvent('response.reasoning_summary_text.delta', {
+        type: 'response.reasoning_summary_text.delta',
+        output_index: 0,
+        item_id: 'rs_stream_1',
+        delta: 'Need ',
+      })
+      writeEvent('response.reasoning_summary_text.delta', {
+        type: 'response.reasoning_summary_text.delta',
+        output_index: 0,
+        item_id: 'rs_stream_1',
+        delta: 'to inspect.',
+      })
+      writeEvent('response.reasoning_summary_text.done', {
+        type: 'response.reasoning_summary_text.done',
+        output_index: 0,
+        item_id: 'rs_stream_1',
+        text: 'Need to inspect.',
+      })
+      writeEvent('response.output_item.added', {
+        type: 'response.output_item.added',
+        output_index: 1,
+        item: {
+          type: 'function_call',
+          call_id: 'call_stream_1',
+          name: 'Read',
+          arguments: '',
+        },
+      })
+      writeEvent('response.function_call_arguments.delta', {
+        type: 'response.function_call_arguments.delta',
+        output_index: 1,
+        item_id: 'call_stream_1',
+        delta: '{"file_path":"/tmp/',
+      })
+      writeEvent('response.function_call_arguments.delta', {
+        type: 'response.function_call_arguments.delta',
+        output_index: 1,
+        item_id: 'call_stream_1',
+        delta: 'example.txt"}',
+      })
+      writeEvent('response.function_call_arguments.done', {
+        type: 'response.function_call_arguments.done',
+        output_index: 1,
+        item_id: 'call_stream_1',
+        arguments: '{"file_path":"/tmp/example.txt"}',
+      })
+      writeEvent('response.output_item.done', {
+        type: 'response.output_item.done',
+        output_index: 1,
+        item: {
+          type: 'function_call',
+          call_id: 'call_stream_1',
+          name: 'Read',
+          arguments: '{"file_path":"/tmp/example.txt"}',
+        },
+      })
+      writeEvent('response.output_text.delta', {
+        type: 'response.output_text.delta',
+        output_index: 2,
+        delta: 'hello ',
+      })
+      writeEvent('response.output_text.delta', {
+        type: 'response.output_text.delta',
+        output_index: 2,
+        delta: 'responses',
+      })
+      writeEvent('response.output_text.done', {
+        type: 'response.output_text.done',
+        output_index: 2,
+        text: 'hello responses',
+      })
+      writeEvent('response.done', {
+        type: 'response.done',
+        response: { output: [] },
+      })
+      response.write('data: [DONE]\n\n')
+      response.end()
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onTextDelta(text) {
+          deltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.deepEqual(deltas, ['hello ', 'responses'])
+    assert.deepEqual(result.message.content, [
+      {
+        type: 'reasoning',
+        id: 'rs_stream_1',
+        summary: ['Need to inspect.'],
+        status: 'in_progress',
+      },
+      {
+        type: 'tool_use',
+        id: 'call_stream_1',
+        name: 'Read',
+        input: { file_path: '/tmp/example.txt' },
+      },
+      { type: 'text', text: 'hello responses' },
+    ])
+    assert.deepEqual(capturedBody, {
+      model: 'gpt-5',
+      input: [{ role: 'user', content: 'hello' }],
+      max_output_tokens: 128000,
+      stream: true,
+    })
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
 test('OpenAiLlmClient rejects missing api key', async () => {
   const client = new OpenAiLlmClient({
     env: {},
@@ -571,6 +1188,130 @@ test('OpenAiLlmClient surfaces API errors', async () => {
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${address.port}`,
       defaultModel: 'gpt-5',
+      maxRetries: 0,
+    })
+
+    await assert.rejects(async () => {
+      await client.createMessage({
+        messages: [createTextMessage('user', 'hello')],
+      })
+    }, error => {
+      assert.match(
+        error instanceof Error ? error.message : String(error),
+        /OpenAI request failed \(429 Too Many Requests\): rate limit exceeded/,
+      )
+      assert.ok(error instanceof RetryableHttpError)
+      assert.equal(getProviderErrorKind(error), 'rate_limit')
+      assert.equal(error.kind, 'rate_limit')
+      return true
+    })
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient retries retryable rate limits and honors Retry-After', async () => {
+  const sleepCalls: number[] = []
+  let attempts = 0
+
+  const server = createServer((_, response) => {
+    attempts += 1
+    if (attempts === 1) {
+      response.writeHead(429, {
+        'content-type': 'application/json',
+        'retry-after': '1',
+      })
+      response.end(
+        JSON.stringify({
+          error: {
+            message: 'try again shortly',
+          },
+        }),
+      )
+      return
+    }
+
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(
+      JSON.stringify({
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'retried ok' }],
+          },
+        ],
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+      sleepImpl: async ms => {
+        sleepCalls.push(ms)
+      },
+    })
+
+    const result = await client.createMessage({
+      messages: [createTextMessage('user', 'hello')],
+    })
+
+    assert.equal(attempts, 2)
+    assert.deepEqual(sleepCalls, [1000])
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'retried ok' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient obeys x-should-retry false even for 5xx responses', async () => {
+  let attempts = 0
+
+  const server = createServer((_, response) => {
+    attempts += 1
+    response.writeHead(500, {
+      'content-type': 'application/json',
+      'x-should-retry': 'false',
+    })
+    response.end(
+      JSON.stringify({
+        error: {
+          message: 'do not retry this',
+        },
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
     })
 
     await assert.rejects(
@@ -578,7 +1319,248 @@ test('OpenAiLlmClient surfaces API errors', async () => {
         client.createMessage({
           messages: [createTextMessage('user', 'hello')],
         }),
-      /OpenAI request failed \(429 Too Many Requests\): rate limit exceeded/,
+      /OpenAI request failed \(500 Internal Server Error\): do not retry this/,
+    )
+    assert.equal(attempts, 1)
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient obeys x-should-retry true for otherwise non-retryable responses', async () => {
+  let attempts = 0
+
+  const server = createServer((_, response) => {
+    attempts += 1
+    if (attempts === 1) {
+      response.writeHead(400, {
+        'content-type': 'application/json',
+        'x-should-retry': 'true',
+      })
+      response.end(
+        JSON.stringify({
+          error: {
+            message: 'retry me once',
+          },
+        }),
+      )
+      return
+    }
+
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(
+      JSON.stringify({
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'header retry ok' }],
+          },
+        ],
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+      sleepImpl: async () => {},
+    })
+
+    const result = await client.createMessage({
+      messages: [createTextMessage('user', 'hello')],
+    })
+
+    assert.equal(attempts, 2)
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'header retry ok' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient retries transient network failures', async () => {
+  let attempts = 0
+
+  const client = new OpenAiLlmClient({
+    apiKey: 'test-key',
+    apiStyle: 'responses',
+    defaultModel: 'gpt-5',
+    sleepImpl: async () => {},
+    fetchImpl: async () => {
+      attempts += 1
+      if (attempts === 1) {
+        throw new TypeError('fetch failed')
+      }
+
+      return new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'network retry ok' }],
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    },
+  })
+
+  const result = await client.createMessage({
+    messages: [createTextMessage('user', 'hello')],
+  })
+
+  assert.equal(attempts, 2)
+  assert.deepEqual(result.message.content, [
+    { type: 'text', text: 'network retry ok' },
+  ])
+})
+
+test('getProviderErrorKind classifies transient fetch failures as network', () => {
+  assert.equal(getProviderErrorKind(new TypeError('fetch failed')), 'network')
+})
+
+test('RetryableHttpError classifies overloaded responses distinctly', () => {
+  const error = new RetryableHttpError(
+    'OpenAI',
+    529,
+    'Overloaded',
+    {
+      message: 'service overloaded',
+      type: 'overloaded_error',
+    },
+    new Headers(),
+  )
+
+  assert.equal(error.kind, 'overloaded')
+  assert.equal(error.subtype, 'server_overload')
+  assert.equal(getProviderErrorKind(error), 'overloaded')
+  assert.equal(getProviderErrorSubtype(error), 'server_overload')
+})
+
+test('OpenAiLlmClient classifies insufficient quota responses distinctly', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(429, {
+      'content-type': 'application/json',
+    })
+    response.end(
+      JSON.stringify({
+        error: {
+          message: 'You exceeded your current quota, please check your plan and billing details.',
+          type: 'insufficient_quota',
+          code: 'insufficient_quota',
+        },
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+      maxRetries: 0,
+    })
+
+    await assert.rejects(
+      () =>
+        client.createMessage({
+          messages: [createTextMessage('user', 'hello')],
+        }),
+      error => {
+        assert.ok(error instanceof RetryableHttpError)
+        assert.equal(error.kind, 'rate_limit')
+        assert.equal(error.subtype, 'insufficient_quota')
+        assert.equal(getProviderErrorSubtype(error), 'insufficient_quota')
+        assert.equal(
+          error.userMessage,
+          'OpenAI quota is exhausted. Check billing, credits, or organization limits before retrying.',
+        )
+        return true
+      },
+    )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient classifies model availability failures distinctly', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(404, {
+      'content-type': 'application/json',
+    })
+    response.end(
+      JSON.stringify({
+        error: {
+          message: 'The model `gpt-missing` does not exist or you do not have access to it.',
+          type: 'invalid_request_error',
+          code: 'model_not_found',
+        },
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+      maxRetries: 0,
+    })
+
+    await assert.rejects(
+      () =>
+        client.createMessage({
+          messages: [createTextMessage('user', 'hello')],
+        }),
+      error => {
+        assert.ok(error instanceof RetryableHttpError)
+        assert.equal(error.kind, 'bad_request')
+        assert.equal(error.subtype, 'model_not_found')
+        assert.equal(
+          error.userMessage,
+          'The selected model is not available on OpenAI. Check the model name and account access.',
+        )
+        return true
+      },
     )
   } finally {
     server.close()

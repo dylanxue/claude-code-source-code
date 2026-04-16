@@ -4,6 +4,7 @@ import {
   getTextContent,
   type Message,
 } from '../../types/message.js'
+import { stringifyJson } from '../providerUtils.js'
 import type { CreateMessageRequest, CreateMessageResponse, LlmClient } from '../types.js'
 
 function findLastUserMessage(messages: Message[]): Message | undefined {
@@ -34,10 +35,7 @@ function getTrailingToolResultOutputs(messages: Message[]): unknown[] {
 }
 
 function stringifyOutput(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-  return JSON.stringify(value, null, 2)
+  return stringifyJson(value)
 }
 
 function tokenizeDirective(input: string): string[] {

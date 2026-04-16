@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { SUPPORTED_LLM_PROVIDERS } from '../llm/client.js'
 import type { LlmProviderName } from '../llm/providerNames.js'
+import type { PermissionMode } from '../types/tool.js'
 import type { ParsedCliCommand } from './types.js'
 
 export class CliArgumentError extends Error {
@@ -29,14 +30,10 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
     model: undefined as string | undefined,
     provider: undefined as LlmProviderName | undefined,
     outputFormat: 'text' as 'text' | 'sse',
-    permissionMode: 'default' as
-      | 'default'
-      | 'accept-edits'
-      | 'bypass-permissions'
-      | 'plan',
+    permissionMode: undefined as PermissionMode | undefined,
     stream: false,
-    systemPrompt: undefined as string | undefined,
     verbose: false,
+    systemPrompt: undefined as string | undefined,
   }
 
   let mode: ParsedCliCommand['mode'] = 'interactive'
@@ -54,12 +51,12 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
       case '--doctor':
         mode = 'doctor'
         break
+      case '--stream':
+        options.stream = true
+        break
       case '--verbose':
       case '-d':
         options.verbose = true
-        break
-      case '--stream':
-        options.stream = true
         break
       case '--output-format': {
         const result = takeValue(args, i, arg)
@@ -194,11 +191,11 @@ export function formatHelp(): string {
     `  --provider <name>         Select provider (${SUPPORTED_LLM_PROVIDERS.join(', ')})`,
     '  --model <name>            Override the model name',
     '  --stream                  Stream assistant output as it arrives',
+    '  -d, --verbose             Show reasoning, content, and tool-call events',
     '  --output-format <format>  Output format for --print (text, sse)',
     '  --permission-mode <mode>  Select permission mode',
     '  --system-prompt <text>    Append a one-off system prompt',
     '  --cwd <path>              Override working directory',
-    '  -d, --verbose             Enable verbose output',
     '  -h, --help                Show help',
     '  -v, --version             Show version',
   ].join('\n')

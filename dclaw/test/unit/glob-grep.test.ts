@@ -4,6 +4,10 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { globTool } from '../../src/tools/builtin/glob.js'
+import {
+  collectFiles,
+  fallbackGrep,
+} from '../../src/tools/builtin/fileSearch.js'
 import { grepTool } from '../../src/tools/builtin/grep.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
@@ -163,4 +167,110 @@ test('Grep validation rejects negative head_limit', async () => {
     ok: false,
     error: 'Grep head_limit must be an integer greater than or equal to 0',
   })
+})
+
+test('Grep excludes node_modules by default when searching a project root', async () => {
+  const dir = await createTempDir('dclaw-grep-exclude-')
+  const appDir = join(dir, 'app')
+  const nodeModulesDir = join(appDir, 'node_modules', 'pkg')
+
+  try {
+    await mkdir(nodeModulesDir, { recursive: true })
+    await writeFile(join(appDir, 'src.txt'), 'needle in app\n', 'utf8')
+    await writeFile(join(nodeModulesDir, 'index.txt'), 'needle in package\n', 'utf8')
+
+    const result = await grepTool.call(
+      {
+        pattern: 'needle',
+        path: appDir,
+        output_mode: 'files_with_matches',
+      },
+      createToolContext({ cwd: appDir }),
+    )
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.output.filenames, ['src.txt'])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Grep still searches node_modules when the path explicitly targets it', async () => {
+  const dir = await createTempDir('dclaw-grep-explicit-node-modules-')
+  const appDir = join(dir, 'app')
+  const nodeModulesDir = join(appDir, 'node_modules', 'pkg')
+
+  try {
+    await mkdir(nodeModulesDir, { recursive: true })
+    await writeFile(join(nodeModulesDir, 'index.txt'), 'needle in package\n', 'utf8')
+
+    const result = await grepTool.call(
+      {
+        pattern: 'needle',
+        path: nodeModulesDir,
+        output_mode: 'files_with_matches',
+      },
+      createToolContext({ cwd: appDir }),
+    )
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.output.filenames, ['node_modules/pkg/index.txt'])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('fallback file collection skips default excluded directories unless explicitly targeted', async () => {
+  const dir = await createTempDir('dclaw-fallback-exclude-')
+  const nodeModulesDir = join(dir, 'node_modules', 'pkg')
+
+  try {
+    await mkdir(nodeModulesDir, { recursive: true })
+    await writeFile(join(dir, 'root.txt'), 'root\n', 'utf8')
+    await writeFile(join(nodeModulesDir, 'index.txt'), 'pkg\n', 'utf8')
+
+    const collected = await collectFiles({
+      cwd: dir,
+      targetPath: dir,
+    })
+    assert.deepEqual(
+      collected.map(file => file.relativePath).sort(),
+      ['root.txt'],
+    )
+
+    const explicitlyCollected = await collectFiles({
+      cwd: dir,
+      targetPath: nodeModulesDir,
+    })
+    assert.deepEqual(
+      explicitlyCollected.map(file => file.relativePath),
+      ['node_modules/pkg/index.txt'],
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('fallback grep also skips default excluded directories', async () => {
+  const dir = await createTempDir('dclaw-fallback-grep-exclude-')
+  const nodeModulesDir = join(dir, 'node_modules', 'pkg')
+
+  try {
+    await mkdir(nodeModulesDir, { recursive: true })
+    await writeFile(join(dir, 'root.txt'), 'needle root\n', 'utf8')
+    await writeFile(join(nodeModulesDir, 'index.txt'), 'needle package\n', 'utf8')
+
+    const result = await fallbackGrep({
+      cwd: dir,
+      targetPath: dir,
+      pattern: 'needle',
+    })
+
+    assert.deepEqual(
+      result.map(match => match.path),
+      ['root.txt'],
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

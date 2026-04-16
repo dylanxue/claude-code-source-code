@@ -7,6 +7,7 @@ import { executeSingleTurn } from '../../src/core/queryLoop.js'
 import {
   createFileQueryTraceSink,
   createQueryTraceFilePath,
+  shouldEnableQueryTrace,
 } from '../../src/core/queryTrace.js'
 import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
@@ -71,6 +72,13 @@ test('query trace records the full tool-use event flow', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('query trace is controlled only by DCLAW_QUERY_TRACE', () => {
+  assert.equal(shouldEnableQueryTrace({}), false)
+  assert.equal(shouldEnableQueryTrace({ DCLAW_QUERY_TRACE: 'true' }), true)
+  assert.equal(shouldEnableQueryTrace({ DCLAW_QUERY_TRACE: '1' }), true)
+  assert.equal(shouldEnableQueryTrace({ DCLAW_QUERY_TRACE: 'false' }), false)
 })
 
 test('query trace summarizes reasoning and thinking blocks', async () => {
@@ -146,8 +154,9 @@ test('query trace summarizes reasoning and thinking blocks', async () => {
 
     const llmResponse = lines.find(line => line.event === 'llm.response')
     assert.ok(llmResponse)
-    assert.deepEqual(llmResponse.data, {
-      assistantMessage: {
+    assert.deepEqual(
+      (llmResponse.data as { assistantMessage?: unknown } | undefined)?.assistantMessage,
+      {
         id: result.assistantMessage.id,
         role: 'assistant',
         contentTypes: ['thinking', 'reasoning', 'text'],
@@ -169,8 +178,25 @@ test('query trace summarizes reasoning and thinking blocks', async () => {
         ],
         toolUses: [],
       },
-      toolUseCount: 0,
-    })
+    )
+    assert.equal(
+      (llmResponse.data as { toolUseCount?: unknown } | undefined)?.toolUseCount,
+      0,
+    )
+    assert.equal(
+      (llmResponse.data as { outputText?: unknown } | undefined)?.outputText,
+      'final answer',
+    )
+    assert.deepEqual(
+      (
+        llmResponse.data as {
+          fullAssistantMessage?: {
+            content: Array<{ type: string }>
+          }
+        } | undefined
+      )?.fullAssistantMessage?.content.map(block => block.type),
+      ['thinking', 'reasoning', 'text'],
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -212,6 +238,82 @@ test('query trace records bash sandbox mode in tool results', async () => {
       (toolResultEvent.data as { sandboxMode?: string } | undefined)?.sandboxMode,
       'restricted',
     )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('query trace records llm.error when streaming fails after partial reasoning output', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-'))
+  const tracePath = createQueryTraceFilePath({
+    ...process.env,
+    DCLAW_HOME: join(dir, '.dclaw-home'),
+  })
+  const registry = createDefaultToolRegistry()
+
+  try {
+    const queryTraceSink = await createFileQueryTraceSink(tracePath)
+
+    await assert.rejects(
+      () =>
+        executeSingleTurn({
+          client: {
+            providerName: 'stub',
+            async createMessage() {
+              throw new Error('createMessage should not be used in this test')
+            },
+            async createMessageStream(_request, handlers) {
+              handlers.onReasoningDelta?.({
+                kind: 'thinking',
+                text: 'Need to inspect before answering.',
+              })
+              throw new TypeError('terminated')
+            },
+          },
+          messages: [createTextMessage('user', 'hello')],
+          toolRegistry: registry,
+          toolContext: createToolContext({
+            availableTools: registry.list().map(tool => tool.name),
+            permissionMode: 'default',
+          }),
+          queryTraceSink,
+          streamHandlers: {},
+        }),
+      /terminated/,
+    )
+
+    const lines = (await readFile(tracePath, 'utf8'))
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+
+    const events = lines.map(line => line.event)
+    assert.deepEqual(events, [
+      'turn.start',
+      'iteration.start',
+      'llm.request',
+      'llm.reasoning.delta',
+      'llm.error',
+    ])
+
+    const llmError = lines.find(line => line.event === 'llm.error')
+    assert.ok(llmError)
+    assert.deepEqual(llmError.data, {
+      iteration: 1,
+      streaming: true,
+      phase: 'during_stream',
+      kind: 'network',
+      subtype: 'network_error',
+      errorName: 'TypeError',
+      message: 'terminated',
+      streamedTextChars: 0,
+      streamedReasoningChars: 33,
+      lastReasoningDelta: {
+        kind: 'thinking',
+        text: 'Need to inspect before answering.',
+      },
+    })
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

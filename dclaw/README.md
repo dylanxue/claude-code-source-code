@@ -163,10 +163,26 @@ npm test
 npm run start -- --doctor --provider openai
 ```
 
-如果不显式传 `--provider`，`doctor` 也会尝试从环境推断 provider，并显示：
+如果不显式传 `--provider`，`doctor` 也会尝试从配置链路推断 provider，并显示：
 
 - `provider source`
 - `model source`
+
+这两个 `source` 字段当前可能出现：
+
+- `cli`
+- `env`
+- `user_config`
+- `workspace_config`
+- `default`
+
+含义分别是：
+
+- `cli`：来自命令行参数
+- `env`：来自当前 shell 环境或 `.env` / `.env.local`
+- `user_config`：来自用户级 `config.json`
+- `workspace_config`：来自 workspace 级 `config.json`
+- `default`：来自内置默认值
 
 当前内置也补了一批兼容模型的默认 limits，`openai` 和 `anthropic` 两侧都可直接使用这些模型名：
 
@@ -192,4 +208,65 @@ SSE 模式下当前会输出：
 
 ```bash
 npm run start -- --print --provider openai --output-format sse "Reply with exactly: ok"
+```
+
+## Permission Mode 配置
+
+当前 `dclaw` 已支持 4 种 `permission mode`：
+
+- `default`
+- `accept-edits`
+- `plan`
+- `bypass-permissions`
+
+`permission mode` 现在支持 CLI、用户级配置和 workspace 级配置三层来源，优先级如下：
+
+1. CLI `--permission-mode`
+2. 用户级配置：`~/.dclaw/config.json`
+3. workspace 配置：`<workspace>/.dclaw/config.json`
+4. 内置默认值：`default`
+
+如果设置了 `DCLAW_HOME`，用户级配置路径会改为：
+
+- `<DCLAW_HOME>/config.json`
+
+配置文件目前支持：
+
+```json
+{
+  "permissionMode": "plan",
+  "MODEL_PROVIDER": "openai-compatible",
+  "DCLAW_QUERY_TRACE": true,
+  "OPENAI_MODEL": "kimi-k2.5",
+  "OPENAI_API_STYLE": "chat-completions"
+}
+```
+
+除 `permissionMode` 之外，`config.json` 现在也可以承载一批运行时配置，主要包括：
+
+- `DCLAW_*`
+- `OPENAI_*`
+- `ANTHROPIC_*`
+- `LLM_PROVIDER`
+- `MODEL_PROVIDER`
+
+例如：
+
+- `MODEL_PROVIDER`
+- `DCLAW_QUERY_TRACE`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+- `OPENAI_API_STYLE`
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL`
+
+另外，`config.json` 当前仍然不能设置：
+
+- `DCLAW_HOME`
+
+可以用下面的命令查看当前实际生效的 `permission mode` 及其来源：
+
+```bash
+npm run start -- --doctor
 ```

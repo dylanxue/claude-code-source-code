@@ -37,6 +37,32 @@ test('parseArgs accepts openai as a provider', () => {
   assert.equal(command.options.outputFormat, 'sse')
 })
 
+test('parseArgs enables verbose mode', () => {
+  const command = parseArgs(['--print', '--verbose', 'hello'])
+
+  assert.equal(command.mode, 'print')
+  assert.equal(command.options.verbose, true)
+})
+
+test('parseArgs leaves permission mode unset when not explicitly provided', () => {
+  const command = parseArgs(['--print', 'hello'])
+
+  assert.equal(command.mode, 'print')
+  assert.equal(command.options.permissionMode, undefined)
+})
+
+test('parseArgs accepts explicit permission mode overrides', () => {
+  const command = parseArgs([
+    '--print',
+    '--permission-mode',
+    'plan',
+    'hello',
+  ])
+
+  assert.equal(command.mode, 'print')
+  assert.equal(command.options.permissionMode, 'plan')
+})
+
 test('parseArgs reports supported providers for invalid input', () => {
   assert.throws(
     () => parseArgs(['--provider', 'unknown']),

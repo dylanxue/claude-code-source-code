@@ -10,6 +10,22 @@ async function createTempDir(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
 }
 
+test('Read description and schema nudge callers toward targeted large-file reads', () => {
+  assert.match(
+    readFileTool.description,
+    /Read the whole file when it is reasonably small/,
+  )
+  assert.match(readFileTool.description, /use offset and limit/i)
+  assert.match(readFileTool.description, /search for specific content first/i)
+
+  const properties = readFileTool.inputSchema.properties as
+    | Record<string, { description?: string }>
+    | undefined
+
+  assert.match(properties?.offset?.description ?? '', /specific section/i)
+  assert.match(properties?.limit?.description ?? '', /larger file/i)
+})
+
 test('Read returns isPartial for ranged reads', async () => {
   const dir = await createTempDir('dclaw-read-')
   const filePath = join(dir, 'sample.txt')
@@ -136,6 +152,45 @@ test('Read accepts path as an alias for file_path', async () => {
     assert.equal(result.output.file.content, 'alias works')
     assert.equal(result.output.file.endLine, 1)
     assert.equal(result.output.didReadToEnd, true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Read rejects oversized full-file reads without an explicit limit', async () => {
+  const dir = await createTempDir('dclaw-read-large-')
+  const filePath = join(dir, 'large.txt')
+
+  try {
+    await writeFile(filePath, 'x'.repeat(300_000), 'utf8')
+
+    await assert.rejects(
+      () => readFileTool.call({ file_path: filePath }, createToolContext()),
+      /Use offset and limit to read specific portions of the file, or search for specific content instead of reading the whole file/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Read still allows oversized files when the caller provides a limit', async () => {
+  const dir = await createTempDir('dclaw-read-large-limited-')
+  const filePath = join(dir, 'large.txt')
+
+  try {
+    await writeFile(filePath, `${'x'.repeat(300_000)}\nsecond line\n`, 'utf8')
+    const result = await readFileTool.call(
+      {
+        file_path: filePath,
+        limit: 1,
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.isPartial, true)
+    assert.equal(result.output.didReadToEnd, false)
+    assert.equal(result.output.file.numLines, 1)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

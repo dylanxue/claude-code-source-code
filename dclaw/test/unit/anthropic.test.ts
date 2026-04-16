@@ -7,10 +7,16 @@ import {
   createTextMessage,
   createToolResultMessage,
 } from '../../src/types/message.js'
+import type { PersistedToolResultOutput } from '../../src/core/toolResultBudget.js'
 import {
   AnthropicLlmClient,
   resolveAnthropicConfig,
 } from '../../src/llm/providers/anthropic.js'
+import {
+  getProviderErrorKind,
+  getProviderErrorSubtype,
+  RetryableHttpError,
+} from '../../src/llm/providerUtils.js'
 
 test('resolveAnthropicConfig reads dclaw env vars first', () => {
   const config = resolveAnthropicConfig({
@@ -27,7 +33,74 @@ test('resolveAnthropicConfig reads dclaw env vars first', () => {
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com',
     defaultModel: 'primary-model',
+    defaultModelSource: 'env',
   })
+})
+
+test('AnthropicLlmClient formats persisted tool results as readable file references', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'ok' }],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+    })
+
+    await client.createMessage({
+      model: 'claude-test',
+      messages: [
+        createToolResultMessage('user', 'tool_big', {
+          type: 'persisted_tool_result',
+          toolName: 'Huge',
+          summary: 'Huge output persisted',
+          filepath: '/tmp/dclaw/tool-results/result.txt',
+          originalSizeChars: 123456,
+          preview: 'first lines',
+          truncated: true,
+        } satisfies PersistedToolResultOutput),
+      ],
+    })
+
+    const body = capturedBody as {
+      messages?: Array<{
+        content?: Array<{ type: string; content?: string }>
+      }>
+    }
+    const toolResult = body.messages?.[0]?.content?.[0]
+    assert.equal(toolResult?.type, 'tool_result')
+    assert.match(toolResult?.content ?? '', /<persisted-output>/)
+    assert.match(toolResult?.content ?? '', /Output too large \(123456 chars\)/)
+    assert.match(toolResult?.content ?? '', /Full output saved to: \/tmp\/dclaw\/tool-results\/result.txt/)
+    assert.match(toolResult?.content ?? '', /<\/persisted-output>/)
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
 })
 
 test('AnthropicLlmClient sends messages and tools to the Anthropic API', async () => {
@@ -246,6 +319,7 @@ test('AnthropicLlmClient surfaces API errors', async () => {
     response.end(
       JSON.stringify({
         error: {
+          type: 'authentication_error',
           message: 'invalid x-api-key',
         },
       }),
@@ -267,13 +341,272 @@ test('AnthropicLlmClient surfaces API errors', async () => {
       defaultModel: 'claude-test',
     })
 
+    await assert.rejects(async () => {
+      await client.createMessage({
+        messages: [createTextMessage('user', 'hello')],
+      })
+    }, error => {
+      assert.match(
+        error instanceof Error ? error.message : String(error),
+        /Anthropic request failed \(401 Unauthorized\): invalid x-api-key/,
+      )
+      assert.ok(error instanceof RetryableHttpError)
+      assert.equal(getProviderErrorKind(error), 'auth')
+      assert.equal(error.kind, 'auth')
+      assert.equal(error.subtype, 'invalid_api_key')
+      assert.equal(getProviderErrorSubtype(error), 'invalid_api_key')
+      assert.equal(error.errorType, 'authentication_error')
+      assert.equal(
+        error.userMessage,
+        'Anthropic rejected the configured API key. Check the credential and any account or project access settings.',
+      )
+      return true
+    })
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('AnthropicLlmClient classifies prompt-too-long responses distinctly', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(400, {
+      'content-type': 'application/json',
+    })
+    response.end(
+      JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'prompt is too long: 137500 tokens > 135000 maximum',
+        },
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      defaultModel: 'claude-test',
+      maxRetries: 0,
+    })
+
     await assert.rejects(
       () =>
         client.createMessage({
           messages: [createTextMessage('user', 'hello')],
         }),
-      /Anthropic request failed \(401 Unauthorized\): invalid x-api-key/,
+      error => {
+        assert.ok(error instanceof RetryableHttpError)
+        assert.equal(error.kind, 'bad_request')
+        assert.equal(error.subtype, 'prompt_too_long')
+        assert.equal(
+          error.userMessage,
+          'The request sent to Anthropic is too large. Reduce prompt or tool output size, or compact context before retrying.',
+        )
+        return true
+      },
     )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('AnthropicLlmClient classifies tool protocol mismatches distinctly', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(400, {
+      'content-type': 'application/json',
+    })
+    response.end(
+      JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message:
+            '`tool_use` ids were found without `tool_result` blocks immediately after',
+        },
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      defaultModel: 'claude-test',
+      maxRetries: 0,
+    })
+
+    await assert.rejects(
+      () =>
+        client.createMessage({
+          messages: [createTextMessage('user', 'hello')],
+        }),
+      error => {
+        assert.ok(error instanceof RetryableHttpError)
+        assert.equal(error.kind, 'bad_request')
+        assert.equal(error.subtype, 'tool_use_mismatch')
+        assert.equal(
+          error.userMessage,
+          'Anthropic rejected the tool call/result sequence. Ensure each tool_result matches a prior tool_use and appears in the expected order.',
+        )
+        return true
+      },
+    )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('AnthropicLlmClient retries 429s and prefers unified reset delay', async () => {
+  const sleepCalls: number[] = []
+  let attempts = 0
+
+  const server = createServer((_, response) => {
+    attempts += 1
+    if (attempts === 1) {
+      response.writeHead(429, {
+        'content-type': 'application/json',
+        'retry-after': '1',
+        'anthropic-ratelimit-unified-reset': '3',
+      })
+      response.end(
+        JSON.stringify({
+          error: {
+            message: 'rate limit reached',
+          },
+        }),
+      )
+      return
+    }
+
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(
+      JSON.stringify({
+        content: [{ type: 'text', text: 'retried anthropic ok' }],
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      defaultModel: 'claude-test',
+      nowImpl: () => 1000,
+      sleepImpl: async ms => {
+        sleepCalls.push(ms)
+      },
+    })
+
+    const result = await client.createMessage({
+      messages: [createTextMessage('user', 'hello')],
+    })
+
+    assert.equal(attempts, 2)
+    assert.deepEqual(sleepCalls, [2000])
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'retried anthropic ok' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('AnthropicLlmClient streams thinking deltas through reasoning callbacks', async () => {
+  const deltas: Array<{ kind: string; text: string }> = []
+  const textDeltas: string[] = []
+
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":"Need "}}\n\n',
+    )
+    response.write(
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"to inspect."}}\n\n',
+    )
+    response.write(
+      'event: content_block_start\ndata: {"index":1,"content_block":{"type":"text","text":"hello "}}\n\n',
+    )
+    response.write(
+      'event: content_block_delta\ndata: {"index":1,"delta":{"type":"text_delta","text":"anthropic"}}\n\n',
+    )
+    response.end()
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      defaultModel: 'claude-test',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onReasoningDelta(delta) {
+          deltas.push(delta)
+        },
+        onTextDelta(text) {
+          textDeltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.deepEqual(deltas, [
+      { kind: 'thinking', text: 'Need ' },
+      { kind: 'thinking', text: 'to inspect.' },
+    ])
+    assert.deepEqual(textDeltas, ['hello ', 'anthropic'])
+    assert.deepEqual(result.message.content, [
+      {
+        type: 'thinking',
+        thinking: 'Need to inspect.',
+      },
+      {
+        type: 'text',
+        text: 'hello anthropic',
+      },
+    ])
   } finally {
     server.close()
     await once(server, 'close')

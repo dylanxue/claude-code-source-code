@@ -12,8 +12,44 @@ export type SearchFile = {
   relativePath: string
 }
 
+export const DEFAULT_EXCLUDED_SEARCH_DIRECTORIES = [
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '.next',
+] as const
+
+export function shouldApplyDefaultSearchExclusions(
+  targetPath?: string,
+): boolean {
+  if (!targetPath) {
+    return true
+  }
+
+  const segments = resolve(targetPath)
+    .split(/[\\/]+/)
+    .filter(Boolean)
+
+  return !segments.some(segment =>
+    DEFAULT_EXCLUDED_SEARCH_DIRECTORIES.includes(
+      segment as (typeof DEFAULT_EXCLUDED_SEARCH_DIRECTORIES)[number],
+    ),
+  )
+}
+
 function isHiddenName(name: string): boolean {
   return name.startsWith('.')
+}
+
+function shouldSkipDirectoryName(name: string, isRoot: boolean): boolean {
+  if (isRoot) {
+    return false
+  }
+
+  return DEFAULT_EXCLUDED_SEARCH_DIRECTORIES.includes(
+    name as (typeof DEFAULT_EXCLUDED_SEARCH_DIRECTORIES)[number],
+  )
 }
 
 async function walkDirectory(
@@ -21,6 +57,7 @@ async function walkDirectory(
   directoryPath: string,
   hidden: boolean,
   files: SearchFile[],
+  isRoot: boolean = false,
 ): Promise<void> {
   const entries = await readdir(directoryPath, { withFileTypes: true })
 
@@ -31,7 +68,10 @@ async function walkDirectory(
 
     const absolutePath = resolve(directoryPath, entry.name)
     if (entry.isDirectory()) {
-      await walkDirectory(cwd, absolutePath, hidden, files)
+      if (shouldSkipDirectoryName(entry.name, false)) {
+        continue
+      }
+      await walkDirectory(cwd, absolutePath, hidden, files, false)
       continue
     }
 
@@ -66,7 +106,7 @@ export async function collectFiles(input: WalkFilesInput): Promise<SearchFile[]>
   }
 
   const files: SearchFile[] = []
-  await walkDirectory(input.cwd, absoluteTargetPath, hidden, files)
+  await walkDirectory(input.cwd, absoluteTargetPath, hidden, files, true)
   return files
 }
 

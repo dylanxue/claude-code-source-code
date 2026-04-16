@@ -28,6 +28,12 @@ export function getSessionsDir(
   return join(getDclawHomeDir(env), 'sessions')
 }
 
+export function getDclawConfigPath(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getDclawHomeDir(env), 'config.json')
+}
+
 export function getQueryTracesDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string {

@@ -5,6 +5,8 @@ import {
   resolveModelLimits,
 } from '../llm/modelLimits.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
+import { buildConfigAwareEnvWithSources } from './configFile.js'
+import { resolvePermissionMode } from './permissionModeConfig.js'
 import type { DoctorCommand } from './types.js'
 
 function statusLine(label: string, value: string): string {
@@ -13,6 +15,11 @@ function statusLine(label: string, value: string): string {
 
 export async function runDoctor(command: DoctorCommand): Promise<void> {
   const cwd = resolve(command.options.cwd)
+  const configured = await buildConfigAwareEnvWithSources(cwd)
+  const resolvedPermissionMode = await resolvePermissionMode({
+    cwd,
+    permissionMode: command.options.permissionMode,
+  }, configured.env)
   const lines = [
     'dclaw doctor',
     '',
@@ -23,13 +30,20 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     statusLine('mode', 'doctor'),
     statusLine('provider override', command.options.provider ?? 'none'),
     statusLine('model override', command.options.model ?? 'none'),
+    statusLine('permission override', command.options.permissionMode ?? 'none'),
+    statusLine('permission mode', resolvedPermissionMode.permissionMode),
+    statusLine('permission source', resolvedPermissionMode.permissionModeSource),
     statusLine(
       'system prompt',
       command.options.systemPrompt ? 'provided' : 'none',
     ),
   ]
 
-  const runtime = resolveLlmRuntimeConfig(command.options)
+  const runtime = resolveLlmRuntimeConfig(
+    command.options,
+    configured.env,
+    key => configured.keySources[key],
+  )
   lines.push(statusLine('provider', runtime.provider))
   lines.push(statusLine('provider source', runtime.providerSource))
 

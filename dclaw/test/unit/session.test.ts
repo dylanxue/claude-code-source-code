@@ -9,10 +9,11 @@ import { loadSessionForResume } from '../../src/session/resume.js'
 import {
   appendSessionMessages,
   createSession,
+  loadSessionMeta,
   loadSessionMessages,
 } from '../../src/session/store.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
-import { createTextMessage } from '../../src/types/message.js'
+import { createMessage, createTextMessage } from '../../src/types/message.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
 test('QueryEngine starts from initialMessages when resuming', async () => {
@@ -64,6 +65,61 @@ test('session store persists transcript messages for resume', async () => {
     assert.equal(resumed?.meta.cwd, '/tmp/project')
     assert.equal(resumed?.messages.length, 2)
     assert.equal(resumed?.messages[1]?.role, 'assistant')
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('session meta records persisted tool result replacements', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-meta-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      env,
+    })
+
+    await appendSessionMessages(
+      session.sessionId,
+      [
+        createMessage('user', [
+          {
+            type: 'tool_result',
+            toolUseId: 'tool_big',
+            output: {
+              type: 'persisted_tool_result',
+              toolName: 'Huge',
+              summary: 'Huge output persisted',
+              filepath: '/tmp/dclaw/tool-results/huge.txt',
+              originalSizeChars: 123456,
+              preview: 'preview',
+              truncated: true,
+            },
+            rawOutput: {
+              ok: true,
+              summary: 'Ran Huge',
+            },
+          },
+        ]),
+      ],
+      env,
+    )
+
+    const meta = await loadSessionMeta(session.sessionId, env)
+    assert.ok(meta)
+    assert.equal(meta.persistedToolResults.length, 1)
+    assert.deepEqual(meta.persistedToolResults[0], {
+      toolUseId: 'tool_big',
+      toolName: 'Huge',
+      filepath: '/tmp/dclaw/tool-results/huge.txt',
+      originalSizeChars: 123456,
+      recordedAt: meta.persistedToolResults[0]?.recordedAt,
+    })
+    assert.ok(meta.persistedToolResults[0]?.recordedAt)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

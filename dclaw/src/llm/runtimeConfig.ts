@@ -5,6 +5,7 @@ import {
 } from './providerConfig.js'
 import { resolveLlmProvider, type LlmProviderSelectionSource } from './providerSelection.js'
 import type { LlmProviderName } from './providerNames.js'
+import type { ConfigEnvSource } from '../cli/configFile.js'
 
 export type ResolvedLlmRuntimeConfig = {
   provider: LlmProviderName
@@ -20,12 +21,18 @@ export function resolveLlmRuntimeConfig(
     model?: string
   },
   env: NodeJS.ProcessEnv = process.env,
+  getEnvSource?: (key: string) => ConfigEnvSource | undefined,
 ): ResolvedLlmRuntimeConfig {
-  const providerSelection = resolveLlmProvider(options.provider, env)
-  const providerConfig = resolveProviderConfig(providerSelection.provider, env)
+  const providerSelection = resolveLlmProvider(options.provider, env, getEnvSource)
+  const providerConfig = resolveProviderConfig(
+    providerSelection.provider,
+    env,
+    getEnvSource,
+  )
   const modelSelection = resolveModelSelection(
     options.model,
     providerConfig.defaultModel,
+    providerConfig.defaultModelSource ?? 'env',
   )
 
   return {

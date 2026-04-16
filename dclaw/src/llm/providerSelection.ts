@@ -1,7 +1,12 @@
 import { trimOrUndefined } from './providerUtils.js'
 import type { LlmProviderName } from './providerNames.js'
 
-export type LlmProviderSelectionSource = 'cli' | 'env' | 'default'
+export type LlmProviderSelectionSource =
+  | 'cli'
+  | 'env'
+  | 'user_config'
+  | 'workspace_config'
+  | 'default'
 
 function normalizeProviderName(
   value: string | undefined,
@@ -24,6 +29,9 @@ function normalizeProviderName(
 export function resolveLlmProvider(
   providerOverride: LlmProviderName | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<LlmProviderSelectionSource, 'cli' | 'default' | 'env'> | undefined,
 ): {
   provider: LlmProviderName
   source: LlmProviderSelectionSource
@@ -35,15 +43,17 @@ export function resolveLlmProvider(
     }
   }
 
-  const envProvider =
-    normalizeProviderName(env.DCLAW_PROVIDER) ??
-    normalizeProviderName(env.LLM_PROVIDER) ??
-    normalizeProviderName(env.MODEL_PROVIDER)
+  const providerKeys = ['DCLAW_PROVIDER', 'LLM_PROVIDER', 'MODEL_PROVIDER'] as const
 
-  if (envProvider) {
+  for (const key of providerKeys) {
+    const envProvider = normalizeProviderName(env[key])
+    if (!envProvider) {
+      continue
+    }
+
     return {
       provider: envProvider,
-      source: 'env',
+      source: getEnvSource?.(key) ?? 'env',
     }
   }
 

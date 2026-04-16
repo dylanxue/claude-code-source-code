@@ -190,6 +190,15 @@ test('query loop forwards declared tool schemas to the llm client', async () => 
     bashProperties?.dangerouslyDisableSandbox?.type,
     'boolean',
   )
+
+  const readTool = tools.find(tool => tool.name === 'Read')
+  const readProperties = readTool?.inputSchema?.properties as
+    | Record<string, { description?: string }>
+    | undefined
+  assert.match(readTool?.description ?? '', /Read the whole file when it is reasonably small/)
+  assert.match(readTool?.description ?? '', /search for specific content first/i)
+  assert.match(readProperties?.offset?.description ?? '', /specific section/i)
+  assert.match(readProperties?.limit?.description ?? '', /specific portion of a larger file/i)
 })
 
 test('query loop stores model-facing tool results separately from raw tool results', async () => {

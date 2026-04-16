@@ -89,3 +89,31 @@ test('formatTranscript can preview only the latest messages', () => {
     'user: three',
   ])
 })
+
+test('formatTranscript notes when model-facing tool output was persisted to disk', () => {
+  const lines = formatTranscript([
+    createMessage('user', [
+      {
+        type: 'tool_result',
+        toolUseId: 'tool_big',
+        output: {
+          type: 'persisted_tool_result',
+          toolName: 'Huge',
+          summary: 'Huge output persisted',
+          filepath: '/tmp/dclaw/tool-results/result.txt',
+          originalSizeChars: 123456,
+          preview: 'first lines',
+          truncated: true,
+        },
+        rawOutput: {
+          ok: true,
+          summary: 'Ran Huge',
+        },
+      },
+    ]),
+  ])
+
+  assert.deepEqual(lines, [
+    'tool result (tool_big): Ran Huge [model output persisted to /tmp/dclaw/tool-results/result.txt]',
+  ])
+})

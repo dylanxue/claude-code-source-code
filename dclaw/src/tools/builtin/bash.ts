@@ -903,6 +903,7 @@ function buildExecutionEnvironment(
 export const bashTool: Tool<BashToolInput, BashToolOutput> = buildTool({
   name: 'Bash',
   description: 'Execute a shell command.',
+  maxResultSizeChars: 30_000,
   inputSchema: {
     type: 'object',
     properties: {
@@ -1066,8 +1067,8 @@ export const bashTool: Tool<BashToolInput, BashToolOutput> = buildTool({
       const quotedLogPath = shellQuote(persistedOutputPath)
       const wrappedCommand = [
         `(${input.command}) >> ${quotedLogPath} 2>&1`,
-        'status=$?',
-        `printf '\\n# dclaw background task complete\\n# exit_code: %s\\n' "$status" >> ${quotedLogPath}`,
+        'command_exit_code=$?',
+        `printf '\\n# dclaw background task complete\\n# exit_code: %s\\n' "$command_exit_code" >> ${quotedLogPath}`,
         'exit 0',
       ].join('\n')
       const shellPath = process.env.SHELL || '/bin/sh'
