@@ -1,6 +1,6 @@
 import type { LlmProviderName } from '../llm/providerNames.js'
 
-export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume'
+export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume' | 'history'
 
 export type CommonCliOptions = {
   cwd: string
@@ -33,6 +33,12 @@ export type DoctorCommand = {
 export type ResumeCommand = {
   mode: 'resume'
   sessionId: string
+  prompt?: string
+  options: CommonCliOptions
+}
+
+export type HistoryCommand = {
+  mode: 'history'
   options: CommonCliOptions
 }
 
@@ -41,3 +47,4 @@ export type ParsedCliCommand =
   | PrintCommand
   | DoctorCommand
   | ResumeCommand
+  | HistoryCommand

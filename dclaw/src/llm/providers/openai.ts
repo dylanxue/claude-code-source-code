@@ -35,6 +35,16 @@ type OpenAiResponsesInputItem =
       content: string
     }
   | {
+      type: 'reasoning'
+      id?: string
+      summary?: Array<{
+        type: 'summary_text'
+        text: string
+      }>
+      encrypted_content?: string
+      status?: string
+    }
+  | {
       type: 'function_call'
       call_id: string
       name: string
@@ -66,6 +76,20 @@ type OpenAiResponsesFunctionCallOutputItem = {
   call_id: string
   name: string
   arguments: string
+}
+
+type OpenAiResponsesReasoningOutputItem = {
+  type: 'reasoning'
+  id?: string
+  summary?: Array<
+    | {
+        type?: string
+        text?: string
+      }
+    | string
+  >
+  encrypted_content?: string
+  status?: string
 }
 
 type OpenAiResponsesOutputItem = Record<string, unknown>
@@ -159,6 +183,28 @@ function toResponsesInputItem(
   switch (block.type) {
     case 'text':
       return [{ role, content: block.text }]
+    case 'thinking':
+    case 'redacted_thinking':
+      return []
+    case 'reasoning':
+      return [
+        {
+          type: 'reasoning',
+          ...(block.id ? { id: block.id } : {}),
+          ...(block.summary.length > 0
+            ? {
+                summary: block.summary.map(text => ({
+                  type: 'summary_text' as const,
+                  text,
+                })),
+              }
+            : {}),
+          ...(block.encryptedContent
+            ? { encrypted_content: block.encryptedContent }
+            : {}),
+          ...(block.status ? { status: block.status } : {}),
+        },
+      ]
     case 'tool_use':
       return [
         {
@@ -235,8 +281,32 @@ function isResponsesFunctionCallOutputItem(
   )
 }
 
+function isResponsesReasoningOutputItem(
+  item: OpenAiResponsesOutputItem,
+): item is OpenAiResponsesReasoningOutputItem {
+  return item.type === 'reasoning'
+}
+
+function parseReasoningSummary(
+  summary: OpenAiResponsesReasoningOutputItem['summary'],
+): string[] {
+  if (!Array.isArray(summary)) {
+    return []
+  }
+
+  return summary
+    .map(part => {
+      if (typeof part === 'string') {
+        return part
+      }
+      return typeof part?.text === 'string' ? part.text : ''
+    })
+    .filter(text => text.length > 0)
+}
+
 function parseResponsesResponse(response: OpenAiResponsesResponse): ContentBlock[] {
   const content: ContentBlock[] = []
+  let hasTextOutput = false
 
   for (const item of response.output ?? []) {
     if (isResponsesMessageOutputItem(item) && item.role === 'assistant') {
@@ -246,8 +316,22 @@ function parseResponsesResponse(response: OpenAiResponsesResponse): ContentBlock
             type: 'text',
             text: part.text,
           })
+          hasTextOutput = true
         }
       }
+      continue
+    }
+
+    if (isResponsesReasoningOutputItem(item)) {
+      content.push({
+        type: 'reasoning',
+        ...(item.id ? { id: item.id } : {}),
+        summary: parseReasoningSummary(item.summary),
+        ...(typeof item.encrypted_content === 'string'
+          ? { encryptedContent: item.encrypted_content }
+          : {}),
+        ...(typeof item.status === 'string' ? { status: item.status } : {}),
+      })
       continue
     }
 
@@ -261,7 +345,7 @@ function parseResponsesResponse(response: OpenAiResponsesResponse): ContentBlock
     }
   }
 
-  if (content.length === 0 && typeof response.output_text === 'string') {
+  if (!hasTextOutput && typeof response.output_text === 'string') {
     content.push({
       type: 'text',
       text: response.output_text,

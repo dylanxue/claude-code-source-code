@@ -1,5 +1,5 @@
 import type { ToolResult } from '../../types/tool.js'
-import type { Tool } from '../types.js'
+import { buildTool, type Tool } from '../types.js'
 
 export type WebFetchToolInput = {
   url: string
@@ -31,9 +31,37 @@ function truncateText(input: string, maxLength: number): string {
   return `${input.slice(0, maxLength)}...`
 }
 
-export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = {
+export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTool({
   name: 'WebFetch',
   description: 'Fetch content from a URL and apply a prompt to it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      url: {
+        type: 'string',
+        description: 'HTTP or HTTPS URL to fetch.',
+      },
+      prompt: {
+        type: 'string',
+        description: 'Instruction describing what to extract or focus on from the fetched content.',
+      },
+    },
+    required: ['url', 'prompt'],
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      bytes: { type: 'integer' },
+      code: { type: 'integer' },
+      codeText: { type: 'string' },
+      result: { type: 'string' },
+      durationMs: { type: 'integer' },
+      url: { type: 'string' },
+    },
+    required: ['bytes', 'code', 'codeText', 'result', 'durationMs', 'url'],
+    additionalProperties: false,
+  },
   validate(input) {
     if (!input.url || !input.prompt) {
       return {
@@ -91,4 +119,4 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = {
       summary: `Fetched ${response.url}`,
     }
   },
-}
+})

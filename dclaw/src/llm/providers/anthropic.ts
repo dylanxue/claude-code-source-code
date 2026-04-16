@@ -40,6 +40,15 @@ type AnthropicContentBlock =
       text: string
     }
   | {
+      type: 'thinking'
+      thinking: string
+      signature?: string
+    }
+  | {
+      type: 'redacted_thinking'
+      data: string
+    }
+  | {
       type: 'tool_use'
       id: string
       name: string
@@ -58,6 +67,15 @@ type AnthropicResponseBlock =
       text: string
     }
   | {
+      type: 'thinking'
+      thinking: string
+      signature?: string
+    }
+  | {
+      type: 'redacted_thinking'
+      data: string
+    }
+  | {
       type: 'tool_use'
       id: string
       name: string
@@ -72,8 +90,11 @@ type AnthropicStreamEventPayload =
   | {
       index?: number
       content_block?: {
-        type?: 'text' | 'tool_use'
+        type?: 'text' | 'tool_use' | 'thinking' | 'redacted_thinking'
         text?: string
+        thinking?: string
+        signature?: string
+        data?: string
         id?: string
         name?: string
         input?: Record<string, unknown>
@@ -84,6 +105,8 @@ type AnthropicStreamEventPayload =
       delta?: {
         type?: string
         text?: string
+        thinking?: string
+        signature?: string
         partial_json?: string
       }
     }
@@ -99,6 +122,15 @@ type StreamingAnthropicBlockState =
       name?: string
       input: Record<string, unknown>
       partialJson: string
+    }
+  | {
+      type: 'thinking'
+      thinking: string
+      signature?: string
+    }
+  | {
+      type: 'redacted_thinking'
+      data: string
     }
 
 type AnthropicRequestBody = {
@@ -141,6 +173,22 @@ function toAnthropicContentBlock(block: ContentBlock): AnthropicContentBlock {
       return {
         type: 'text',
         text: block.text,
+      }
+    case 'thinking':
+      return {
+        type: 'thinking',
+        thinking: block.thinking,
+        ...(block.signature ? { signature: block.signature } : {}),
+      }
+    case 'redacted_thinking':
+      return {
+        type: 'redacted_thinking',
+        data: block.data,
+      }
+    case 'reasoning':
+      return {
+        type: 'text',
+        text: block.summary.join('\n'),
       }
     case 'tool_use':
       return {
@@ -202,6 +250,19 @@ function parseAnthropicContent(
     switch (block.type) {
       case 'text':
         content.push({ type: 'text', text: block.text })
+        break
+      case 'thinking':
+        content.push({
+          type: 'thinking',
+          thinking: block.thinking,
+          ...(block.signature ? { signature: block.signature } : {}),
+        })
+        break
+      case 'redacted_thinking':
+        content.push({
+          type: 'redacted_thinking',
+          data: block.data,
+        })
         break
       case 'tool_use':
         content.push({
@@ -348,6 +409,23 @@ export class AnthropicLlmClient implements LlmClient {
         continue
       }
 
+      if (block.type === 'thinking') {
+        content.push({
+          type: 'thinking',
+          thinking: block.thinking,
+          ...(block.signature ? { signature: block.signature } : {}),
+        })
+        continue
+      }
+
+      if (block.type === 'redacted_thinking') {
+        content.push({
+          type: 'redacted_thinking',
+          data: block.data,
+        })
+        continue
+      }
+
       if (block.partialJson.length > 0) {
         try {
           const parsed = JSON.parse(block.partialJson)
@@ -425,6 +503,24 @@ export class AnthropicLlmClient implements LlmClient {
           partialJson: '',
         }
       }
+
+      if (contentBlock.type === 'thinking') {
+        blocks[index] = {
+          type: 'thinking',
+          thinking: contentBlock.thinking ?? '',
+          signature: contentBlock.signature,
+        }
+      }
+
+      if (
+        contentBlock.type === 'redacted_thinking' &&
+        typeof contentBlock.data === 'string'
+      ) {
+        blocks[index] = {
+          type: 'redacted_thinking',
+          data: contentBlock.data,
+        }
+      }
       return
     }
 
@@ -439,6 +535,22 @@ export class AnthropicLlmClient implements LlmClient {
       if (block.type === 'text' && delta.type === 'text_delta' && delta.text) {
         block.text += delta.text
         callbacks.onTextDelta?.(delta.text)
+      }
+
+      if (
+        block.type === 'thinking' &&
+        delta.type === 'thinking_delta' &&
+        typeof delta.thinking === 'string'
+      ) {
+        block.thinking += delta.thinking
+      }
+
+      if (
+        block.type === 'thinking' &&
+        delta.type === 'signature_delta' &&
+        typeof delta.signature === 'string'
+      ) {
+        block.signature = delta.signature
       }
 
       if (

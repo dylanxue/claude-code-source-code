@@ -126,7 +126,7 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
         break
       }
       case 'resume':
-        if (mode === 'print' || mode === 'doctor') {
+        if (mode === 'print' || mode === 'doctor' || mode === 'history') {
           throw new CliArgumentError('resume cannot be combined with the current mode')
         }
         mode = 'resume'
@@ -135,6 +135,12 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
           throw new CliArgumentError('Missing session ID for resume')
         }
         i += 1
+        break
+      case 'history':
+        if (mode === 'print' || mode === 'doctor' || mode === 'resume') {
+          throw new CliArgumentError('history cannot be combined with the current mode')
+        }
+        mode = 'history'
         break
       case '--help':
       case '-h':
@@ -155,8 +161,14 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   if (mode === 'doctor') {
     return { mode, options }
   }
+  if (mode === 'history') {
+    if (positionals.length > 0) {
+      throw new CliArgumentError('history does not accept a prompt')
+    }
+    return { mode, options }
+  }
   if (mode === 'resume') {
-    return { mode, sessionId: sessionId!, options }
+    return { mode, sessionId: sessionId!, prompt, options }
   }
   if (mode === 'print') {
     return { mode, prompt, options }
@@ -172,7 +184,8 @@ export function formatHelp(): string {
     'Usage:',
     '  dclaw [prompt]',
     '  dclaw --print [prompt]',
-    '  dclaw resume <session-id>',
+    '  dclaw history',
+    '  dclaw resume <session-id> [prompt]',
     '  dclaw --doctor',
     '',
     'Options:',

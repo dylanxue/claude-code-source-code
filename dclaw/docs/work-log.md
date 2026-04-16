@@ -2,6 +2,65 @@
 
 ## 2026-04-16
 
+- 继续收口阶段 5 的 Tool 协议与核心工具语义：
+  - 将 Tool 协议收紧为轻量版 `buildTool`
+  - 统一默认 `validate / isEnabled / isReadOnly`
+  - 为默认 builtin tools 补齐显式 `outputSchema`
+  - 将 tool result 分为模型侧 `output` 与内部 `rawOutput`
+  - 在 `queryLoop` 中接入 `outputSchema` 运行时校验，避免不合法结果直接进入消息链路
+- 继续收紧 `Read / Edit / Write`：
+  - `Read` 补上 `didReadToEnd / endLine`
+  - `Write` 补上 `create / update / noop`
+  - `Edit / Write` 的 direct `call` 也强制执行“完整读取 + stale read 拦截”
+- 继续细化 `Bash / Glob / Grep` 的结果结构：
+  - `Glob / Grep` 补上 `totalFiles / totalMatches / searchRoot / engine / durationMs`
+  - `Bash` 补上 `executionMode / stdoutTruncated / stderrTruncated / persistedOutputSize`
+- 为上述收口补齐和扩展测试：
+  - `test/unit/tool-schemas.test.ts`
+  - `test/unit/glob-grep.test.ts`
+  - `test/unit/bash.test.ts`
+  - `test/unit/query-trace.test.ts`
+  - `test/integration/query-loop-permissions.test.ts`
+- 验证：
+  - `npm run check`
+  - `npm test`
+  - 当前共 114 条测试，全部通过
+
+- 继续收口 `Bash` 的阶段 5 语义：
+  - 为前台大输出与后台任务日志补上 `cwd / exit_code / sandbox_mode / command` 等元信息
+  - 将 `sandboxMode` 透出到 query trace、transcript 与 history 摘要
+  - 收紧 `fd duplication / force-clobber / >& file / &> / &>> / 1>>file 2>&1` 等重定向边界
+  - 将 command substitution / process substitution 从只读自动放行路径中移出
+- 为上述 `Bash` 语义补齐单测与权限集成测试：
+  - `test/unit/bash.test.ts`
+  - `test/integration/query-loop-permissions.test.ts`
+- 当前判断：`Bash` 已达到阶段 5 的基础可用完成度，后续除 bugfix 外，不继续主动进入真 sandbox / AST 级 shell 解析的深水区
+
+- 为 `Read` 工具补上明确 input schema：
+  - `file_path`
+  - `path` 兼容别名
+- 修正真实 provider 在项目分析类问题里反复以 `path` 调用 `Read` 时被校验拦下的问题
+- 为 CLI 运行时提高最小 tool loop 轮数，减少 headless 在未收束成最终 assistant 文本前直接回退输出原始 tool result JSON
+- 建立最小 session / resume 链路：
+  - `src/session/paths.ts`
+  - `src/session/store.ts`
+  - `src/session/resume.ts`
+- 让 `interactive / --print / resume` 接入最小 session 持久化：
+  - `meta.json`
+  - `messages.jsonl`
+- 让 `resume` 从已恢复 transcript 消息继续执行新的 prompt，而不是仅做占位输出
+- 为 `QueryEngine` 增加 `initialMessages` 入口，用于按已恢复消息继续执行
+- 增加自动化测试：
+  - `test/unit/session.test.ts`
+- 扩展现有测试：
+  - `test/unit/cli.test.ts`
+  - `test/unit/read.test.ts`
+- 验证：
+  - `npm run check`
+  - `npx tsx --test test/unit/read.test.ts test/unit/cli.test.ts test/unit/session.test.ts`
+  - `npm run start -- --print "分析当前dclaw项目有哪些未完成的工作"`
+  - `npm run start -- --print --stream "分析当前dclaw项目有哪些未完成的工作"`
+
 - 继续扩展真实 LLM provider：
   - `src/llm/providers/anthropic.ts`
   - `src/llm/providers/openai.ts`
@@ -90,6 +149,7 @@
   - `DCLAW_MODEL_LIMITS_JSON` / `DCLAW_MODEL_LIMITS_FILE`
 - 默认模型 limits 文件路径：
   - `~/.dclaw/model-limits.json`
+  - 若设置 `DCLAW_HOME`，则为 `<DCLAW_HOME>/model-limits.json`
 - 将 `doctor` 扩展为在 `anthropic / openai` 下输出：
   - resolved model
   - limits config path
@@ -214,9 +274,9 @@
   - 支持后台启动命令
   - 返回 `backgroundTaskId`
   - 返回 `persistedOutputPath`
-  - 将后台输出写入 `.dclaw/background-tasks/*.log`
+  - 将后台输出写入 `<DCLAW_HOME>/background-tasks/*.log`
 - 将 `Bash` 的大输出处理推进到“截断内联 + 完整输出落盘”
-- 为前台 `Bash` 大输出补上 `.dclaw/tool-results/*.log`
+- 为前台 `Bash` 大输出补上 `<DCLAW_HOME>/tool-results/*.log`
 - 将 `permissionMode` 接入 CLI 与 `ToolContext`
 - 为 `Bash.dangerouslyDisableSandbox` 接入最小模式约束：
   - 默认模式阻止
@@ -347,7 +407,8 @@
   - `dclaw --system-prompt "be terse" --print "override check"`
   - `dclaw "interactive with prompt layer"`
 - 实现基础 `CLAUDE.md` 加载器：
-  - `~/.dclaw/CLAUDE.md`
+  - 默认用户级 `CLAUDE.md`：`~/.dclaw/CLAUDE.md`
+  - 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/CLAUDE.md`
   - `<cwd>/CLAUDE.md`
   - `<cwd>/CLAUDE.local.md`
 - 将 `CLAUDE.md` 内容作为独立 prompt section 注入
@@ -365,7 +426,8 @@
   - `dclaw --cwd test/fixtures/claude-md-basic --print "fixture prompt"`
   - `dclaw --cwd test/fixtures/claude-md-basic "interactive fixture"`
 - 将 `CLAUDE.md` 发现升级为多层模式：
-  - 用户级 `~/.dclaw/CLAUDE.md`
+  - 默认用户级 `~/.dclaw/CLAUDE.md`
+  - 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/CLAUDE.md`
   - 从 cwd 向上查找 `<dir>/CLAUDE.md`
   - 从 cwd 向上查找 `<dir>/.claude/CLAUDE.md`
   - 从 cwd 向上查找 `<dir>/.claude/rules/*.md`

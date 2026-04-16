@@ -13,6 +13,10 @@ async function createTempDir(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 test('plan mode blocks mutating tool calls', async () => {
   const dir = await createTempDir('dclaw-plan-mode-')
   const filePath = join(dir, 'blocked.txt')
@@ -64,7 +68,8 @@ test('accept-edits mode allows Write without prompting', async () => {
       }),
     })
 
-    assert.match(result.outputText, /"ok": true/)
+    assert.match(result.outputText, /"type": "create"/)
+    assert.match(result.outputText, /"didWrite": true/)
     assert.equal(await readFile(filePath, 'utf8'), 'hello')
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -90,7 +95,6 @@ test('plan mode still allows read-only tools', async () => {
       }),
     })
 
-    assert.match(result.outputText, /"ok": true/)
     assert.match(result.outputText, /"type": "text"/)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -118,6 +122,7 @@ test('accept-edits mode still blocks Bash without interactive approval', async (
 
 test('default mode can allow Bash through interactive approval', async () => {
   const registry = createDefaultToolRegistry()
+  const cwdPattern = new RegExp(escapeRegExp(process.cwd()))
 
   const result = await executeSingleTurn({
     client: new StubLlmClient(),
@@ -130,12 +135,14 @@ test('default mode can allow Bash through interactive approval', async () => {
     }),
   })
 
-  assert.match(result.outputText, /"ok": true/)
-  assert.match(result.outputText, /work\/claude-code-source-code\/dclaw/)
+  assert.match(result.outputText, /"command": "pwd"/)
+  assert.match(result.outputText, /"sandboxMode": "restricted"/)
+  assert.match(result.outputText, cwdPattern)
 })
 
 test('default mode allows read-only Bash without interactive approval', async () => {
   const registry = createDefaultToolRegistry()
+  const cwdPattern = new RegExp(escapeRegExp(process.cwd()))
 
   const result = await executeSingleTurn({
     client: new StubLlmClient(),
@@ -147,12 +154,14 @@ test('default mode allows read-only Bash without interactive approval', async ()
     }),
   })
 
-  assert.match(result.outputText, /"ok": true/)
-  assert.match(result.outputText, /work\/claude-code-source-code\/dclaw/)
+  assert.match(result.outputText, /"command": "pwd"/)
+  assert.match(result.outputText, /"sandboxMode": "restricted"/)
+  assert.match(result.outputText, cwdPattern)
 })
 
 test('default mode allows wrapped read-only Bash without interactive approval', async () => {
   const registry = createDefaultToolRegistry()
+  const cwdPattern = new RegExp(escapeRegExp(process.cwd()))
 
   const result = await executeSingleTurn({
     client: new StubLlmClient(),
@@ -164,12 +173,14 @@ test('default mode allows wrapped read-only Bash without interactive approval', 
     }),
   })
 
-  assert.match(result.outputText, /"ok": true/)
-  assert.match(result.outputText, /work\/claude-code-source-code\/dclaw/)
+  assert.match(result.outputText, /"command": "time pwd"/)
+  assert.match(result.outputText, /"sandboxMode": "restricted"/)
+  assert.match(result.outputText, cwdPattern)
 })
 
 test('default mode allows safe-env-prefixed read-only Bash without interactive approval', async () => {
   const registry = createDefaultToolRegistry()
+  const cwdPattern = new RegExp(escapeRegExp(process.cwd()))
 
   const result = await executeSingleTurn({
     client: new StubLlmClient(),
@@ -181,8 +192,28 @@ test('default mode allows safe-env-prefixed read-only Bash without interactive a
     }),
   })
 
-  assert.match(result.outputText, /"ok": true/)
-  assert.match(result.outputText, /work\/claude-code-source-code\/dclaw/)
+  assert.match(result.outputText, /"command": "TZ=UTC pwd"/)
+  assert.match(result.outputText, /"sandboxMode": "restricted"/)
+  assert.match(result.outputText, cwdPattern)
+})
+
+test('default mode allows Bash with fd duplication without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+  const cwdPattern = new RegExp(escapeRegExp(process.cwd()))
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [createTextMessage('user', 'tool:Bash command=pwd\\ 2\\>\\&1')],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(result.outputText, /"command": "pwd 2>&1"/)
+  assert.match(result.outputText, /"sandboxMode": "restricted"/)
+  assert.match(result.outputText, cwdPattern)
 })
 
 test('default mode blocks Bash with output redirection without interactive approval', async () => {
@@ -248,7 +279,8 @@ test('default mode can allow Bash with shell expansion in output redirection aft
       }),
     })
 
-    assert.match(result.outputText, /"ok": true/)
+    assert.match(result.outputText, /"command": "printf hello > \$DCLAW_REDIRECT"/)
+    assert.match(result.outputText, /"sandboxMode": "restricted"/)
     assert.equal(await readFile(filePath, 'utf8'), 'hello')
   } finally {
     if (previousValue === undefined) {
@@ -290,4 +322,136 @@ test("default mode blocks Bash that combines cd with output redirection without 
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('default mode blocks Bash with fd output redirection without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=pwd\\ 2\\>\\ stderr.txt'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(result.outputText, /Permission denied for tool Bash in default mode/)
+})
+
+test('default mode blocks Bash with force-clobber redirection without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=pwd\\ \\>\\|\\ forced.txt'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(result.outputText, /Permission denied for tool Bash in default mode/)
+})
+
+test('default mode blocks Bash with >& file redirection without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=pwd\\ \\>\\&\\ redirected.txt'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(result.outputText, /Permission denied for tool Bash in default mode/)
+})
+
+test('default mode blocks Bash with &> redirection without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=pwd\\ \\&\\>\\ redirected.txt'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(result.outputText, /Permission denied for tool Bash in default mode/)
+})
+
+test('default mode blocks Bash with append-all-output redirection without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=pwd\\ \\&\\>\\>\\ redirected.txt'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(result.outputText, /Permission denied for tool Bash in default mode/)
+})
+
+test('default mode blocks Bash with process substitution without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=cat\\ \\<\\(pwd\\)'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(
+    result.outputText,
+    /Shell command substitution and process substitution in Bash require manual approval/,
+  )
+})
+
+test('default mode blocks Bash with command substitution without interactive approval', async () => {
+  const registry = createDefaultToolRegistry()
+
+  const result = await executeSingleTurn({
+    client: new StubLlmClient(),
+    messages: [
+      createTextMessage('user', 'tool:Bash command=grep\\ foo\\ \\$\\(pwd\\)\\/file.txt'),
+    ],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: registry.list().map(tool => tool.name),
+      permissionMode: 'default',
+    }),
+  })
+
+  assert.match(
+    result.outputText,
+    /Shell command substitution and process substitution in Bash require manual approval/,
+  )
 })

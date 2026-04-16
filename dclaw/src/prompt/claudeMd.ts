@@ -1,6 +1,7 @@
 import { access, readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { getDclawHomeDir } from '../session/paths.js'
 
 export type ClaudeMdSource = 'user' | 'project' | 'local' | 'rules'
 
@@ -340,11 +341,14 @@ async function loadEntriesForDirectory(
   ]
 }
 
-export async function loadClaudeMdEntries(cwd: string): Promise<ClaudeMdEntry[]> {
+export async function loadClaudeMdEntries(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ClaudeMdEntry[]> {
   const state: LoadState = { loadedPaths: new Set() }
   const userEntry = await loadEntryWithIncludes(
     'user',
-    join(homedir(), '.dclaw', 'CLAUDE.md'),
+    join(getDclawHomeDir(env), 'CLAUDE.md'),
     state,
   )
   const directories = listDirectoriesFromRootToCwd(cwd)

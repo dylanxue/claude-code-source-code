@@ -135,8 +135,18 @@ test('resolveModelLimits applies environment overrides last', () => {
 })
 
 test('getModelLimitsConfigPath defaults to ~/.dclaw/model-limits.json', () => {
-  assert.match(
+  assert.equal(
     getModelLimitsConfigPath({ HOME: '/tmp/example-home' } as NodeJS.ProcessEnv),
-    /\/\.dclaw\/model-limits\.json$/,
+    '/tmp/example-home/.dclaw/model-limits.json',
+  )
+})
+
+test('getModelLimitsConfigPath uses DCLAW_HOME when configured', () => {
+  assert.equal(
+    getModelLimitsConfigPath({
+      HOME: '/tmp/example-home',
+      DCLAW_HOME: '/tmp/dev-dclaw',
+    } as NodeJS.ProcessEnv),
+    '/tmp/dev-dclaw/model-limits.json',
   )
 })

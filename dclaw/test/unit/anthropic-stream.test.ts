@@ -123,3 +123,72 @@ test('AnthropicLlmClient skips sparse SSE block indexes', async () => {
     await once(server, 'close')
   }
 })
+
+test('AnthropicLlmClient preserves streaming thinking blocks', async () => {
+  const deltas: string[] = []
+
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+    )
+    response.write(
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"Need to inspect first."}}\n\n',
+    )
+    response.write(
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"signature_delta","signature":"sig_stream_1"}}\n\n',
+    )
+    response.write(
+      'event: content_block_start\ndata: {"index":1,"content_block":{"type":"text","text":""}}\n\n',
+    )
+    response.write(
+      'event: content_block_delta\ndata: {"index":1,"delta":{"type":"text_delta","text":"done"}}\n\n',
+    )
+    response.write('event: message_stop\ndata: {"type":"message_stop"}\n\n')
+    response.end()
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      defaultModel: 'claude-sonnet-4-6',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onTextDelta(text) {
+          deltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.deepEqual(deltas, ['done'])
+    assert.deepEqual(result.message.content, [
+      {
+        type: 'thinking',
+        thinking: 'Need to inspect first.',
+        signature: 'sig_stream_1',
+      },
+      {
+        type: 'text',
+        text: 'done',
+      },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})

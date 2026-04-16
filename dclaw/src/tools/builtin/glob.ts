@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { ToolResult } from '../../types/tool.js'
-import type { Tool } from '../types.js'
+import { buildTool, type Tool } from '../types.js'
 import { fallbackGlob } from './fileSearch.js'
 import {
   isAbsoluteToolPath,
@@ -21,13 +22,74 @@ export type GlobToolInput = {
 export type GlobToolOutput = {
   filenames: string[]
   numFiles: number
+  totalFiles: number
   truncated: boolean
+  appliedLimit?: number
+  searchRoot: string
+  engine: 'ripgrep' | 'node-fallback'
   durationMs: number
 }
 
-export const globTool: Tool<GlobToolInput, GlobToolOutput> = {
+function getSearchRoot(path: string | undefined, cwd: string): string {
+  if (!path) {
+    return '.'
+  }
+
+  const absolutePath = toAbsoluteToolPath(path)
+  if (resolve(absolutePath) === resolve(cwd)) {
+    return '.'
+  }
+
+  return toDisplayPath(absolutePath, cwd)
+}
+
+export const globTool: Tool<GlobToolInput, GlobToolOutput> = buildTool({
   name: 'Glob',
   description: 'Fast file pattern matching tool.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pattern: {
+        type: 'string',
+        description: 'Glob pattern to match, for example **/*.ts.',
+      },
+      path: {
+        type: 'string',
+        description: 'Optional absolute directory path to search within.',
+      },
+    },
+    required: ['pattern'],
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      filenames: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+      numFiles: { type: 'integer' },
+      totalFiles: { type: 'integer' },
+      truncated: { type: 'boolean' },
+      appliedLimit: { type: 'integer' },
+      searchRoot: { type: 'string' },
+      engine: {
+        type: 'string',
+        enum: ['ripgrep', 'node-fallback'],
+      },
+      durationMs: { type: 'integer' },
+    },
+    required: [
+      'filenames',
+      'numFiles',
+      'totalFiles',
+      'truncated',
+      'searchRoot',
+      'engine',
+      'durationMs',
+    ],
+    additionalProperties: false,
+  },
   async validate(input) {
     if (!input.pattern || input.pattern.trim().length === 0) {
       return {
@@ -60,6 +122,7 @@ export const globTool: Tool<GlobToolInput, GlobToolOutput> = {
   },
   async call(input, context): Promise<ToolResult<GlobToolOutput>> {
     const start = Date.now()
+    const searchRoot = getSearchRoot(input.path, context.cwd)
     const args = ['--files', '-g', input.pattern, input.path ? toAbsoluteToolPath(input.path) : '.']
 
     try {
@@ -81,11 +144,15 @@ export const globTool: Tool<GlobToolInput, GlobToolOutput> = {
         output: {
           filenames: limitedFilenames,
           numFiles: limitedFilenames.length,
+          totalFiles: filenames.length,
           truncated,
+          appliedLimit: truncated ? DEFAULT_GLOB_LIMIT : undefined,
+          searchRoot,
+          engine: 'ripgrep',
           durationMs: Date.now() - start,
         },
         summary: truncated
-          ? `Found ${limitedFilenames.length}+ file(s)`
+          ? `Found ${limitedFilenames.length} of ${filenames.length} file(s)`
           : `Found ${limitedFilenames.length} file(s)`,
       }
     } catch (error) {
@@ -106,11 +173,15 @@ export const globTool: Tool<GlobToolInput, GlobToolOutput> = {
           output: {
             filenames: limitedFilenames,
             numFiles: limitedFilenames.length,
+            totalFiles: filenames.length,
             truncated,
+            appliedLimit: truncated ? DEFAULT_GLOB_LIMIT : undefined,
+            searchRoot,
+            engine: 'node-fallback',
             durationMs: Date.now() - start,
           },
           summary: truncated
-            ? `Found ${limitedFilenames.length}+ file(s) (node fallback)`
+            ? `Found ${limitedFilenames.length} of ${filenames.length} file(s) (node fallback)`
             : `Found ${limitedFilenames.length} file(s) (node fallback)`,
         }
       }
@@ -121,7 +192,10 @@ export const globTool: Tool<GlobToolInput, GlobToolOutput> = {
           output: {
             filenames: [],
             numFiles: 0,
+            totalFiles: 0,
             truncated: false,
+            searchRoot,
+            engine: 'ripgrep',
             durationMs: Date.now() - start,
           },
           summary: 'Found 0 file(s)',
@@ -131,4 +205,4 @@ export const globTool: Tool<GlobToolInput, GlobToolOutput> = {
       throw error
     }
   },
-}
+})

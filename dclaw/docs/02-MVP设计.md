@@ -111,7 +111,8 @@ MVP 模式建议：
 建议存储：
 
 ```text
-~/.dclaw/sessions/<session-id>/
+默认: ~/.dclaw/sessions/<session-id>/
+若设置 DCLAW_HOME: <DCLAW_HOME>/sessions/<session-id>/
   meta.json
   messages.jsonl
 ```

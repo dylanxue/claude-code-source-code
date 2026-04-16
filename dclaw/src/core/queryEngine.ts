@@ -6,6 +6,7 @@ import {
 } from '../types/message.js'
 import type { ToolRegistry } from '../tools/registry.js'
 import { executeSingleTurn, type QueryLoopRequest } from './queryLoop.js'
+import type { QueryTraceSink } from './queryTrace.js'
 
 export type QueryEngineOptions = {
   client: LlmClient
@@ -14,6 +15,8 @@ export type QueryEngineOptions = {
   toolRegistry: ToolRegistry
   toolContext: ToolContext
   maxIterations?: number
+  initialMessages?: Message[]
+  queryTraceSink?: QueryTraceSink
 }
 
 export type QueryResult = {
@@ -33,6 +36,7 @@ export class QueryEngine {
   private readonly toolContext: ToolContext
   private readonly maxIterations: number
   private readonly messages: Message[]
+  private readonly queryTraceSink?: QueryTraceSink
 
   constructor(options: QueryEngineOptions) {
     this.client = options.client
@@ -41,7 +45,8 @@ export class QueryEngine {
     this.toolRegistry = options.toolRegistry
     this.toolContext = options.toolContext
     this.maxIterations = options.maxIterations ?? 4
-    this.messages = []
+    this.messages = [...(options.initialMessages ?? [])]
+    this.queryTraceSink = options.queryTraceSink
   }
 
   getMessages(): Message[] {
@@ -68,6 +73,7 @@ export class QueryEngine {
       toolContext: this.toolContext,
       maxIterations: this.maxIterations,
       streamHandlers,
+      queryTraceSink: this.queryTraceSink,
     })
 
     this.messages.push(...response.addedMessages)

@@ -71,7 +71,7 @@ export async function evaluateToolPermission(
   input: unknown,
   context: ToolContext,
 ): Promise<ToolValidationResult> {
-  const isReadOnly = tool.isReadOnly?.(input) ?? false
+  const isReadOnly = tool.isReadOnly(input)
   const bashApprovalReason =
     tool.name === 'Bash' &&
     typeof input === 'object' &&

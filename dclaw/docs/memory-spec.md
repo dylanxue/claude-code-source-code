@@ -17,7 +17,8 @@ memory 使用本地文件持久化。
 建议路径：
 
 ```text
-~/.dclaw/projects/<project>/memory/
+默认: ~/.dclaw/projects/<project>/memory/
+若设置 DCLAW_HOME: <DCLAW_HOME>/projects/<project>/memory/
 ```
 
 ### 2.2 `MEMORY.md`
@@ -85,4 +86,3 @@ memory 使用本地文件持久化。
 
 - repo 级 team memory
 - 本地与远端同步
-

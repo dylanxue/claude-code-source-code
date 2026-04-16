@@ -29,7 +29,12 @@ test('Glob truncates results after 100 files', async () => {
 
     assert.equal(result.ok, true)
     assert.equal(result.output.numFiles, 100)
+    assert.equal(result.output.totalFiles, 105)
     assert.equal(result.output.truncated, true)
+    assert.equal(result.output.appliedLimit, 100)
+    assert.equal(result.output.searchRoot, '.')
+    assert.equal(result.output.engine, 'ripgrep')
+    assert.ok(result.output.durationMs >= 0)
     assert.equal(result.output.filenames.length, 100)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -76,6 +81,11 @@ test('Grep defaults to files_with_matches mode', async () => {
     assert.equal(result.ok, true)
     assert.equal(result.output.mode, 'files_with_matches')
     assert.deepEqual(result.output.filenames, ['sample.txt'])
+    assert.equal(result.output.totalFiles, 1)
+    assert.equal(result.output.searchRoot, 'sample.txt')
+    assert.equal(result.output.engine, 'ripgrep')
+    assert.ok(result.output.durationMs >= 0)
+    assert.equal(result.output.truncated, false)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -103,6 +113,11 @@ test('Grep applies default head_limit in content mode', async () => {
     assert.equal(result.output.mode, 'content')
     assert.equal(result.output.appliedLimit, 250)
     assert.equal(result.output.numLines, 250)
+    assert.equal(result.output.totalLines, 300)
+    assert.equal(result.output.searchRoot, 'sample.txt')
+    assert.equal(result.output.engine, 'ripgrep')
+    assert.ok(result.output.durationMs >= 0)
+    assert.equal(result.output.truncated, true)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -126,6 +141,10 @@ test('Grep supports content mode without line numbers', async () => {
 
     assert.equal(result.ok, true)
     assert.equal(result.output.content, 'sample.txt:alpha')
+    assert.equal(result.output.searchRoot, 'sample.txt')
+    assert.equal(result.output.engine, 'ripgrep')
+    assert.ok(result.output.durationMs >= 0)
+    assert.equal(result.output.truncated, false)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

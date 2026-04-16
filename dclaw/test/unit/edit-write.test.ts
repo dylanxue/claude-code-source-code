@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -57,6 +57,7 @@ test('Edit returns structuredPatch after a full read', async () => {
     assert.equal(result.output.oldString, 'two')
     assert.equal(result.output.newString, 'TWO')
     assert.equal(result.output.userModified, false)
+    assert.equal(result.output.didWrite, true)
     assert.equal(result.output.replaceAll, false)
     assert.equal(result.output.structuredPatch.length, 1)
     assert.deepEqual(result.output.structuredPatch[0]?.lines, [
@@ -124,6 +125,58 @@ test('Edit replace_all updates every match', async () => {
   }
 })
 
+test('Edit call rejects when the file was not fully read first', async () => {
+  const dir = await createTempDir('dclaw-edit-call-no-read-')
+  const filePath = join(dir, 'sample.txt')
+
+  try {
+    await writeFile(filePath, 'one\ntwo\n', 'utf8')
+    await assert.rejects(
+      () =>
+        editTool.call(
+          {
+            file_path: filePath,
+            old_string: 'two',
+            new_string: 'TWO',
+          },
+          createToolContext(),
+        ),
+      /File has not been fully read yet. Use Read first before Edit\./,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Edit call rejects when the file changed after it was read', async () => {
+  const dir = await createTempDir('dclaw-edit-call-stale-')
+  const filePath = join(dir, 'sample.txt')
+  const context = createToolContext()
+
+  try {
+    await writeFile(filePath, 'one\ntwo\n', 'utf8')
+    await readFileTool.call({ file_path: filePath }, context)
+    await writeFile(filePath, 'one\nchanged\n', 'utf8')
+    const bumpedTime = new Date(Date.now() + 2_000)
+    await utimes(filePath, bumpedTime, bumpedTime)
+
+    await assert.rejects(
+      () =>
+        editTool.call(
+          {
+            file_path: filePath,
+            old_string: 'two',
+            new_string: 'TWO',
+          },
+          context,
+        ),
+      /File has been modified since it was read. Use Read again before Edit\./,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('Write returns structuredPatch when updating an existing file', async () => {
   const dir = await createTempDir('dclaw-write-')
   const filePath = join(dir, 'sample.txt')
@@ -142,6 +195,8 @@ test('Write returns structuredPatch when updating an existing file', async () =>
 
     assert.equal(result.ok, true)
     assert.equal(result.output.type, 'update')
+    assert.equal(result.output.didWrite, true)
+    assert.equal(result.output.userModified, false)
     assert.equal(result.output.structuredPatch.length, 1)
     assert.deepEqual(result.output.structuredPatch[0]?.lines, [
       '-old',
@@ -149,6 +204,33 @@ test('Write returns structuredPatch when updating an existing file', async () =>
       ' text',
     ])
     assert.equal(await readFile(filePath, 'utf8'), 'new\ntext\n')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Write returns noop when content is unchanged', async () => {
+  const dir = await createTempDir('dclaw-write-noop-')
+  const filePath = join(dir, 'sample.txt')
+  const context = createToolContext()
+
+  try {
+    await writeFile(filePath, 'same\ntext\n', 'utf8')
+    await readFileTool.call({ file_path: filePath }, context)
+    const result = await writeTool.call(
+      {
+        file_path: filePath,
+        content: 'same\ntext\n',
+      },
+      context,
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.type, 'noop')
+    assert.equal(result.output.didWrite, false)
+    assert.equal(result.output.userModified, false)
+    assert.deepEqual(result.output.structuredPatch, [])
+    assert.equal(await readFile(filePath, 'utf8'), 'same\ntext\n')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -174,6 +256,56 @@ test('Write validation rejects partial reads for existing files', async () => {
       ok: false,
       error: 'File has not been fully read yet. Use Read first before Write.',
     })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Write call rejects when the file was not fully read first', async () => {
+  const dir = await createTempDir('dclaw-write-call-no-read-')
+  const filePath = join(dir, 'sample.txt')
+
+  try {
+    await writeFile(filePath, 'old\ntext\n', 'utf8')
+    await assert.rejects(
+      () =>
+        writeTool.call(
+          {
+            file_path: filePath,
+            content: 'new\ntext\n',
+          },
+          createToolContext(),
+        ),
+      /File has not been fully read yet. Use Read first before Write\./,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Write call rejects when the file changed after it was read', async () => {
+  const dir = await createTempDir('dclaw-write-call-stale-')
+  const filePath = join(dir, 'sample.txt')
+  const context = createToolContext()
+
+  try {
+    await writeFile(filePath, 'old\ntext\n', 'utf8')
+    await readFileTool.call({ file_path: filePath }, context)
+    await writeFile(filePath, 'changed\ntext\n', 'utf8')
+    const bumpedTime = new Date(Date.now() + 2_000)
+    await utimes(filePath, bumpedTime, bumpedTime)
+
+    await assert.rejects(
+      () =>
+        writeTool.call(
+          {
+            file_path: filePath,
+            content: 'new\ntext\n',
+          },
+          context,
+        ),
+      /File has been modified since it was read. Use Read again before Write\./,
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

@@ -3,7 +3,7 @@
 ## 当前状态
 
 - 项目名称：`dclaw`
-- 当前阶段：阶段 5 进行中
+- 当前阶段：`v0.1` 后半段，阶段 5 持续打磨中，阶段 6-7 已启动
 - 当前版本目标：`v0.1`
 - 总体状态：`in progress`
 
@@ -15,9 +15,9 @@
 | 2 | Query Engine 与消息协议 | completed | 已有最小消息模型、LLM 抽象、QueryEngine、queryLoop |
 | 3 | System Prompt 与指令装配 | in progress | 最小 prompt assembler 与基础版 `CLAUDE.md` 指令链路已可用 |
 | 4 | `CLAUDE.md` 指令系统 | in progress | 基础版多层发现、include、去重、顺序可观察性已可用 |
-| 5 | Tool 协议与基础工具 | in progress | 工具名和最小链路已接入，但工具语义与 Claude Code 仍有明显差距 |
-| 6 | 权限模式与 Hooks | not started | 已完成方案设计，未编码 |
-| 7 | Session、历史与恢复 | not started | 已完成方案设计，未编码 |
+| 5 | Tool 协议与基础工具 | in progress | 已补 `buildTool / outputSchema / result mapping / runtime output validation`，当前继续打磨 `Bash / Glob / Grep` 与模型侧结果收口 |
+| 6 | 权限模式与 Hooks | in progress | 已接入最小 permission evaluator，但 hooks 与细粒度规则仍未完成 |
+| 7 | Session、历史与恢复 | in progress | 已实现最小 session store、messages 持久化与 `resume` 恢复链路 |
 | 8 | 上下文管理与自动压缩 | not started | 后续阶段 |
 | 9 | Plan / Task / Todo | not started | 后续阶段 |
 | 10 | Memory | not started | 已完成方案设计，未编码 |
@@ -77,7 +77,7 @@
 - 为 Tool 执行链路补上 `validate / isEnabled / availableTools` 预留位
 - 增加 `WebFetch` 与 `AskUserQuestion` 的最小实现并接入默认工具集
 - 将 `Bash` 的 timeout / interrupted / noOutputExpected / 只读判定语义往 Claude Code 收紧一层
-- 将 `Bash` 补上最小 `run_in_background` 能力，并将后台输出落盘到 `.dclaw/background-tasks/`
+- 将 `Bash` 补上最小 `run_in_background` 能力，并将后台输出落盘到 `<DCLAW_HOME>/background-tasks/`
 - 将 `Bash` 补上大输出落盘能力，并返回 `persistedOutputPath`
 - 将 `permissionMode` 接入 CLI 与 tool context
 - 将 `Bash.dangerouslyDisableSandbox` 接入最小模式约束
@@ -89,6 +89,16 @@
 - 将 `Edit / Write` 补上最小 `gitDiff` 输出
 - 将 `Read` 补上 `isPartial` 输出标记
 - 将 `Read` 补上空文件 / offset 越界 warning 与目录路径校验
+- 为 `Read` 补上明确 input schema，并兼容 `path` 作为 `file_path` 别名
+- 将 Tool 协议收紧为轻量版 `buildTool`，并统一默认 `validate / isEnabled / isReadOnly`
+- 为默认 builtin tools 补齐显式 `outputSchema`
+- 将 tool result 分为模型侧 `output` 与内部 `rawOutput`
+- 将 `outputSchema` 接入 `queryLoop` 运行时校验，避免不合法工具输出直接进入消息链路
+- 将 `Read` 的输出形态进一步收紧到更明确的 `type / file / didReadToEnd / warning` 结构
+- 将 `Edit / Write` 的读后写约束从 validate 扩展到 direct `call`
+- 为 `Write` 补上 `create / update / noop` 结果区分与 `didWrite`
+- 为 `Glob / Grep` 补上 `totalFiles / totalMatches / searchRoot / engine / durationMs` 等结果元信息
+- 为 `Bash` 补上 `executionMode / stdoutTruncated / stderrTruncated / persistedOutputSize`
 - 建立基础自动化测试骨架，并接入 `npm test`
 - 将自动化测试扩展到 `Glob / Grep / WebFetch / AskUserQuestion`
 - 将自动化测试扩展到更多 permission mode 与 `Read / Edit / Write / Bash` 边界场景
@@ -100,14 +110,26 @@
   - 动态 shell expansion 重定向目标
   - `cd` 与输出重定向的组合命令
 - 将自动化测试扩展到上述两类 `Bash` 安全审批场景
+- 将 `Bash` 的结果持久化收紧为“可独立诊断的运行记录”，前台大输出与后台任务日志均补上 `cwd / exit_code / sandbox_mode / command` 等元信息
+- 将 `Bash` 的 `sandboxMode` 透出到 tool result、query trace、session transcript 与 history 摘要
+- 将 `Bash` 的重定向语义进一步收紧到 `fd duplication / force-clobber / >& file / &> / &>> / 1>>file 2>&1` 等边界
+- 将 `Bash` 的 command substitution / process substitution 从只读自动放行路径中移出，并统一要求手动审批
+- 建立最小 session store：
+  - 默认：`~/.dclaw/sessions/<session-id>/meta.json`
+  - 默认：`~/.dclaw/sessions/<session-id>/messages.jsonl`
+  - 若设置 `DCLAW_HOME`，则改为 `<DCLAW_HOME>/sessions/<session-id>/...`
+- 让 `interactive / --print / resume` 接入最小 session 持久化与恢复链路
+- 让 `resume` 支持在恢复历史消息后继续执行新的 prompt
+- 将 `QueryEngine` 扩展为支持从恢复的 `initialMessages` 继续执行
+- 将 headless / interactive 运行时的最大 tool loop 轮数从默认最小值上调，减少过早回退到原始 tool result JSON 的情况
 
 ## 当前风险与注意事项
 
 - 当前已完成 Query Engine 最小链路和基础 prompt/`CLAUDE.md` 注入，已进入基础多轮 tool loop
 - 当前 tool loop 已有基础多轮 assistant->tool->assistant 闭环，并已补上最小 permission evaluator，但还没有更细粒度规则
-- 当前工具层主要完成的是“名字和最小链路对齐”，离 Claude Code 的完整工具语义还差很远
-- 当前 `Read / Edit / Write` 已进入“基础语义收紧”阶段，并补上了基础 `structuredPatch`、最小 `gitDiff` 与更明确的 warning 语义，但和 Claude Code 的完整 diff / patch /复杂文件支持还有明显差距
-- 当前 `Bash / Glob / Grep` 已补上部分核心语义；`Bash` 已有最小后台任务、大输出落盘、mode 级 unsandboxed 入口和最小 permission evaluator，但真正的 sandbox 行为和更细粒度 permission 规则仍未接入
+- 当前工具层已经不只是“名字和最小链路对齐”，而是完成了第一轮协议收口：`buildTool`、显式 `input/output schema`、内部/模型结果分层、运行时 output 校验都已接入
+- 当前 `Read / Edit / Write` 已完成第一轮语义收紧，具备更明确的 partial read、warning、stale read 拦截、`noop` 与 patch/diff 输出；但和 Claude Code 的完整 diff / patch /复杂文件支持还有明显差距
+- 当前 `Bash / Glob / Grep` 已补上较完整的结果边界信息；其中 `Bash` 已具备只读判定、关键 shell 边界覆盖、结果持久化与可观测性，`Glob / Grep` 也已补上统计、分页和执行来源字段，但模型侧结果映射仍比 Claude Code 更薄
 - 当前 `WebFetch / AskUserQuestion` 仍然只是最小实现
 - 当前 `LLM` 层已同时支持 `stub`、`Anthropic`、`OpenAI`，默认联调已可以直接走真实 provider
 - 当前已接入 `Anthropic` 与 `OpenAI` 的基础 streaming，但仍未补重试、速率限制处理与更细粒度错误分类
@@ -117,21 +139,26 @@
 - 文档约束已经较明确，后续开发需尽量遵守，不要边写边扩大范围
 - 当前 `CLAUDE.md` 仍是基础版实现，未覆盖完整 include 语义和所有优先级细节
 - 当前 `CLAUDE.md` 尚未覆盖 managed memory、frontmatter 条件规则、instruction hooks 等细节
+- 当前 session / resume 仍是最小实现，尚未覆盖 session 列表、最近会话选择、history 检索与更完整的 transcript 恢复语义
 - 阶段 1 开始后，应持续维护本文件状态
 
 ## 下一步
 
 下一步进入：
 
-- 阶段 5：Tool 协议与基础工具继续推进
+- `v0.1` 收尾阶段：并行推进阶段 5、6、7 的剩余主链路
 
 第一批目标：
 
 - 优先细化已有核心工具语义，而不是继续横向补更多工具
-- 先补 `Read / Edit / Write / Bash / Glob / Grep`
+- 继续收口 `Bash / Glob / Grep` 的统计、分页、结果映射与模型侧压缩策略
 - 再补 `WebFetch / AskUserQuestion`
-- 下一批优先补 `Bash` 的权限接入点、sandbox 行为和更稳的结果持久化语义
-- 同步继续细化 `Read / Edit / Write`，向 Claude Code 的更完整 diff / patch / 文件类型支持靠近
+- `Bash` 暂时以 bugfix 为主，不继续主动深挖真 sandbox / AST 级 shell 解析这类深水区能力
+- `Read / Edit / Write` 转入 bugfix + 小步增强，继续向 Claude Code 的更完整 diff / patch / 文件类型支持靠近
+- 把 session / resume 从“最小可用”推进到“可持续使用”：
+  - session 列表 / 最近会话选择
+  - 更完整的 transcript / history 恢复
+  - interactive 真正 REPL 化，而不是仅依赖单次 prompt
 - 继续细化 `Anthropic` provider，补重试、可配置 token 参数与更稳的错误处理
 - 继续细化 `OpenAI` provider，补 `responses` 流式事件、reasoning / verbosity 等更细粒度参数支持
 - 为后续更多 provider 抽象出更明确的 request/response 适配层

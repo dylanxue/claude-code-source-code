@@ -1,5 +1,5 @@
 import type { ToolResult } from '../../types/tool.js'
-import type { Tool } from '../types.js'
+import { buildTool, type Tool } from '../types.js'
 
 export type AskUserQuestionOption = {
   label: string
@@ -24,9 +24,105 @@ export type AskUserQuestionOutput = {
 export const askUserQuestionTool: Tool<
   AskUserQuestionInput,
   AskUserQuestionOutput
-> = {
+> = buildTool({
   name: 'AskUserQuestion',
   description: 'Ask the user one or more multiple-choice questions.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 4,
+        items: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: 'Prompt shown to the user.',
+            },
+            header: {
+              type: 'string',
+              description: 'Short header label shown alongside the question.',
+            },
+            options: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 4,
+              items: {
+                type: 'object',
+                properties: {
+                  label: {
+                    type: 'string',
+                    description: 'Short option label.',
+                  },
+                  description: {
+                    type: 'string',
+                    description: 'One-sentence explanation of the option.',
+                  },
+                },
+                required: ['label', 'description'],
+                additionalProperties: false,
+              },
+            },
+            multiSelect: {
+              type: 'boolean',
+              description: 'Whether multiple options may be selected.',
+            },
+          },
+          required: ['question', 'header', 'options'],
+          additionalProperties: false,
+        },
+      },
+      answers: {
+        type: 'object',
+        additionalProperties: {
+          type: 'string',
+        },
+        description: 'Optional pre-filled answers for non-interactive execution.',
+      },
+    },
+    required: ['questions'],
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            header: { type: 'string' },
+            options: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  description: { type: 'string' },
+                },
+                required: ['label', 'description'],
+                additionalProperties: false,
+              },
+            },
+            multiSelect: { type: 'boolean' },
+          },
+          required: ['question', 'header', 'options'],
+          additionalProperties: false,
+        },
+      },
+      answers: {
+        type: 'object',
+        additionalProperties: {
+          type: 'string',
+        },
+      },
+    },
+    required: ['questions', 'answers'],
+    additionalProperties: false,
+  },
   validate(input, context) {
     if (!Array.isArray(input.questions) || input.questions.length === 0) {
       return {
@@ -93,4 +189,4 @@ export const askUserQuestionTool: Tool<
       summary: `Collected ${Object.keys(answers).length} answer(s)`,
     }
   },
-}
+})

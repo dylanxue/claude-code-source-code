@@ -2,7 +2,7 @@
 
 `dclaw` 是一个严格参考 Claude Code 通用能力边界设计的终端优先通用 agent 项目。
 
-当前仓库中的 `dclaw/` 目录已经进入核心实现早期阶段，当前重点是按既定文档推进 CLI、Query Engine、Prompt、`CLAUDE.md` 与 Tool 主链路。
+当前仓库中的 `dclaw/` 目录已经进入 `v0.1` 后半段，当前重点是收口通用 agent 的 MVP 主链路，继续把 CLI、Query Engine、Prompt、`CLAUDE.md`、Tool、Permission 与 Session/Resume 往可持续使用的状态推进。
 
 ## 当前范围
 
@@ -66,7 +66,10 @@ dclaw/
 - TypeScript 基础工程已初始化
 - CLI 与最小 Query Engine 已可运行
 - Prompt / `CLAUDE.md` 基础链路已接入
-- Tool registry 与基础工具链路已开始实现
+- Tool registry 与基础工具链路已接入，并进入语义收紧阶段
+- 最小 permission mode 已接入 tool 执行链路
+- 最小 session store / transcript 持久化 / `resume` 恢复链路已打通
+- 当前仍处于 `v0.1` 收尾阶段，REPL、history、compact、memory、多代理、MCP / skills / plugins 等能力尚未进入完成态
 
 ## 测试
 
@@ -78,6 +81,7 @@ dclaw/
 - `Glob / Grep`
 - `WebFetch / AskUserQuestion`
 - `queryLoop` 下的 permission mode 集成行为
+- `session / resume`
 
 当前测试也覆盖了一批关键边界：
 
@@ -135,6 +139,7 @@ npm test
   - `DCLAW_MODEL_LIMITS_JSON`
   - `DCLAW_MODEL_LIMITS_FILE`
   - 默认文件路径：`~/.dclaw/model-limits.json`
+  - 若设置 `DCLAW_HOME`，则默认文件路径改为 `<DCLAW_HOME>/model-limits.json`
 
 示例：
 

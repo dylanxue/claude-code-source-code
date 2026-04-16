@@ -102,7 +102,8 @@ MVP 应满足：
 
 MVP 只实现：
 
-- `~/.dclaw/CLAUDE.md`
+- 默认用户级 `CLAUDE.md`：`~/.dclaw/CLAUDE.md`
+- 若设置 `DCLAW_HOME`，则用户级 `CLAUDE.md` 改为 `<DCLAW_HOME>/CLAUDE.md`
 - `<project>/CLAUDE.md`
 - `<project>/CLAUDE.local.md`
 
@@ -152,7 +153,8 @@ MVP 模式：
 存储建议：
 
 ```text
-~/.dclaw/sessions/<session-id>/
+默认: ~/.dclaw/sessions/<session-id>/
+若设置 DCLAW_HOME: <DCLAW_HOME>/sessions/<session-id>/
   meta.json
   messages.jsonl
 ```

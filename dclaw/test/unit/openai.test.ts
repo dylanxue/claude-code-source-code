@@ -47,6 +47,13 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
         JSON.stringify({
           output: [
             {
+              type: 'reasoning',
+              id: 'rs_123',
+              summary: [{ type: 'summary_text', text: 'Need to inspect the file first.' }],
+              encrypted_content: 'enc_123',
+              status: 'completed',
+            },
+            {
               type: 'message',
               role: 'assistant',
               content: [{ type: 'output_text', text: 'hello from responses' }],
@@ -112,6 +119,13 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
         createTextMessage('user', 'Open the file'),
         createMessage('assistant', [
           {
+            type: 'reasoning',
+            id: 'rs_prev',
+            summary: ['First inspect the file.'],
+            encryptedContent: 'enc_prev',
+            status: 'completed',
+          },
+          {
             type: 'tool_use',
             id: 'tool_123',
             name: 'Read',
@@ -126,6 +140,13 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
     })
 
     assert.deepEqual(result.message.content, [
+      {
+        type: 'reasoning',
+        id: 'rs_123',
+        summary: ['Need to inspect the file first.'],
+        encryptedContent: 'enc_123',
+        status: 'completed',
+      },
       { type: 'text', text: 'hello from responses' },
       {
         type: 'tool_use',
@@ -159,6 +180,18 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
         {
           role: 'user',
           content: 'Open the file',
+        },
+        {
+          type: 'reasoning',
+          id: 'rs_prev',
+          summary: [
+            {
+              type: 'summary_text',
+              text: 'First inspect the file.',
+            },
+          ],
+          encrypted_content: 'enc_prev',
+          status: 'completed',
         },
         {
           type: 'function_call',

@@ -14,31 +14,33 @@
 
 ## 3. 基础接口
 
-建议基础接口：
+当前基础接口已收口为：
 
 ```ts
 interface Tool<I = unknown, O = unknown> {
   name: string
   description: string
+  inputSchema: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
   call(input: I, ctx: ToolUseContext): Promise<ToolResult<O>>
-  validate?(input: I, ctx: ToolUseContext): Promise<ValidationResult>
-  isEnabled?(ctx: ToolUseContext): boolean
-  isReadOnly?(input: I): boolean
+  mapToolResult(result: ToolResult<O>): unknown
+  validate(input: I, ctx: ToolUseContext): Promise<ValidationResult>
+  isEnabled(ctx: ToolUseContext): boolean
+  isReadOnly(input: I): boolean
 }
 ```
 
+并通过 `buildTool` 提供默认实现，避免调用侧散落 `?.` 分支。
+
 ## 4. ToolUseContext
 
-建议包含：
+当前最小上下文包含：
 
 - `cwd`
 - `readState`
-- `abortController`
-- `getAppState`
-- `setAppState`
-- `sessionId`
 - `permissionMode`
 - `availableTools`
+- `askUserQuestions`
 
 ## 5. ToolResult
 
@@ -49,9 +51,15 @@ type ToolResult<T> = {
   ok: boolean
   output: T
   summary?: string
-  metadata?: Record<string, unknown>
 }
 ```
+
+消息层额外保留：
+
+- 模型侧 `output`
+- 内部 `rawOutput`
+
+这样 transcript / trace 可以看到完整内部结果，而 provider 只消费映射后的模型侧结果。
 
 ## 6. MVP 工具集合
 
@@ -68,11 +76,12 @@ type ToolResult<T> = {
 
 - `Read / Edit / Write`
   - 已有基础的读后写约束
-  - 已开始向 Claude Code 的错误语义和输出形态收紧
-  - `Read` 已补上 `isPartial`
-  - `Read` 已补上空文件 / offset 越界 warning
+  - 已完成第一轮向 Claude Code 的错误语义和输出形态收紧
+  - `Read` 已补上 `isPartial / didReadToEnd / warning / endLine`
   - `Edit / Write` 已补上基础 `structuredPatch`
   - `Edit / Write` 已补上最小 `gitDiff`
+  - `Write` 已补上 `create / update / noop`
+  - `Edit / Write` 的 direct `call` 已拦截未完整读取与 stale read 覆盖
 - `Bash`
   - 已有最小 timeout、`interrupted`、`noOutputExpected` 和只读判定
   - 已补上最小 `run_in_background`
@@ -83,15 +92,28 @@ type ToolResult<T> = {
   - 已开始识别一小组 Claude Code 风格的安全环境变量前缀
   - 已将带输出重定向的命令从只读自动放行中排除
   - 已为动态重定向目标和 `cd` + 重定向组合命令补上人工审批原因
-  - 仍未接入真正的 sandbox、更细粒度权限规则和更完整的结果持久化语义
+  - 已补上结果持久化元信息与 `sandboxMode` 可观测性
+  - 已补上 `executionMode / stdoutTruncated / stderrTruncated / persistedOutputSize`
+  - 已覆盖一批更细的重定向边界，包括 `fd duplication / force-clobber / >& file / &> / &>>`
+  - 已将 command substitution / process substitution 移出只读自动放行路径
+  - 当前可视为阶段 5 的基础收口已到位
+  - 仍未接入真正的 sandbox、更细粒度权限规则和 AST 级 shell 解析；这部分暂时后置
 - `Glob`
   - 已补上默认 100 条结果限制和 `truncated`
+  - 已补上 `searchRoot / engine / durationMs / appliedLimit`
 - `Grep`
   - 已补上默认 `head_limit=250`
   - 已支持 `0` 表示 unlimited
   - 已补上 `-A / -B / -C / context / -n / type / multiline` 的基础参数
+  - 已补上 `totalFiles / totalMatches / searchRoot / engine / durationMs`
 - `WebFetch / AskUserQuestion`
   - 仍处于最小实现阶段
+
+- Tool 协议层
+  - 已补 `buildTool`
+  - 已补显式 `outputSchema`
+  - 已在 `queryLoop` 接入 `outputSchema` 运行时校验
+  - 已将模型侧输出与内部输出分层
 
 ## 8. 当前 permission mode 语义
 
@@ -115,6 +137,8 @@ tool_use
   -> validate
   -> permission evaluation
   -> call
+  -> outputSchema validation
+  -> mapToolResult
   -> tool_result
 ```
 

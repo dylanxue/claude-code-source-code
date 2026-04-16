@@ -47,7 +47,16 @@ test('AnthropicLlmClient sends messages and tools to the Anthropic API', async (
       response.end(
         JSON.stringify({
           content: [
+            {
+              type: 'thinking',
+              thinking: 'Need to inspect the file first.',
+              signature: 'sig_123',
+            },
             { type: 'text', text: 'hello from anthropic' },
+            {
+              type: 'redacted_thinking',
+              data: 'encrypted_thinking_blob',
+            },
             {
               type: 'tool_use',
               id: 'toolu_123',
@@ -95,6 +104,15 @@ test('AnthropicLlmClient sends messages and tools to the Anthropic API', async (
         createTextMessage('user', 'Open the file'),
         createMessage('assistant', [
           {
+            type: 'thinking',
+            thinking: 'Need to inspect before using the tool.',
+            signature: 'sig_prev',
+          },
+          {
+            type: 'redacted_thinking',
+            data: 'encrypted_prev',
+          },
+          {
             type: 'tool_use',
             id: 'tool_123',
             name: 'Read',
@@ -110,7 +128,16 @@ test('AnthropicLlmClient sends messages and tools to the Anthropic API', async (
 
     assert.equal(result.message.role, 'assistant')
     assert.deepEqual(result.message.content, [
+      {
+        type: 'thinking',
+        thinking: 'Need to inspect the file first.',
+        signature: 'sig_123',
+      },
       { type: 'text', text: 'hello from anthropic' },
+      {
+        type: 'redacted_thinking',
+        data: 'encrypted_thinking_blob',
+      },
       {
         type: 'tool_use',
         id: 'toolu_123',
@@ -147,6 +174,15 @@ test('AnthropicLlmClient sends messages and tools to the Anthropic API', async (
         {
           role: 'assistant',
           content: [
+            {
+              type: 'thinking',
+              thinking: 'Need to inspect before using the tool.',
+              signature: 'sig_prev',
+            },
+            {
+              type: 'redacted_thinking',
+              data: 'encrypted_prev',
+            },
             {
               type: 'tool_use',
               id: 'tool_123',

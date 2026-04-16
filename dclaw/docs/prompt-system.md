@@ -107,7 +107,8 @@ headless 模式不能使用不同 prompt 体系，只能改变 section 注入内
 
 当前基础版 `CLAUDE.md` 发现规则包括：
 
-- `~/.dclaw/CLAUDE.md`
+- 默认用户级 `CLAUDE.md`：`~/.dclaw/CLAUDE.md`
+- 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/CLAUDE.md`
 - 从当前 `cwd` 向上查找 `<dir>/CLAUDE.md`
 - 从当前 `cwd` 向上查找 `<dir>/.claude/CLAUDE.md`
 - 从当前 `cwd` 向上查找 `<dir>/.claude/rules/*.md`

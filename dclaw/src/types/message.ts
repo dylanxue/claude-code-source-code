@@ -3,6 +3,25 @@ export type TextContentBlock = {
   text: string
 }
 
+export type ThinkingContentBlock = {
+  type: 'thinking'
+  thinking: string
+  signature?: string
+}
+
+export type RedactedThinkingContentBlock = {
+  type: 'redacted_thinking'
+  data: string
+}
+
+export type ReasoningContentBlock = {
+  type: 'reasoning'
+  id?: string
+  summary: string[]
+  encryptedContent?: string
+  status?: string
+}
+
 export type ToolUseContentBlock = {
   type: 'tool_use'
   id: string
@@ -14,10 +33,14 @@ export type ToolResultContentBlock = {
   type: 'tool_result'
   toolUseId: string
   output: unknown
+  rawOutput?: unknown
 }
 
 export type ContentBlock =
   | TextContentBlock
+  | ThinkingContentBlock
+  | RedactedThinkingContentBlock
+  | ReasoningContentBlock
   | ToolUseContentBlock
   | ToolResultContentBlock
 
@@ -65,12 +88,14 @@ export function createToolResultMessage(
   role: MessageRole,
   toolUseId: string,
   output: unknown,
+  rawOutput?: unknown,
 ): Message {
   return createMessage(role, [
     {
       type: 'tool_result',
       toolUseId,
       output,
+      ...(rawOutput === undefined ? {} : { rawOutput }),
     },
   ])
 }

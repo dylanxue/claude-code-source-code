@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { getDclawHomeDir } from '../session/paths.js'
 import type { LlmProviderName } from './providerNames.js'
 import { trimOrUndefined } from './providerUtils.js'
 
@@ -498,8 +499,7 @@ export function getModelLimitsConfigPath(
     return resolve(configuredPath)
   }
 
-  const home = trimOrUndefined(env.HOME) ?? homedir()
-  return resolve(home, '.dclaw/model-limits.json')
+  return resolve(getDclawHomeDir(env), 'model-limits.json')
 }
 
 export function getBuiltInModelLimits(

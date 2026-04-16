@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { ToolResult } from '../../types/tool.js'
-import type { Tool } from '../types.js'
+import type { ToolContext, ToolResult } from '../../types/tool.js'
+import { buildTool, type Tool } from '../types.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
 import {
   createStructuredPatch,
@@ -26,6 +26,7 @@ export type EditToolOutput = {
   originalFile: string
   structuredPatch: StructuredPatchHunk[]
   userModified: boolean
+  didWrite: boolean
   replaceAll: boolean
   replaced: number
   content: string
@@ -37,6 +38,106 @@ function contentsMatchReadState(
   readContent: string | undefined,
 ): boolean {
   return readContent !== undefined && currentContent === readContent
+}
+
+function wasUserModifiedSinceRead(
+  timestamp: number | undefined,
+  readTimestamp: number | undefined,
+): boolean {
+  return (
+    timestamp !== undefined &&
+    readTimestamp !== undefined &&
+    timestamp > readTimestamp
+  )
+}
+
+type PreparedEditState = {
+  absolutePath: string
+  currentContent: string
+  currentTimestamp?: number
+  readStateTimestamp?: number
+}
+
+async function prepareEditState(
+  input: EditToolInput,
+  context: ToolContext,
+): Promise<PreparedEditState> {
+  if (!input.file_path || input.file_path.trim().length === 0) {
+    throw new Error('Edit requires a non-empty file_path')
+  }
+
+  if (!isAbsoluteToolPath(input.file_path)) {
+    throw new Error('Edit requires file_path to be absolute')
+  }
+
+  if (input.old_string === input.new_string) {
+    throw new Error('Edit requires old_string and new_string to differ')
+  }
+
+  const absolutePath = toAbsoluteToolPath(input.file_path)
+
+  try {
+    const currentContent = await readFile(absolutePath, 'utf8')
+    const fileStat = await stat(absolutePath)
+    const currentTimestamp = Math.floor(fileStat.mtimeMs)
+    const readState = context.readState.get(absolutePath)
+
+    if (!readState || readState.isPartialView) {
+      throw new Error('File has not been fully read yet. Use Read first before Edit.')
+    }
+
+    if (
+      currentTimestamp > readState.timestamp &&
+      !contentsMatchReadState(currentContent, readState.content)
+    ) {
+      throw new Error(
+        'File has been modified since it was read. Use Read again before Edit.',
+      )
+    }
+
+    if (input.old_string === '' && currentContent.trim() !== '') {
+      throw new Error(
+        'Cannot create new file content with Edit because the file already exists and is not empty.',
+      )
+    }
+
+    const matches = countMatches(currentContent, input.old_string)
+    if (input.old_string !== '' && matches === 0) {
+      throw new Error(
+        `String to replace not found in file.\nString: ${input.old_string}`,
+      )
+    }
+
+    if (matches > 1 && !input.replace_all) {
+      throw new Error(
+        `Found ${matches} matches of the string to replace, but replace_all is false. ` +
+          'Set replace_all to true or provide more context to identify a single occurrence.',
+      )
+    }
+
+    return {
+      absolutePath,
+      currentContent,
+      currentTimestamp,
+      readStateTimestamp: readState.timestamp,
+    }
+  } catch (error) {
+    const fileError = error as NodeJS.ErrnoException
+    if (fileError.code === 'ENOENT') {
+      if (input.old_string === '') {
+        return {
+          absolutePath,
+          currentContent: '',
+        }
+      }
+
+      throw new Error(
+        'File does not exist. Use Write to create a file, or Edit with old_string="" only for new file creation.',
+      )
+    }
+
+    throw error
+  }
 }
 
 function countMatches(source: string, oldString: string): number {
@@ -84,111 +185,117 @@ function replaceAll(
   }
 }
 
-export const editTool: Tool<EditToolInput, EditToolOutput> = {
+export const editTool: Tool<EditToolInput, EditToolOutput> = buildTool({
   name: 'Edit',
   description: 'Edit a file in place.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      file_path: {
+        type: 'string',
+        description: 'Absolute path to the file to edit.',
+      },
+      old_string: {
+        type: 'string',
+        description: 'Exact text to replace. Use an empty string only for creating a new empty file via Edit.',
+      },
+      new_string: {
+        type: 'string',
+        description: 'Replacement text to write into the file.',
+      },
+      replace_all: {
+        type: 'boolean',
+        description: 'Replace all matches of old_string instead of requiring a single unique match.',
+      },
+    },
+    required: ['file_path', 'old_string', 'new_string'],
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      filePath: { type: 'string' },
+      oldString: { type: 'string' },
+      newString: { type: 'string' },
+      originalFile: { type: 'string' },
+      structuredPatch: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            oldStart: { type: 'integer' },
+            oldLines: { type: 'integer' },
+            newStart: { type: 'integer' },
+            newLines: { type: 'integer' },
+            lines: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+          required: ['oldStart', 'oldLines', 'newStart', 'newLines', 'lines'],
+          additionalProperties: false,
+        },
+      },
+      userModified: { type: 'boolean' },
+      didWrite: { type: 'boolean' },
+      replaceAll: { type: 'boolean' },
+      replaced: { type: 'integer' },
+      content: { type: 'string' },
+      gitDiff: {
+        type: 'object',
+        properties: {
+          filename: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['modified', 'added'],
+          },
+          additions: { type: 'integer' },
+          deletions: { type: 'integer' },
+          changes: { type: 'integer' },
+          patch: { type: 'string' },
+        },
+        required: [
+          'filename',
+          'status',
+          'additions',
+          'deletions',
+          'changes',
+          'patch',
+        ],
+        additionalProperties: false,
+      },
+    },
+    required: [
+      'filePath',
+      'oldString',
+      'newString',
+      'originalFile',
+      'structuredPatch',
+      'userModified',
+      'didWrite',
+      'replaceAll',
+      'replaced',
+      'content',
+    ],
+    additionalProperties: false,
+  },
   validate: async (input, context) => {
-    if (!input.file_path || input.file_path.trim().length === 0) {
-      return {
-        ok: false,
-        error: 'Edit requires a non-empty file_path',
-      }
-    }
-
-    if (!isAbsoluteToolPath(input.file_path)) {
-      return {
-        ok: false,
-        error: 'Edit requires file_path to be absolute',
-      }
-    }
-
-    if (input.old_string === input.new_string) {
-      return {
-        ok: false,
-        error: 'Edit requires old_string and new_string to differ',
-      }
-    }
-
-    const absolutePath = toAbsoluteToolPath(input.file_path)
-
     try {
-      const currentContent = await readFile(absolutePath, 'utf8')
-      const fileStat = await stat(absolutePath)
-      const readState = context.readState.get(absolutePath)
-
-      if (!readState || readState.isPartialView) {
-        return {
-          ok: false,
-          error: 'File has not been fully read yet. Use Read first before Edit.',
-        }
-      }
-
-      if (
-        Math.floor(fileStat.mtimeMs) > readState.timestamp &&
-        !contentsMatchReadState(currentContent, readState.content)
-      ) {
-        return {
-          ok: false,
-          error: 'File has been modified since it was read. Use Read again before Edit.',
-        }
-      }
-
-      if (input.old_string === '') {
-        if (currentContent.trim() !== '') {
-          return {
-            ok: false,
-            error:
-              'Cannot create new file content with Edit because the file already exists and is not empty.',
-          }
-        }
-
-        return { ok: true }
-      }
-
-      const matches = countMatches(currentContent, input.old_string)
-      if (matches === 0) {
-        return {
-          ok: false,
-          error: `String to replace not found in file.\nString: ${input.old_string}`,
-        }
-      }
-
-      if (matches > 1 && !input.replace_all) {
-        return {
-          ok: false,
-          error:
-            `Found ${matches} matches of the string to replace, but replace_all is false. ` +
-            'Set replace_all to true or provide more context to identify a single occurrence.',
-        }
-      }
+      await prepareEditState(input, context)
     } catch (error) {
-      const fileError = error as NodeJS.ErrnoException
-      if (fileError.code === 'ENOENT' && input.old_string === '') {
-        return { ok: true }
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
       }
-      if (fileError.code === 'ENOENT') {
-        return {
-          ok: false,
-          error: 'File does not exist. Use Write to create a file, or Edit with old_string="" only for new file creation.',
-        }
-      }
-      throw error
     }
 
     return { ok: true }
   },
   async call(input, context): Promise<ToolResult<EditToolOutput>> {
-    const absolutePath = toAbsoluteToolPath(input.file_path)
-
-    let currentContent = ''
-    try {
-      currentContent = await readFile(absolutePath, 'utf8')
-    } catch (error) {
-      const fileError = error as NodeJS.ErrnoException
-      if (fileError.code !== 'ENOENT') {
-        throw error
-      }
-    }
+    const prepared = await prepareEditState(input, context)
+    const absolutePath = prepared.absolutePath
+    const currentContent = prepared.currentContent
+    const currentTimestamp = prepared.currentTimestamp
 
     const replacement =
       input.old_string === ''
@@ -205,6 +312,10 @@ export const editTool: Tool<EditToolInput, EditToolOutput> = {
     await writeFile(absolutePath, replacement.content, 'utf8')
 
     const fileStat = await stat(absolutePath)
+    const userModified = wasUserModifiedSinceRead(
+      currentTimestamp,
+      prepared.readStateTimestamp,
+    )
     context.readState.set(absolutePath, {
       content: replacement.content,
       timestamp: Math.floor(fileStat.mtimeMs),
@@ -230,7 +341,8 @@ export const editTool: Tool<EditToolInput, EditToolOutput> = {
         newString: input.new_string,
         originalFile: currentContent,
         structuredPatch,
-        userModified: false,
+        userModified,
+        didWrite: true,
         replaceAll: input.replace_all ?? false,
         replaced: replacement.replaced,
         content: replacement.content,
@@ -239,4 +351,4 @@ export const editTool: Tool<EditToolInput, EditToolOutput> = {
       summary: `Edited ${absolutePath}`,
     }
   },
-}
+})

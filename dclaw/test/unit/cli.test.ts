@@ -57,3 +57,24 @@ test('parseArgs rejects unsupported output format', () => {
     /Supported formats: text, sse/,
   )
 })
+
+test('parseArgs keeps prompt text for resume mode', () => {
+  const command = parseArgs(['resume', 'session-123', 'continue', 'here'])
+
+  assert.equal(command.mode, 'resume')
+  assert.equal(command.sessionId, 'session-123')
+  assert.equal(command.prompt, 'continue here')
+})
+
+test('parseArgs supports history mode', () => {
+  const command = parseArgs(['history'])
+
+  assert.equal(command.mode, 'history')
+})
+
+test('parseArgs rejects prompt text for history mode', () => {
+  assert.throws(
+    () => parseArgs(['history', 'extra']),
+    /history does not accept a prompt/,
+  )
+})

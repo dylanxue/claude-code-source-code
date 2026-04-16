@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { loadEnvFiles } from '../llm/env.js'
 import { runDoctor } from './doctor.js'
 import { runHeadless } from './headless.js'
+import { runHistory } from './history.js'
 import { runInteractive } from './interactive.js'
 import { CliArgumentError, formatHelp, parseArgs } from './parseArgs.js'
 import { runResume } from './resume.js'
@@ -19,7 +20,11 @@ async function readVersion(): Promise<string> {
 }
 
 async function resolvePrompt(command: ParsedCliCommand): Promise<ParsedCliCommand> {
-  if (command.mode !== 'interactive' && command.mode !== 'print') {
+  if (
+    command.mode !== 'interactive' &&
+    command.mode !== 'print' &&
+    command.mode !== 'resume'
+  ) {
     return command
   }
 
@@ -48,6 +53,9 @@ async function dispatch(command: ParsedCliCommand): Promise<void> {
       return
     case 'resume':
       await runResume(command)
+      return
+    case 'history':
+      await runHistory(command)
       return
   }
 }

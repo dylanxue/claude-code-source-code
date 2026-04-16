@@ -23,8 +23,10 @@ test('Read returns isPartial for ranged reads', async () => {
 
     assert.equal(result.ok, true)
     assert.equal(result.output.isPartial, true)
+    assert.equal(result.output.didReadToEnd, false)
     assert.equal(result.output.file.content, 'b')
     assert.equal(result.output.file.startLine, 2)
+    assert.equal(result.output.file.endLine, 2)
     assert.equal(result.output.file.totalLines, 3)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -44,6 +46,8 @@ test('Read returns warning for empty files', async () => {
 
     assert.equal(result.ok, true)
     assert.equal(result.output.file.numLines, 0)
+    assert.equal(result.output.file.endLine, 0)
+    assert.equal(result.output.didReadToEnd, true)
     assert.equal(result.output.warning, 'The file exists but is empty.')
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -64,6 +68,8 @@ test('Read returns warning when offset is beyond end of file', async () => {
     assert.equal(result.ok, true)
     assert.match(result.output.warning ?? '', /offset \(10\) is beyond the end/)
     assert.equal(result.output.file.content, '')
+    assert.equal(result.output.file.endLine, 9)
+    assert.equal(result.output.didReadToEnd, true)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -105,4 +111,32 @@ test('Read validation rejects missing files', async () => {
     ok: false,
     error: `File does not exist: ${missingPath}`,
   })
+})
+
+test('Read accepts path as an alias for file_path', async () => {
+  const dir = await createTempDir('dclaw-read-path-alias-')
+  const filePath = join(dir, 'sample.txt')
+
+  try {
+    await writeFile(filePath, 'alias works\n', 'utf8')
+    const validation = await readFileTool.validate?.(
+      { path: filePath },
+      createToolContext(),
+    )
+
+    assert.deepEqual(validation, { ok: true })
+
+    const result = await readFileTool.call(
+      { path: filePath },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.file.filePath, filePath)
+    assert.equal(result.output.file.content, 'alias works')
+    assert.equal(result.output.file.endLine, 1)
+    assert.equal(result.output.didReadToEnd, true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
