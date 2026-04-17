@@ -2,7 +2,7 @@
 
 `dclaw` 是一个严格参考 Claude Code 通用能力边界设计的终端优先通用 agent 项目。
 
-当前仓库中的 `dclaw/` 目录已经进入 `v0.1` 后半段，当前重点是收口通用 agent 的 MVP 主链路，继续把 CLI、Query Engine、Prompt、`CLAUDE.md`、Tool、Permission 与 Session/Resume 往可持续使用的状态推进。
+当前仓库中的 `dclaw/` 目录正在从 `v0.1` 收尾切换到 `v0.2` 主线。当前重点不再是继续追 `v0.1` 的零散收口项，而是转向阶段 8-10：上下文管理 / 自动压缩、Plan / Task、以及 Memory；`v0.1` 剩余的工具与会话体验打磨统一转入 backlog，`CLAUDE.md` 深化、权限系统继续收口，以及更广的上下文压缩 / persistence 打磨已下调到 `v0.3`。
 
 ## 当前范围
 
@@ -53,7 +53,7 @@ dclaw/
 6. 权限模式与 Hooks
 7. Session 与恢复
 8. 上下文压缩
-9. Plan / Task / Todo
+9. Plan / Task
 10. Memory
 11. 多代理与 Worktree
 12. MCP / Skills / Plugins / Remote
@@ -73,7 +73,8 @@ dclaw/
 - session store / transcript 持久化 / `resume` 恢复链路已打通
 - `interactive` 已推进到真正可用的 REPL，并补上首批本地 slash commands
 - model limits 已接入 provider 配置与首段 model-aware `tool result budget`
-- 当前仍处于 `v0.1` 收尾阶段，history、compact、memory、多代理、MCP / skills / plugins 等能力尚未进入完成态
+- 当前主线已切换到 `v0.2`，重点进入 `compact / autocompact`、Plan / Task、Memory；`v0.1` 剩余的工具与 session 收尾项已转入 backlog
+- 阶段 8 当前已完成最小 manual compact、消息级 compact boundary、模型生成 compact summary、autocompact，以及首轮 post-compact 文件/plan/task 恢复；下一步优先进入 partial/reactive compact
 
 ## 测试
 
@@ -172,6 +173,8 @@ npm run start -- --doctor --provider openai
 
 - `provider source`
 - `model source`
+- `max iterations`
+- `max retries / request timeout / stream watchdog / stream idle timeout` 的当前生效值与来源
 
 这两个 `source` 字段当前可能出现：
 
@@ -201,6 +204,13 @@ npm run start -- --doctor --provider openai
 
 - `--stream`：直接输出文本增量
 - `--output-format sse`：按 SSE 事件格式输出
+- 真实 provider 默认还会补几层稳定性保护：
+  - 默认重试次数：`DCLAW_LLM_MAX_RETRIES=10`
+  - 默认退避策略：`500ms` 起步的指数退避，最大 `32s`，附加最多 `25%` 抖动
+  - 请求超时：`DCLAW_LLM_TIMEOUT_MS`，默认 `600000`
+  - 流式 idle watchdog：`DCLAW_ENABLE_STREAM_WATCHDOG=true`
+  - 流式 idle 超时：`DCLAW_STREAM_IDLE_TIMEOUT_MS=90000`
+- 如果流式请求在收到首个 SSE 事件前就挂起、提前结束或无法形成有效流内容，当前会保守回退到 non-streaming 请求；一旦已经开始出流，则不会自动重放，避免重复文本和重复 tool call
 
 SSE 模式下当前会输出：
 
@@ -265,6 +275,16 @@ npm run start -- resume <session-id>
   - 带 `session-id` 时切到该会话
   - 不带参数时显示最近的 sessions，便于继续恢复
 
+当前这条 session / resume 链路还包含：
+
+- session 元信息持久化：`meta.json`
+- transcript 消息持久化：`messages.jsonl`
+- `history` 视图中的最近会话摘要
+- `resume` 时的 transcript 预览与继续交互
+- persisted tool result 的基础记录与展示
+
+当前这部分已经从“最小恢复链路”推进到“基础可持续使用”，但仍未完成完整会话管理体验；后续重点仍是更完整的 history / transcript 恢复视图、最近会话选择，以及更统一的 slash command 框架。
+
 ## Permission Mode 配置
 
 当前 `dclaw` 已支持 4 种 `permission mode`：
@@ -285,11 +305,37 @@ npm run start -- resume <session-id>
 
 - `<DCLAW_HOME>/config.json`
 
+## Iteration 上限配置
+
+当前 `dclaw` 主查询循环支持可配置的最大迭代上限，优先级如下：
+
+1. CLI `--max-iterations`
+2. 环境变量 `DCLAW_MAX_ITERATIONS`
+3. 用户级配置：`~/.dclaw/config.json`
+4. workspace 配置：`<workspace>/.dclaw/config.json`
+5. 内置默认值：`128`
+
+配置文件里可以写两种形式：
+
+- `maxIterations`
+- `DCLAW_MAX_ITERATIONS`
+
+例如：
+
+```json
+{
+  "maxIterations": 128
+}
+```
+
+达到上限后，当前行为是直接停止本轮 agentic loop，并输出一条明确的终止消息；不会再额外补发一次 LLM 请求做兜底收口。
+
 配置文件目前支持：
 
 ```json
 {
   "permissionMode": "plan",
+  "maxIterations": 128,
   "MODEL_PROVIDER": "openai-compatible",
   "DCLAW_QUERY_TRACE": true,
   "OPENAI_MODEL": "kimi-k2.5",
@@ -307,7 +353,13 @@ npm run start -- resume <session-id>
 
 例如：
 
+- `maxIterations`
+- `DCLAW_MAX_ITERATIONS`
 - `MODEL_PROVIDER`
+- `DCLAW_LLM_MAX_RETRIES`
+- `DCLAW_LLM_TIMEOUT_MS`
+- `DCLAW_ENABLE_STREAM_WATCHDOG`
+- `DCLAW_STREAM_IDLE_TIMEOUT_MS`
 - `DCLAW_QUERY_TRACE`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`

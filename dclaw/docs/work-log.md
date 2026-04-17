@@ -2,6 +2,35 @@
 
 ## 2026-04-17
 
+- 对照本仓库内 Claude Code 源码，继续补查真实 provider 的超时策略，结论先落文档：
+  - Claude Code 不只做基础重试，还补了 provider 请求超时和 streaming idle watchdog
+  - `dclaw` 当前 provider 重试链路已具备基础能力，但最大缺口仍是“请求或流在静默状态下长期挂起”
+  - 与其先继续拉高默认重试次数，不如优先补齐：
+    - `DCLAW_LLM_TIMEOUT_MS`
+    - `DCLAW_ENABLE_STREAM_WATCHDOG`
+    - `DCLAW_STREAM_IDLE_TIMEOUT_MS`
+  - 最小落地目标是先解决“真实 provider 看起来卡死但没有明确错误”的问题，再决定是否继续追加更复杂的 non-streaming fallback 和更细粒度 429/529 策略
+- 在 `src/llm/providerUtils.ts` 抽出最小 provider 稳定性公共层：
+  - `DCLAW_LLM_TIMEOUT_MS` 解析与默认值
+  - `DCLAW_ENABLE_STREAM_WATCHDOG` / `DCLAW_STREAM_IDLE_TIMEOUT_MS` 解析与默认值
+  - 基于 `AbortController` 的请求超时包装
+  - 基于 `ReadableStreamDefaultReader.cancel()` 的流式 idle watchdog
+- 将上述能力接到：
+  - `src/llm/providers/openai.ts`
+  - `src/llm/providers/anthropic.ts`
+- 当前策略口径：
+  - 请求超时默认 `600000ms`
+  - stream idle watchdog 默认开启
+  - stream idle 超时默认 `90000ms`
+  - 流式请求若在收到首个 SSE 事件前因 watchdog 超时、提前结束或形成空流，会保守回退到 non-streaming 请求
+  - 若已开始出流，则仍保持“不自动重放”的保守策略
+- 补充自动化测试：
+  - `test/unit/openai.test.ts`
+  - `test/unit/anthropic-stream.test.ts`
+- 验证：
+  - `npm test`
+  - `npm run typecheck`
+
 - 继续收口 `interactive / session / resume` 主线：
   - 将 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
   - 让 `resume` 在恢复 session 后继续进入同一套 REPL，而不是只停在 transcript 展示
@@ -300,7 +329,7 @@
   - `src/llm/providers/anthropic.ts`
   - `src/llm/providers/openai.ts`
 - 为 `Anthropic` 与 `OpenAI` provider 补上统一重试入口：
-  - 默认 `maxRetries = 2`，总尝试次数最多 3 次
+  - 默认 `maxRetries = 10`，总尝试次数最多 11 次
   - 支持环境变量 `DCLAW_LLM_MAX_RETRIES` 与 client 构造参数覆盖
   - 默认重试 `408 / 409 / 429 / 529 / 5xx`
   - 默认将瞬时网络 `TypeError` 视为可重试错误
@@ -309,7 +338,14 @@
   - 优先尊重 `x-should-retry`
   - 优先尊重 `Retry-After`
   - `Anthropic 429` 优先使用 `anthropic-ratelimit-unified-reset`
-  - 默认退避为 `500ms` 起步的指数退避，最大 `8s`，附加最多 25% 抖动
+  - 默认退避为 `500ms` 起步的指数退避，最大 `32s`，附加最多 25% 抖动
+- 为 `doctor` 与 REPL `/doctor` 补上 provider reliability 诊断输出：
+  - `max retries`
+  - `retry backoff`
+  - `request timeout`
+  - `stream watchdog`
+  - `stream idle timeout`
+  - 并显示这些可配置项的当前生效来源：`env / user_config / workspace_config / default`
 - 将流式请求的自动重试收紧为仅在收到首个 SSE 事件前允许重放，避免重复文本与重复 tool call
 - 继续补齐 `OpenAI Responses API` 的流式事件兼容：
   - `response.output_text.*`

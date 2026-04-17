@@ -1,3 +1,5 @@
+import { evaluateCompactPressure } from '../compact/pressure.js'
+import { computeContextStats } from './contextStats.js'
 import type { LlmClient } from '../llm/types.js'
 import type { ModelLimits } from '../llm/modelLimits.js'
 import {
@@ -9,6 +11,7 @@ import {
 } from '../llm/providerUtils.js'
 import {
   createToolResultMessage,
+  createTextMessage,
   getTextContent,
   getToolUseBlocks,
   type ContentBlock,
@@ -78,6 +81,18 @@ export type QueryLoopRequest = {
         text: string
       }
     }) => void
+    onCompactDryRun?: (event: {
+      iteration: number
+      phase: 'iteration_start' | 'post_tool_results'
+      recommendation: ReturnType<typeof getCompactRecommendationForTrace>
+      contextStats: ReturnType<typeof getContextStatsForTrace>
+    }) => void
+    onAutoCompact?: (event: {
+      sessionId: string
+      boundaryId: string
+      reason: string
+      summaryMessageId: string
+    }) => void
   }
 }
 
@@ -88,6 +103,8 @@ export type QueryLoopResult = {
   outputText: string
   iterations: number
 }
+
+export const DEFAULT_QUERY_MAX_ITERATIONS = 128
 
 function stringifyOutput(value: unknown): string {
   return stringifyJson(value)
@@ -185,14 +202,61 @@ function recordTrace(
   })
 }
 
-function toToolDefinition(tool: Tool): {
+function getContextStatsForTrace(request: QueryLoopRequest, messages: Message[]) {
+  return computeContextStats(messages, {
+    modelLimits: request.modelLimits,
+    toolResultBudgetOptions: request.toolResultBudgetOptions,
+  })
+}
+
+function getCompactRecommendationForTrace(
+  request: QueryLoopRequest,
+  messages: Message[],
+) {
+  return evaluateCompactPressure(getContextStatsForTrace(request, messages))
+}
+
+function emitCompactDryRun(
+  request: QueryLoopRequest,
+  iteration: number,
+  phase: 'iteration_start' | 'post_tool_results',
+  messages: Message[],
+): void {
+  const contextStats = getContextStatsForTrace(request, messages)
+  const recommendation = evaluateCompactPressure(contextStats)
+  if (!recommendation.shouldCompact) {
+    return
+  }
+
+  recordTrace(
+    request.queryTraceSink,
+    'compact.dry_run',
+    {
+      phase,
+      contextStats,
+      compactRecommendation: recommendation,
+    },
+    iteration,
+  )
+  request.streamHandlers?.onCompactDryRun?.({
+    iteration,
+    phase,
+    recommendation,
+    contextStats,
+  })
+}
+
+async function toToolDefinition(
+  tool: Tool,
+  context: ToolContext,
+): Promise<{
   name: string
   description: string
   inputSchema: Record<string, unknown>
-} {
+}> {
   return {
     name: tool.name,
-    description: tool.description,
+    description: await tool.prompt(context),
     inputSchema: tool.inputSchema,
   }
 }
@@ -216,14 +280,16 @@ function getAvailableTools(
 export async function executeSingleTurn(
   request: QueryLoopRequest,
 ): Promise<QueryLoopResult> {
-  const maxIterations = request.maxIterations ?? 4
+  const maxIterations = request.maxIterations ?? DEFAULT_QUERY_MAX_ITERATIONS
   const workingMessages = [...request.messages]
   const addedMessages: Message[] = []
   const availableTools = getAvailableTools(
     request.toolRegistry,
     request.toolContext,
   )
-  const toolDefinitions = availableTools.map(toToolDefinition)
+  const toolDefinitions = await Promise.all(
+    availableTools.map(tool => toToolDefinition(tool, request.toolContext)),
+  )
 
   let lastAssistantMessage: Message | undefined
   let lastToolResultMessages: Message[] = []
@@ -241,6 +307,11 @@ export async function executeSingleTurn(
         }
       : undefined,
     messageCount: workingMessages.length,
+    contextStats: getContextStatsForTrace(request, workingMessages),
+    compactRecommendation: getCompactRecommendationForTrace(
+      request,
+      workingMessages,
+    ),
     availableTools: toolDefinitions.map(tool => tool.name),
     permissionMode: request.toolContext.permissionMode,
     cwd: request.toolContext.cwd,
@@ -257,9 +328,15 @@ export async function executeSingleTurn(
         'iteration.start',
         {
           messageCount: workingMessages.length,
+          contextStats: getContextStatsForTrace(request, workingMessages),
+          compactRecommendation: getCompactRecommendationForTrace(
+            request,
+            workingMessages,
+          ),
         },
         iteration,
       )
+      emitCompactDryRun(request, iteration, 'iteration_start', workingMessages)
 
       const useStreaming = Boolean(
         request.streamHandlers && request.client.createMessageStream,
@@ -660,6 +737,14 @@ export async function executeSingleTurn(
             toolNames: budgetedToolResults.replacements.map(
               replacement => replacement.toolName,
             ),
+            contextStatsAfter: getContextStatsForTrace(request, [
+              ...workingMessages,
+              ...budgetedToolResults.messages,
+            ]),
+            compactRecommendationAfter: getCompactRecommendationForTrace(
+              request,
+              [...workingMessages, ...budgetedToolResults.messages],
+            ),
           },
           iteration,
         )
@@ -673,6 +758,14 @@ export async function executeSingleTurn(
         'iteration.tool_results',
         {
           count: budgetedToolResults.messages.length,
+          contextStatsAfter: getContextStatsForTrace(request, [
+            ...workingMessages,
+            ...budgetedToolResults.messages,
+          ]),
+          compactRecommendationAfter: getCompactRecommendationForTrace(
+            request,
+            [...workingMessages, ...budgetedToolResults.messages],
+          ),
           toolUseIds: budgetedToolResults.messages
             .map(message => message.content[0])
             .filter(
@@ -687,6 +780,12 @@ export async function executeSingleTurn(
             .map(block => block.toolUseId),
         },
         iteration,
+      )
+      emitCompactDryRun(
+        request,
+        iteration,
+        'post_tool_results',
+        workingMessages,
       )
     }
 
@@ -704,22 +803,29 @@ export async function executeSingleTurn(
             .join('\n\n')
         : ''
 
+    const maxIterationsMessageText = [
+      `Stopped after reaching the maximum iteration limit (${maxIterations}) before the model produced a final answer.`,
+      ...(fallbackToolText.length > 0
+        ? ['', 'Last tool results:', fallbackToolText]
+        : []),
+    ].join('\n')
+    const maxIterationsMessage = createTextMessage(
+      'assistant',
+      maxIterationsMessageText,
+    )
+    addedMessages.push(maxIterationsMessage)
+
     recordTrace(request.queryTraceSink, 'turn.max_iterations', {
       iterations: maxIterations,
       fallbackToolText: truncateForTrace(fallbackToolText),
+      outputText: truncateForTrace(maxIterationsMessageText),
     })
 
     return {
-      assistantMessage:
-        lastAssistantMessage ?? {
-          id: 'msg_empty',
-          role: 'assistant',
-          createdAt: new Date().toISOString(),
-          content: [],
-        },
+      assistantMessage: maxIterationsMessage,
       toolResultMessages: lastToolResultMessages,
       addedMessages,
-      outputText: outputText || fallbackToolText,
+      outputText: maxIterationsMessageText,
       iterations: maxIterations,
     }
   } finally {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import type { CompactBoundary } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import type { Message } from '../types/message.js'
 import {
@@ -25,6 +26,7 @@ export type SessionMeta = {
   mode: SessionMode
   provider: string
   model?: string
+  taskBoardId?: string
   createdAt: string
   updatedAt: string
   persistedToolResults: SessionPersistedToolResultRecord[]
@@ -35,6 +37,7 @@ export type CreateSessionInput = {
   mode: SessionMode
   provider: string
   model?: string
+  taskBoardId?: string
   sessionId?: string
   env?: NodeJS.ProcessEnv
 }
@@ -55,6 +58,10 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
 function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
   return {
     ...meta,
+    taskBoardId:
+      typeof meta.taskBoardId === 'string' && meta.taskBoardId.trim().length > 0
+        ? meta.taskBoardId
+        : undefined,
     persistedToolResults: Array.isArray(meta.persistedToolResults)
       ? meta.persistedToolResults
       : [],
@@ -126,6 +133,7 @@ export async function createSession(
     mode: input.mode,
     provider: input.provider,
     model: input.model,
+    taskBoardId: input.taskBoardId,
     createdAt: now,
     updatedAt: now,
     persistedToolResults: [],
@@ -192,6 +200,21 @@ export async function appendSessionMessages(
     },
     env,
   )
+}
+
+export async function updateSessionMeta(
+  sessionId: string,
+  updater: (meta: SessionMeta) => SessionMeta,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SessionMeta | null> {
+  const current = await loadSessionMeta(sessionId, env)
+  if (!current) {
+    return null
+  }
+
+  const next = normalizeSessionMeta(updater(current))
+  await writeSessionMeta(next, env)
+  return next
 }
 
 export async function countSessions(

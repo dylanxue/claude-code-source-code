@@ -63,6 +63,25 @@ test('parseArgs accepts explicit permission mode overrides', () => {
   assert.equal(command.options.permissionMode, 'plan')
 })
 
+test('parseArgs accepts explicit max iteration overrides', () => {
+  const command = parseArgs([
+    '--print',
+    '--max-iterations',
+    '12',
+    'hello',
+  ])
+
+  assert.equal(command.mode, 'print')
+  assert.equal(command.options.maxIterations, 12)
+})
+
+test('parseArgs rejects invalid max iteration overrides', () => {
+  assert.throws(
+    () => parseArgs(['--max-iterations', '0']),
+    /--max-iterations must be a positive integer/,
+  )
+})
+
 test('parseArgs reports supported providers for invalid input', () => {
   assert.throws(
     () => parseArgs(['--provider', 'unknown']),

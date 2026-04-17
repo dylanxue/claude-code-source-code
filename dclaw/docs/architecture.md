@@ -84,6 +84,14 @@
 - task / todo / plan 状态管理
 - session 生命周期管理
 
+其中阶段 9 首版建议引入 `task board` 作为 planning / execution 状态容器：
+
+- session 负责消息历史
+- task board 负责 `plan mode`、task、todo、current step 真值
+- session meta 通过 `taskBoardId` 挂接 task board
+
+详细结构见 [plan-task-spec.md](./plan-task-spec.md)。
+
 对应目录：
 
 - `src/permissions/`
@@ -185,7 +193,7 @@ Session History
 - 权限控制
 - 会话持久化
 - memory
-- plan/task/todo
+- plan/task
 - 多代理
 - MCP / skill / plugin / remote
 
@@ -219,4 +227,3 @@ Session History
 - Session / Resume
 
 达到这个点后，`dclaw` 已经是一个可工作的通用 agent 外壳。
-

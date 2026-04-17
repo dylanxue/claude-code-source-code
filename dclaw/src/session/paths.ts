@@ -28,6 +28,18 @@ export function getSessionsDir(
   return join(getDclawHomeDir(env), 'sessions')
 }
 
+export function getTaskBoardsDir(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getDclawHomeDir(env), 'task-boards')
+}
+
+export function getPlansDir(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getDclawHomeDir(env), 'plans')
+}
+
 export function getDclawConfigPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -71,4 +83,18 @@ export function getSessionMessagesPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return join(getSessionDir(sessionId, env), 'messages.jsonl')
+}
+
+export function getTaskBoardPath(
+  boardId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getTaskBoardsDir(env), `${boardId}.json`)
+}
+
+export function getPlanFilePath(
+  planId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getPlansDir(env), `${planId}.md`)
 }

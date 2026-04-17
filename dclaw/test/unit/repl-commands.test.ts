@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { QueryEngine } from '../../src/core/queryEngine.js'
@@ -10,6 +11,7 @@ import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { createTextMessage } from '../../src/types/message.js'
 import type { CommonCliOptions } from '../../src/cli/types.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
+import { loadTaskBoardForSession } from '../../src/tasks/store.js'
 import type { ReplSessionState } from '../../src/cli/replCommands.js'
 
 function createEngine() {
@@ -84,6 +86,7 @@ test('maybeHandleReplCommand prints help for /help', async () => {
   assert.match(text, /\/doctor/)
   assert.match(text, /\/model/)
   assert.match(text, /\/permissions/)
+  assert.match(text, /\/plan/)
   assert.match(text, /\/config/)
   assert.match(text, /\/transcript/)
   assert.match(text, /\/resume/)
@@ -116,8 +119,17 @@ test('maybeHandleReplCommand prints diagnostics for /doctor', async () => {
   const text = output.join('')
   assert.match(text, /dclaw doctor/)
   assert.match(text, /session id/)
+  assert.match(text, /compact pressure\s+low \(thresholds unavailable\)/)
+  assert.match(text, /compact recommendation/)
+  assert.match(text, /compact tokens\s+\d+ \(thresholds unavailable\)/)
+  assert.match(text, /compact remaining\s+unknown/)
+  assert.match(text, /compact used\s+unknown/)
+  assert.match(text, /compact thresholds\s+unavailable/)
+  assert.match(text, /max iterations\s+128 \(default\)/)
   assert.match(text, /provider/)
   assert.match(text, /resolved model/)
+  assert.match(text, /max retries/)
+  assert.match(text, /retry backoff/)
 })
 
 test('maybeHandleReplCommand shows and updates the current model for /model', async () => {
@@ -178,6 +190,95 @@ test('maybeHandleReplCommand shows and updates the current permission mode for /
   )
   assert.equal(context.session.permissionMode, 'bypass-permissions')
   assert.equal(context.session.permissionModeSource, 'repl_command')
+})
+
+test('maybeHandleReplCommand enters and exits plan mode with /plan', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-plan-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const context = createCommandContext()
+
+  try {
+    process.env = env
+    await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: context.session.sessionId,
+      env,
+    })
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    assert.equal(await maybeHandleReplCommand('/plan', context), true)
+    const board = await loadTaskBoardForSession(context.session.sessionId, env)
+    assert.ok(board?.planFilePath)
+    assert.equal(existsSync(board.planFilePath), true)
+    assert.equal(await maybeHandleReplCommand('/plan exit', context), true)
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /Entered plan mode for this REPL session\./)
+  assert.match(text, /plan mode: active/)
+  assert.match(text, /plan file:/)
+  assert.match(text, /Exited plan mode\. Restored permission mode: default/)
+  assert.equal(context.session.permissionMode, 'default')
+})
+
+test('maybeHandleReplCommand manages task state via /plan start', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-task-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const context = createCommandContext()
+
+  try {
+    process.env = env
+    await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: context.session.sessionId,
+      env,
+    })
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    assert.equal(await maybeHandleReplCommand('/plan', context), true)
+    assert.equal(
+      await maybeHandleReplCommand('/plan start implement recall', context),
+      true,
+    )
+    assert.equal(await maybeHandleReplCommand('/plan', context), true)
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /Started task: implement recall/)
+  assert.match(text, /current task: implement recall/)
+  assert.match(text, /current step: <none>/)
 })
 
 test('maybeHandleReplCommand prints config sources for /config', async () => {
@@ -251,6 +352,9 @@ test('maybeHandleReplCommand prints current session info for /session', async ()
   assert.match(text, /provider: stub/)
   assert.match(text, /model: stub-model/)
   assert.match(text, /permission mode: default/)
+  assert.match(text, /compact pressure: low \(thresholds unavailable\)/)
+  assert.match(text, /compact dry-run recommendation: no immediate compact needed/)
+  assert.match(text, /compact tokens: \d+ used \(model limits unavailable\)/)
 })
 
 test('maybeHandleReplCommand prints current transcript for /transcript', async () => {
@@ -369,7 +473,7 @@ test('maybeHandleReplCommand resets engine state and updates session info on /cl
   assert.deepEqual(context.engine.getMessages(), [])
 })
 
-test('maybeHandleReplCommand compacts the conversation into a summary and new session', async () => {
+test('maybeHandleReplCommand compacts the conversation into a summary within the current session', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-compact-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -397,14 +501,23 @@ test('maybeHandleReplCommand compacts the conversation into a summary and new se
   }
 
   const text = output.join('')
-  assert.match(text, /Compacted conversation into a summary and started a new session\./)
-  assert.notEqual(context.session.sessionId, previousSessionId)
+  assert.match(text, /Compacted conversation into a summary within the current session\./)
+  assert.equal(context.session.sessionId, previousSessionId)
   const messages = context.engine.getMessages()
-  assert.equal(messages.length, 1)
-  assert.match(messages[0]?.content[0]?.type ?? '', /text/)
-  const summaryText = (messages[0]?.content[0] as { text?: string }).text ?? ''
-  assert.match(summaryText, /Conversation summary from the previous session:/)
-  assert.match(summaryText, /Additional compact instructions: keep the key points/)
+  assert.equal(messages.length, 4)
+  assert.ok(messages[2]?.compactBoundary)
+  assert.match(messages[3]?.content[0]?.type ?? '', /text/)
+  const summaryText = (messages[3]?.content[0] as { text?: string }).text ?? ''
+  assert.match(text, /session id: session-123/)
+  assert.match(text, /compact boundary: manual compact boundary compact_/)
+  assert.match(text, /context snapshot: /)
+  assert.match(summaryText, /Compact summary from earlier in this session\./)
+  assert.match(summaryText, /boundary: manual compact boundary compact_/)
+  assert.match(
+    summaryText,
+    /Primary request: continue the current session with a compacted summary\./,
+  )
+  assert.doesNotMatch(summaryText, /Transcript summary:/)
 })
 
 test('maybeHandleReplCommand clears the terminal for /cls', async () => {
@@ -524,6 +637,7 @@ test('maybeHandleReplCommand resumes a saved session and restores its messages',
 
   const text = output.join('')
   assert.match(text, /Resumed session:/)
+  assert.doesNotMatch(text, /last compact boundary:/)
   assert.match(text, /restored transcript preview:/)
   assert.equal(context.session.mode, 'resume')
   assert.equal(context.engine.getMessages().length, 2)

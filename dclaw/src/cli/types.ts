@@ -8,6 +8,7 @@ export type CommonCliOptions = {
   model?: string
   provider?: LlmProviderName
   permissionMode?: PermissionMode
+  maxIterations?: number
   systemPrompt?: string
   stream: boolean
   verbose: boolean

@@ -6,13 +6,18 @@ import {
 } from '../../types/message.js'
 import { resolveModelLimits } from '../modelLimits.js'
 import {
+  getLlmMaxRetries,
+  getLlmRequestTimeoutMs,
   getAnthropicRateLimitResetDelayMs,
   getHttpErrorDetails,
+  getStreamIdleTimeoutMs,
+  isStreamWatchdogEnabled,
   NonRetryableError,
   readSseEvents,
   RetryableHttpError,
   type SleepImpl,
   stringifyJson,
+  withTimeout,
   withRetry,
   type SseEvent,
 } from '../providerUtils.js'
@@ -158,7 +163,10 @@ export type AnthropicLlmClientOptions = {
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
   maxRetries?: number
+  requestTimeoutMs?: number
   sleepImpl?: SleepImpl
+  streamWatchdogEnabled?: boolean
+  streamIdleTimeoutMs?: number
   nowImpl?: () => number
 }
 
@@ -295,7 +303,9 @@ export class AnthropicLlmClient implements LlmClient {
   private readonly fetchImpl: typeof fetch
   private readonly env: NodeJS.ProcessEnv
   private readonly maxRetries: number
+  private readonly requestTimeoutMs: number
   private readonly sleepImpl?: SleepImpl
+  private readonly streamIdleTimeoutMs?: number
   private readonly nowImpl: () => number
 
   constructor(options: AnthropicLlmClientOptions = {}) {
@@ -305,8 +315,15 @@ export class AnthropicLlmClient implements LlmClient {
     this.defaultModel = options.defaultModel ?? config.defaultModel
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
-    this.maxRetries = options.maxRetries ?? getMaxRetriesFromEnv(this.env)
+    this.maxRetries = options.maxRetries ?? getLlmMaxRetries(this.env)
+    this.requestTimeoutMs =
+      options.requestTimeoutMs ?? getLlmRequestTimeoutMs(this.env)
     this.sleepImpl = options.sleepImpl
+    const streamWatchdogEnabled =
+      options.streamWatchdogEnabled ?? isStreamWatchdogEnabled(this.env)
+    this.streamIdleTimeoutMs = streamWatchdogEnabled
+      ? (options.streamIdleTimeoutMs ?? getStreamIdleTimeoutMs(this.env))
+      : undefined
     this.nowImpl = options.nowImpl ?? Date.now
   }
 
@@ -315,23 +332,26 @@ export class AnthropicLlmClient implements LlmClient {
   ): Promise<CreateMessageResponse> {
     const { model, limits } = this.resolveRequestContext(request)
     const parsed = await this.withRetry(async () => {
-      const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.apiKey!,
-          'anthropic-version': ANTHROPIC_VERSION,
-        },
-        body: JSON.stringify(
-          this.buildRequestBody(request, model, limits.maxOutputTokens),
-        ),
+      return this.withRequestTimeout(async signal => {
+        const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': this.apiKey!,
+            'anthropic-version': ANTHROPIC_VERSION,
+          },
+          body: JSON.stringify(
+            this.buildRequestBody(request, model, limits.maxOutputTokens),
+          ),
+          signal,
+        })
+
+        if (!response.ok) {
+          throw await this.createRequestError(response)
+        }
+
+        return (await response.json()) as AnthropicResponse
       })
-
-      if (!response.ok) {
-        throw await this.createRequestError(response)
-      }
-
-      return (await response.json()) as AnthropicResponse
     })
 
     const content = parseAnthropicContent(parsed)
@@ -350,44 +370,55 @@ export class AnthropicLlmClient implements LlmClient {
   ): Promise<CreateMessageResponse> {
     const { model, limits } = this.resolveRequestContext(request)
     return this.withRetry(async () => {
-      const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.apiKey!,
-          'anthropic-version': ANTHROPIC_VERSION,
-        },
-        body: JSON.stringify({
-          ...this.buildRequestBody(request, model, limits.maxOutputTokens),
-          stream: true,
-        }),
-      })
+      const response = await this.withRequestTimeout(async signal => {
+        const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': this.apiKey!,
+            'anthropic-version': ANTHROPIC_VERSION,
+          },
+          body: JSON.stringify({
+            ...this.buildRequestBody(request, model, limits.maxOutputTokens),
+            stream: true,
+          }),
+          signal,
+        })
 
-      if (!response.ok) {
-        throw await this.createRequestError(response)
-      }
+        if (!response.ok) {
+          throw await this.createRequestError(response)
+        }
+
+        return response
+      })
 
       const blocks: StreamingAnthropicBlockState[] = []
       let sawStreamEvent = false
       try {
-        await readSseEvents(response, (event: SseEvent) => {
-          if (event.data === '[DONE]') {
-            return
-          }
+        await readSseEvents(
+          response,
+          (event: SseEvent) => {
+            if (event.data === '[DONE]') {
+              return
+            }
 
-          sawStreamEvent = true
-          this.applyStreamEvent(blocks, callbacks, event)
-        })
+            sawStreamEvent = true
+            this.applyStreamEvent(blocks, callbacks, event)
+          },
+          this.streamIdleTimeoutMs === undefined
+            ? undefined
+            : { idleTimeoutMs: this.streamIdleTimeoutMs },
+        )
       } catch (error) {
         if (sawStreamEvent) {
           throw new NonRetryableError(error)
         }
-        throw error
+        return this.createMessage(request)
       }
 
       const content = this.buildStreamingContent(blocks)
       if (content.length === 0) {
-        throw new Error('Anthropic streaming response did not contain supported content')
+        return this.createMessage(request)
       }
 
       return {
@@ -523,6 +554,15 @@ export class AnthropicLlmClient implements LlmClient {
     })
   }
 
+  private withRequestTimeout<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    return withTimeout(operation, {
+      timeoutMs: this.requestTimeoutMs,
+      timeoutMessage: `Anthropic request timed out after ${this.requestTimeoutMs}ms`,
+    })
+  }
+
   private applyStreamEvent(
     blocks: StreamingAnthropicBlockState[],
     callbacks: CreateMessageStreamCallbacks,
@@ -631,18 +671,4 @@ export class AnthropicLlmClient implements LlmClient {
       }
     }
   }
-}
-
-function getMaxRetriesFromEnv(env: NodeJS.ProcessEnv): number {
-  const raw = env.DCLAW_LLM_MAX_RETRIES
-  if (!raw) {
-    return 2
-  }
-
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 2
-  }
-
-  return Math.floor(parsed)
 }

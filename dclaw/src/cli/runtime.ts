@@ -13,6 +13,9 @@ import {
 import { assemblePromptContext } from '../prompt/contextAssembler.js'
 import { buildSystemPrompt } from '../prompt/systemPrompt.js'
 import type { PromptMode } from '../prompt/types.js'
+import { summarizePendingTasks } from '../tasks/planAttachment.js'
+import { loadTaskBoardForSession } from '../tasks/store.js'
+import { getCurrentTask } from '../tasks/taskState.js'
 import { createDefaultToolRegistry } from '../tools/index.js'
 import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/tool.js'
@@ -22,6 +25,9 @@ import {
   resolvePermissionMode,
   type PermissionModeSource,
 } from './permissionModeConfig.js'
+import {
+  resolveMaxIterations,
+} from './maxIterationsConfig.js'
 import type { CommonCliOptions } from './types.js'
 
 export type PreparedCliRuntime = {
@@ -46,15 +52,12 @@ export async function prepareCliRuntime(
     key => configured.keySources[key],
   )
   const resolvedPermissionMode = await resolvePermissionMode(options, configured.env)
+  const resolvedMaxIterations = await resolveMaxIterations(
+    options,
+    configured.env,
+    key => configured.keySources[key],
+  )
   const claudeMdEntries = await loadClaudeMdEntries(options.cwd)
-  const promptContext = assemblePromptContext({
-    cwd: options.cwd,
-    provider: runtime.provider,
-    model: runtime.model,
-    mode,
-    userSystemPrompt: options.systemPrompt,
-    claudeMdEntries,
-  })
 
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceSink = shouldEnableQueryTrace(configured.env)
@@ -65,18 +68,46 @@ export async function prepareCliRuntime(
     provider: runtime.provider,
     modelLimitsEnv: configured.env,
     model: runtime.model,
-    systemPrompt: buildSystemPrompt(promptContext),
+    systemPromptResolver: async state => {
+      const board =
+        state.sessionId
+          ? await loadTaskBoardForSession(state.sessionId, configured.env)
+          : null
+      const currentTask = board ? getCurrentTask(board) : undefined
+      const promptContext = assemblePromptContext({
+        cwd: options.cwd,
+        provider: runtime.provider,
+        model: state.model ?? runtime.model,
+        mode,
+        permissionMode: state.permissionMode,
+        plan: board
+          ? {
+              boardId: board.boardId,
+              status: board.mode,
+              planFilePath: board.planFilePath,
+              currentTaskTitle: currentTask?.subject,
+              currentStep: board.currentStep,
+              taskSummary: summarizePendingTasks(board),
+            }
+          : undefined,
+        userSystemPrompt: options.systemPrompt,
+        claudeMdEntries,
+      })
+      return buildSystemPrompt(promptContext)
+    },
     toolRegistry,
     toolContext: {
       cwd: options.cwd,
       availableTools: toolRegistry.list().map(tool => tool.name),
       permissionMode: resolvedPermissionMode.permissionMode,
+      planFilePath: undefined,
       readState: new Map(),
       askUserQuestions: askUserQuestionsInteractively,
     },
     initialMessages,
-    maxIterations: 8,
+    maxIterations: resolvedMaxIterations.maxIterations,
     queryTraceSink,
+    sessionMode: mode === 'print' ? 'print' : 'interactive',
   })
 
   return {

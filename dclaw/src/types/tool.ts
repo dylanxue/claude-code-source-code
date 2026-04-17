@@ -37,10 +37,14 @@ export type ReadStateEntry = {
 }
 
 export type ToolContext = {
+  sessionId?: string
+  planFilePath?: string
   cwd: string
   availableTools: string[]
   permissionMode: PermissionMode
   readState: Map<string, ReadStateEntry>
+  setPermissionMode?: (permissionMode: PermissionMode) => void
+  setPlanFilePath?: (planFilePath: string | undefined) => void
   askUserQuestions?: (
     questions: AskUserQuestion[],
   ) => Promise<Record<string, string>>

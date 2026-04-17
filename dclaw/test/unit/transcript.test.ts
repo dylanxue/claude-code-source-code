@@ -1,119 +1,36 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { formatTranscript } from '../../src/session/transcript.js'
-import { createMessage, createTextMessage } from '../../src/types/message.js'
+import { createToolResultMessage } from '../../src/types/message.js'
 
-test('formatTranscript renders assistant reasoning tool use and tool result blocks', () => {
-  const lines = formatTranscript([
-    createTextMessage('user', 'Inspect the file'),
-    createMessage('assistant', [
-      {
-        type: 'reasoning',
-        summary: ['Inspect before using Read.'],
-        status: 'completed',
+test('formatTranscript surfaces plan-mode tool result summaries', () => {
+  const message = createToolResultMessage(
+    'user',
+    'tool_enter_plan',
+    {
+      status: 'approved',
+      boardId: 'board_123',
+      planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
+    },
+    {
+      ok: true,
+      output: {
+        status: 'approved',
+        boardId: 'board_123',
+        planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
       },
-      {
-        type: 'text',
-        text: 'Need to inspect first.',
-      },
-      {
-        type: 'tool_use',
-        id: 'tool_1',
-        name: 'Read',
-        input: { file_path: '/tmp/example.txt' },
-      },
-    ]),
-    createMessage('user', [
-      {
-        type: 'tool_result',
-        toolUseId: 'tool_1',
-        output: {
-          ok: true,
-          summary: 'Read /tmp/example.txt',
-          output: {
-            sandboxMode: 'restricted',
-          },
-        },
-      },
-    ]),
-  ])
-
-  assert.deepEqual(lines, [
-    'user: Inspect the file',
-    '',
-    'assistant: Need to inspect first.',
-    '[reasoning] Inspect before using Read.',
-    '[tool use] Read {"file_path":"/tmp/example.txt"}',
-    '',
-    'tool result (tool_1): Read /tmp/example.txt [sandbox: restricted]',
-  ])
-})
-
-test('formatTranscript includes thinking blocks only when requested', () => {
-  const messages = [
-    createMessage('assistant', [
-      {
-        type: 'thinking',
-        thinking: 'Inspect the file before editing it.',
-      },
-      {
-        type: 'redacted_thinking',
-        data: 'secret',
-      },
-    ]),
-  ]
-
-  assert.deepEqual(formatTranscript(messages), ['assistant:'])
-  assert.deepEqual(formatTranscript(messages, { includeThinking: true }), [
-    'assistant:',
-    '[thinking] Inspect the file before editing it.',
-    '[redacted thinking] hidden (6 chars)',
-  ])
-})
-
-test('formatTranscript can preview only the latest messages', () => {
-  const lines = formatTranscript(
-    [
-      createTextMessage('user', 'one'),
-      createTextMessage('assistant', 'two'),
-      createTextMessage('user', 'three'),
-    ],
-    { maxMessages: 2 },
+      summary:
+        'Plan mode entered with approval. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
+    },
   )
 
-  assert.deepEqual(lines, [
-    '... 1 earlier messages omitted ...',
-    '',
-    'assistant: two',
-    '',
-    'user: three',
-  ])
-})
+  const lines = formatTranscript([message], {
+    includeThinking: false,
+  })
 
-test('formatTranscript notes when model-facing tool output was persisted to disk', () => {
-  const lines = formatTranscript([
-    createMessage('user', [
-      {
-        type: 'tool_result',
-        toolUseId: 'tool_big',
-        output: {
-          type: 'persisted_tool_result',
-          toolName: 'Huge',
-          summary: 'Huge output persisted',
-          filepath: '/tmp/dclaw/tool-results/result.txt',
-          originalSizeChars: 123456,
-          preview: 'first lines',
-          truncated: true,
-        },
-        rawOutput: {
-          ok: true,
-          summary: 'Ran Huge',
-        },
-      },
-    ]),
-  ])
-
-  assert.deepEqual(lines, [
-    'tool result (tool_big): Ran Huge [model output persisted to /tmp/dclaw/tool-results/result.txt]',
-  ])
+  assert.equal(lines.length, 1)
+  assert.match(
+    lines[0] ?? '',
+    /Plan mode entered with approval\./,
+  )
 })

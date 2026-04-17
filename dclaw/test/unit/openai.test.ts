@@ -13,6 +13,7 @@ import {
   resolveOpenAiConfig,
 } from '../../src/llm/providers/openai.js'
 import {
+  getRetryDelayMs,
   getProviderErrorKind,
   getProviderErrorSubtype,
   RetryableHttpError,
@@ -969,6 +970,82 @@ test('OpenAiLlmClient supports Responses API SSE streaming', async () => {
   }
 })
 
+test('OpenAiLlmClient falls back to non-streaming when the stream ends before first event', async () => {
+  const deltas: string[] = []
+  let streamAttempts = 0
+  let nonStreamingAttempts = 0
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      const parsed = JSON.parse(body) as { stream?: boolean }
+      if (parsed.stream) {
+        streamAttempts += 1
+        response.writeHead(200, { 'content-type': 'text/event-stream' })
+        response.end()
+        return
+      }
+
+      nonStreamingAttempts += 1
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'fallback openai ok' }],
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onTextDelta(text) {
+          deltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.equal(streamAttempts, 1)
+    assert.equal(nonStreamingAttempts, 1)
+    assert.deepEqual(deltas, [])
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'fallback openai ok' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
 test('OpenAiLlmClient preserves incremental Responses API reasoning and tool-call SSE events', async () => {
   const deltas: string[] = []
   let capturedBody: unknown
@@ -1433,6 +1510,113 @@ test('OpenAiLlmClient retries transient network failures', async () => {
   assert.deepEqual(result.message.content, [
     { type: 'text', text: 'network retry ok' },
   ])
+})
+
+test('OpenAiLlmClient retries request timeouts', async () => {
+  let attempts = 0
+
+  const client = new OpenAiLlmClient({
+    apiKey: 'test-key',
+    apiStyle: 'responses',
+    defaultModel: 'gpt-5',
+    maxRetries: 1,
+    requestTimeoutMs: 20,
+    sleepImpl: async () => {},
+    fetchImpl: async (_input, init) => {
+      attempts += 1
+      if (attempts === 1) {
+        const signal = init?.signal
+        await new Promise((_, reject) => {
+          if (!signal) {
+            reject(new Error('Expected timeout signal'))
+            return
+          }
+
+          if (signal.aborted) {
+            const error = new Error('Request aborted')
+            error.name = 'AbortError'
+            reject(error)
+            return
+          }
+
+          signal.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('Request aborted')
+              error.name = 'AbortError'
+              reject(error)
+            },
+            { once: true },
+          )
+        })
+      }
+
+      return new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'timeout retry ok' }],
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    },
+  })
+
+  const result = await client.createMessage({
+    messages: [createTextMessage('user', 'hello')],
+  })
+
+  assert.equal(attempts, 2)
+  assert.deepEqual(result.message.content, [
+    { type: 'text', text: 'timeout retry ok' },
+  ])
+})
+
+test('OpenAiLlmClient defaults to Claude Code retry count', async () => {
+  let attempts = 0
+
+  const client = new OpenAiLlmClient({
+    apiKey: 'test-key',
+    apiStyle: 'responses',
+    defaultModel: 'gpt-5',
+    env: {},
+    sleepImpl: async () => {},
+    fetchImpl: async () => {
+      attempts += 1
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: 'temporary server failure',
+          },
+        }),
+        {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    },
+  })
+
+  await assert.rejects(() =>
+    client.createMessage({
+      messages: [createTextMessage('user', 'hello')],
+    }),
+  )
+
+  assert.equal(attempts, 11)
+})
+
+test('getRetryDelayMs uses Claude Code backoff cap by default', () => {
+  const delay = getRetryDelayMs(10, null)
+  assert.ok(delay >= 32000)
+  assert.ok(delay <= 40000)
 })
 
 test('getProviderErrorKind classifies transient fetch failures as network', () => {

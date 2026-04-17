@@ -83,6 +83,10 @@ test('buildTool fills safe defaults for optional tool behavior', async () => {
   })
 
   assert.deepEqual(await tool.validate({}, createToolContext()), { ok: true })
+  assert.equal(
+    await tool.prompt(createToolContext()),
+    'Tool used to verify buildTool defaults.',
+  )
   assert.equal(tool.isEnabled(createToolContext()), true)
   assert.equal(tool.isReadOnly({}), false)
   assert.deepEqual(
@@ -199,6 +203,38 @@ test('query loop forwards declared tool schemas to the llm client', async () => 
   assert.match(readTool?.description ?? '', /search for specific content first/i)
   assert.match(readProperties?.offset?.description ?? '', /specific section/i)
   assert.match(readProperties?.limit?.description ?? '', /specific portion of a larger file/i)
+})
+
+test('query loop forwards Claude Code style task tool prompts to the llm client', async () => {
+  const client = new CapturingLlmClient()
+  const registry = createDefaultToolRegistry()
+  const toolContext = createToolContext({
+    availableTools: ['TaskCreate', 'TaskList', 'TaskGet', 'TaskUpdate'],
+  })
+
+  await executeSingleTurn({
+    client,
+    messages: [createTextMessage('user', 'hello')],
+    toolRegistry: registry,
+    toolContext,
+  })
+
+  const tools = client.requests[0]?.tools
+  assert.ok(tools)
+
+  const taskCreate = tools.find(tool => tool.name === 'TaskCreate')
+  assert.match(taskCreate?.description ?? '', /Complex multi-step tasks/i)
+  assert.match(taskCreate?.description ?? '', /Check TaskList first/i)
+
+  const taskList = tools.find(tool => tool.name === 'TaskList')
+  assert.match(taskList?.description ?? '', /prefer working on tasks in ID order/i)
+
+  const taskGet = tools.find(tool => tool.name === 'TaskGet')
+  assert.match(taskGet?.description ?? '', /blockedBy/i)
+
+  const taskUpdate = tools.find(tool => tool.name === 'TaskUpdate')
+  assert.match(taskUpdate?.description ?? '', /TaskGet.*before updating/i)
+  assert.match(taskUpdate?.description ?? '', /Only mark a task as `completed`/i)
 })
 
 test('query loop stores model-facing tool results separately from raw tool results', async () => {

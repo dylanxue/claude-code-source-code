@@ -1,0 +1,20 @@
+{
+    "permissionMode": "bypass-permissions",
+    "maxIterations": 128,
+    "DCLAW_QUERY_TRACE": true,
+    "DCLAW_LLM_MAX_RETRIES": 10,
+    "DCLAW_LLM_TIMEOUT_MS": 600000,
+    "DCLAW_ENABLE_STREAM_WATCHDOG": true,
+    "DCLAW_STREAM_IDLE_TIMEOUT_MS": 90000,
+
+    "MODEL_PROVIDER": "openai",
+    
+    "OPENAI_MODEL": "kimi-k2.5",
+    "OPENAI_API_STYLE": "chat-completions",
+    "OPENAI_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "OPENAI_API_KEY": "f4b1bde0-e387-49ef-a732-e9e369770766",
+
+    "ANTHROPIC_API_KEY":"sk-cp-8fbwtCj-AGJo-q9W6e8ztBfMQ4YUsXV9VFbC0mnDXiW_N2QMUnh4Z345QoGjKJlPWUDHXMWCElvJI6pUvMAc-bOc9kZNiDUnVOoitlMrKZoXmaxkPI0rmWE",
+    "ANTHROPIC_MODEL": "minimax-m2.7",
+    "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic"
+  }

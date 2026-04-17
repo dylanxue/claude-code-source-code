@@ -49,7 +49,7 @@ test('query trace records the full tool-use event flow', async () => {
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0)
-      .map(line => JSON.parse(line) as { event: string })
+      .map(line => JSON.parse(line) as { event: string; data?: Record<string, unknown> })
 
     const events = lines.map(line => line.event)
     assert.deepEqual(events, [
@@ -69,6 +69,12 @@ test('query trace records the full tool-use event flow', async () => {
       'iteration.complete.no_tool_use',
       'turn.complete',
     ])
+    const turnStart = lines.find(line => line.event === 'turn.start')
+    assert.ok(turnStart?.data?.contextStats)
+    assert.ok(turnStart?.data?.compactRecommendation)
+    const iterationStart = lines.find(line => line.event === 'iteration.start')
+    assert.ok(iterationStart?.data?.contextStats)
+    assert.ok(iterationStart?.data?.compactRecommendation)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -314,6 +320,153 @@ test('query trace records llm.error when streaming fails after partial reasoning
         text: 'Need to inspect before answering.',
       },
     })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('query trace records compact dry-run recommendations when pressure is high', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-'))
+  const tracePath = createQueryTraceFilePath({
+    ...process.env,
+    DCLAW_HOME: join(dir, '.dclaw-home'),
+  })
+  const registry = createDefaultToolRegistry()
+  const compactDryRunEvents: Array<Record<string, unknown>> = []
+  const largeChunk = 'x'.repeat(2_000)
+  const messages = Array.from({ length: 50 }, (_, index) =>
+    createTextMessage(
+      index % 2 === 0 ? 'user' : 'assistant',
+      `message ${index + 1} ${largeChunk}`,
+    ),
+  )
+
+  try {
+    const queryTraceSink = await createFileQueryTraceSink(tracePath)
+
+    const result = await executeSingleTurn({
+      client: new StubLlmClient(),
+      messages,
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        availableTools: registry.list().map(tool => tool.name),
+        permissionMode: 'default',
+      }),
+      modelLimits: {
+        contextWindow: 40_000,
+        maxOutputTokens: 4_000,
+        maxOutputTokensUpperLimit: 4_000,
+      },
+      queryTraceSink,
+      streamHandlers: {
+        onCompactDryRun(event) {
+          compactDryRunEvents.push(event as unknown as Record<string, unknown>)
+        },
+      },
+    })
+
+    assert.match(result.outputText, /dclaw stub response/)
+    assert.ok(compactDryRunEvents.length >= 1)
+    assert.equal(compactDryRunEvents[0]?.phase, 'iteration_start')
+    assert.equal(
+      (
+        compactDryRunEvents[0]?.recommendation as
+          | { shouldCompact?: unknown }
+          | undefined
+      )?.shouldCompact,
+      true,
+    )
+
+    const lines = (await readFile(tracePath, 'utf8'))
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+
+    const dryRunEvent = lines.find(line => line.event === 'compact.dry_run')
+    assert.ok(dryRunEvent)
+    assert.equal(
+      (dryRunEvent.data as { phase?: unknown } | undefined)?.phase,
+      'iteration_start',
+    )
+    assert.equal(
+      (
+        dryRunEvent.data as {
+          compactRecommendation?: { shouldCompact?: unknown }
+        } | undefined
+      )?.compactRecommendation?.shouldCompact,
+      true,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('query trace records max-iteration exits with an explicit terminal message', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-'))
+  const filePath = join(dir, 'trace-max-iterations.txt')
+  const tracePath = createQueryTraceFilePath({
+    ...process.env,
+    DCLAW_HOME: join(dir, '.dclaw-home'),
+  })
+  const registry = createDefaultToolRegistry()
+  let toolUseCounter = 0
+
+  try {
+    await writeFile(filePath, 'loop forever', 'utf8')
+    const queryTraceSink = await createFileQueryTraceSink(tracePath)
+
+    const result = await executeSingleTurn({
+      client: {
+        providerName: 'stub',
+        async createMessage() {
+          toolUseCounter += 1
+          return {
+            message: createMessage('assistant', [
+              {
+                type: 'tool_use',
+                id: `tool_loop_${toolUseCounter}`,
+                name: 'Read',
+                input: { path: filePath },
+              },
+            ]),
+          }
+        },
+      },
+      messages: [createTextMessage('user', 'inspect the file')],
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        availableTools: registry.list().map(tool => tool.name),
+        permissionMode: 'default',
+      }),
+      maxIterations: 2,
+      queryTraceSink,
+    })
+
+    assert.equal(result.iterations, 2)
+    assert.match(
+      result.outputText,
+      /Stopped after reaching the maximum iteration limit \(2\)/,
+    )
+    assert.match(result.outputText, /Last tool results:/)
+    assert.equal(result.assistantMessage.role, 'assistant')
+    assert.equal(result.assistantMessage.content[0]?.type, 'text')
+
+    const lines = (await readFile(tracePath, 'utf8'))
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => JSON.parse(line) as { event: string; data?: Record<string, unknown> })
+
+    const maxIterationsEvent = lines.find(
+      line => line.event === 'turn.max_iterations',
+    )
+    assert.ok(maxIterationsEvent)
+    assert.equal(maxIterationsEvent.data?.iterations, 2)
+    assert.match(
+      String(maxIterationsEvent.data?.outputText ?? ''),
+      /Stopped after reaching the maximum iteration limit \(2\)/,
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

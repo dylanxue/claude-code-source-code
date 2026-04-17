@@ -26,6 +26,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     provider: runtime.provider,
     model: runtime.model,
   })
+  engine.setSessionId(session.sessionId)
   const replSession: ReplSessionState = {
     sessionId: session.sessionId,
     mode: 'interactive',
@@ -102,13 +103,19 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
         return
       }
 
-      await runInteractiveSessionPrompt({
+      const result = await runInteractiveSessionPrompt({
         engine,
         sessionId: replSession.sessionId,
         prompt,
         stream: command.options.stream,
         verbose: command.options.verbose,
       })
+      replSession.sessionId = result.sessionId
+      const runtimePermissionMode = engine.getPermissionMode()
+      if (runtimePermissionMode !== replSession.permissionMode) {
+        replSession.permissionMode = runtimePermissionMode
+        replSession.permissionModeSource = 'tool_runtime'
+      }
     },
   })
 }

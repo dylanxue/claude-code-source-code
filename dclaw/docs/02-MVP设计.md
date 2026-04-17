@@ -62,7 +62,10 @@ MVP 只需要重点实现这些目录：
 当前实现状态补充：
 
 - `interactive` 已不是占位入口，而是最小可用 REPL
-- 已支持首批本地 REPL commands，包括 `/help / history / doctor / model / permissions / config / resume / compact / clear`
+- 已支持首批本地 REPL commands，包括 `/help / session / history / doctor / model / permissions / config / transcript / resume / compact / clear / cls / exit`
+- `resume` 已不再只是占位入口，而是支持恢复 transcript 后继续进入同一套 REPL
+- REPL 内的 `/resume` 在不带参数时会显示最近 sessions，便于继续恢复
+- session 元信息与 transcript 已分别持久化到 `meta.json` 与 `messages.jsonl`
 
 ### 4.2 Query Engine
 

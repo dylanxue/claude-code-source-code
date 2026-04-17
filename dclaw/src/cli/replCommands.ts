@@ -1,18 +1,49 @@
 import { existsSync } from 'node:fs'
+import {
+  getCompactBoundaryMessages,
+  getLastCompactBoundary,
+  getMessagesAfterCompactBoundary,
+} from '../compact/boundaryMessage.js'
+import { compactSession } from '../compact/compactSession.js'
+import { formatCompactRecommendationLines } from '../compact/pressure.js'
+import { formatCompactBoundaryLabel } from '../compact/types.js'
 import type { QueryEngine } from '../core/queryEngine.js'
-import { getModelLimitsConfigPath, resolveModelLimits } from '../llm/modelLimits.js'
 import type { LlmProviderName } from '../llm/providerNames.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import { listSessionHistory } from '../session/history.js'
 import { loadSessionForResume } from '../session/resume.js'
-import { appendSessionMessages, createSession } from '../session/store.js'
+import { createSession, loadSessionMeta } from '../session/store.js'
+import {
+  ensurePlanFileForTaskBoard,
+  readPlanFile,
+} from '../tasks/planFiles.js'
+import {
+  createTaskRecord,
+  getCurrentTask,
+  setTaskStatus,
+} from '../tasks/taskState.js'
+import {
+  attachTaskBoardToSession,
+  createTaskBoard,
+  loadTaskBoard,
+  loadTaskBoardForSession,
+  updateTaskBoard,
+  updateTaskBoardLatestSession,
+} from '../tasks/store.js'
+import type { TaskBoard } from '../tasks/types.js'
 import { formatTranscript } from '../session/transcript.js'
-import { createTextMessage } from '../types/message.js'
 import type { PermissionMode } from '../types/tool.js'
 import {
   buildConfigAwareEnvWithSources,
   loadDclawConfigFiles,
 } from './configFile.js'
+import {
+  appendModelLimitLines,
+  appendReliabilityConfigLines,
+  getLimitsConfigStatus,
+  statusLine,
+} from './diagnostics.js'
+import { resolveMaxIterations } from './maxIterationsConfig.js'
 import { runHistory } from './history.js'
 import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { CommonCliOptions } from './types.js'
@@ -49,10 +80,6 @@ function printLines(lines: string[]): void {
   process.stdout.write(lines.join('\n') + '\n')
 }
 
-function statusLine(label: string, value: string): string {
-  return `${label.padEnd(18)} ${value}`
-}
-
 function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) {
     return undefined
@@ -66,7 +93,54 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
   return parsed
 }
 
-function printSessionInfo(context: ReplCommandContext): void {
+async function ensureBoardPlanFile(board: TaskBoard): Promise<TaskBoard> {
+  const { filePath } = await ensurePlanFileForTaskBoard(board)
+  if (board.planFilePath === filePath) {
+    return board
+  }
+
+  return (
+    (await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        planFilePath: filePath,
+        updatedAt: new Date().toISOString(),
+      }),
+    )) ?? {
+      ...board,
+      planFilePath: filePath,
+    }
+  )
+}
+
+async function syncPlanModeRuntime(
+  context: ReplCommandContext,
+): Promise<TaskBoard | null> {
+  const loadedBoard = await loadTaskBoardForSession(context.session.sessionId)
+  const board = loadedBoard ? await ensureBoardPlanFile(loadedBoard) : null
+  const activePlanFilePath = board?.mode === 'active' ? board.planFilePath : undefined
+
+  context.engine.setPlanFilePath(activePlanFilePath)
+  if (board?.mode === 'active') {
+    context.engine.setPermissionMode('plan')
+    context.session.permissionMode = 'plan'
+    context.session.permissionModeSource = 'task_board'
+  }
+
+  return board
+}
+
+async function printSessionInfo(context: ReplCommandContext): Promise<void> {
+  const meta = await loadSessionMeta(context.session.sessionId)
+  const taskBoard = meta?.taskBoardId
+    ? await loadTaskBoard(meta.taskBoardId)
+    : null
+  const compactRecommendation = context.engine.getCompactRecommendation()
+  const messages = context.engine.getMessages()
+  const compactBoundaries = getCompactBoundaryMessages(messages)
+  const lastCompactBoundary = getLastCompactBoundary(messages)
+
   printLines([
     'current session:',
     `session id: ${context.session.sessionId}`,
@@ -79,20 +153,39 @@ function printSessionInfo(context: ReplCommandContext): void {
     `permission mode: ${context.session.permissionMode}`,
     `permission mode source: ${context.session.permissionModeSource}`,
     `stream: ${context.options.stream ? 'enabled' : 'disabled'}`,
+    ...(meta?.taskBoardId ? [`task board: ${meta.taskBoardId}`] : []),
+    ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
+    ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
+    ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...formatCompactRecommendationLines(compactRecommendation),
+    ...(compactBoundaries.length > 0
+      ? [`compact boundaries: ${compactBoundaries.length}`]
+      : []),
+    ...(lastCompactBoundary
+      ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
+      : []),
     '',
   ])
 }
 
-function printTranscript(engine: QueryEngine, maxMessages?: number): void {
-  const transcriptLines = formatTranscript(engine.getMessages(), {
+async function printTranscript(
+  context: ReplCommandContext,
+  maxMessages?: number,
+): Promise<void> {
+  const transcriptLines = formatTranscript(context.engine.getMessages(), {
     includeThinking: false,
     maxMessages,
   })
+  const lastCompactBoundary = getLastCompactBoundary(context.engine.getMessages())
+  const compactLines = lastCompactBoundary
+    ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`, '']
+    : []
 
   printLines([
     typeof maxMessages === 'number'
       ? `current transcript (latest ${maxMessages} messages):`
       : 'current transcript:',
+    ...compactLines,
     ...(transcriptLines.length > 0 ? transcriptLines : ['<empty>']),
     '',
   ])
@@ -111,6 +204,8 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   })
 
   context.engine.resetMessages()
+  context.engine.setSessionId(nextSession.sessionId)
+  context.engine.setPlanFilePath(undefined)
   context.session.sessionId = nextSession.sessionId
   context.session.mode = 'interactive'
 
@@ -121,11 +216,209 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   ])
 }
 
+function formatTaskBoardSummary(board: TaskBoard): string[] {
+  const currentTask = getCurrentTask(board)
+
+  return [
+    `task board: ${board.boardId}`,
+    `plan mode: ${board.mode}`,
+    `workspace: ${board.workspaceId}`,
+    `root session: ${board.rootSessionId}`,
+    `latest session: ${board.latestSessionId}`,
+    `plan file: ${board.planFilePath ?? '<none>'}`,
+    `current task: ${currentTask?.subject ?? '<none>'}`,
+    `current step: ${board.currentStep ?? '<none>'}`,
+  ]
+}
+
+async function getOrCreateCurrentTaskBoard(
+  context: ReplCommandContext,
+): Promise<TaskBoard> {
+  const existing = await loadTaskBoardForSession(context.session.sessionId)
+  if (existing) {
+    const updated =
+      existing.latestSessionId !== context.session.sessionId
+        ? await updateTaskBoardLatestSession(
+            existing.boardId,
+            context.session.sessionId,
+          )
+        : existing
+    return updated ?? existing
+  }
+
+  const board = await createTaskBoard({
+    workspaceId: context.options.cwd,
+    rootSessionId: context.session.sessionId,
+  })
+  await attachTaskBoardToSession(context.session.sessionId, board.boardId)
+  return board
+}
+
+async function showPlanState(context: ReplCommandContext): Promise<void> {
+  const board = await syncPlanModeRuntime(context)
+  if (!board) {
+    printLines([
+      'No task board is attached to this session yet.',
+      'Use /plan to enter plan mode and create one.',
+      '',
+    ])
+    return
+  }
+
+  const planContent =
+    board.planFilePath
+      ? await readPlanFile(board.planFilePath)
+      : null
+  const planPreview = planContent
+    ?.split('\n')
+    .map(line => line.trim())
+    .find(line => line.length > 0 && !line.startsWith('#'))
+
+  printLines([
+    ...formatTaskBoardSummary(board),
+    ...(board.planFilePath && existsSync(board.planFilePath)
+      ? ['plan file status: ready']
+      : ['plan file status: missing']),
+    ...(planPreview ? [`plan preview: ${planPreview}`] : []),
+    '',
+  ])
+}
+
+async function enterPlanMode(context: ReplCommandContext): Promise<void> {
+  const board = await ensureBoardPlanFile(await getOrCreateCurrentTaskBoard(context))
+  const updated =
+    board.mode === 'active' && context.session.permissionMode === 'plan'
+      ? board
+      : await updateTaskBoard(
+          board.boardId,
+          current => ({
+            ...current,
+            planFilePath: board.planFilePath,
+            mode: 'active',
+            latestSessionId: context.session.sessionId,
+            needsPlanModeExitReminder: false,
+            resumePermissionMode:
+              context.session.permissionMode === 'plan'
+                ? current.resumePermissionMode ?? 'default'
+                : (context.session.permissionMode as PermissionMode),
+            updatedAt: new Date().toISOString(),
+          }),
+        )
+
+  context.engine.setPermissionMode('plan')
+  context.engine.setPlanFilePath(updated?.planFilePath ?? board.planFilePath)
+  context.session.permissionMode = 'plan'
+  context.session.permissionModeSource = 'repl_command'
+
+  printLines([
+    'Entered plan mode for this REPL session.',
+    ...(updated ? formatTaskBoardSummary(updated) : []),
+    '',
+  ])
+}
+
+async function exitPlanMode(context: ReplCommandContext): Promise<void> {
+  const board = await loadTaskBoardForSession(context.session.sessionId)
+  if (!board) {
+    printLines([
+      'No task board is attached to this session yet.',
+      '',
+    ])
+    return
+  }
+
+  const nextPermissionMode = board.resumePermissionMode ?? 'default'
+  const updated = await updateTaskBoard(
+    board.boardId,
+    current => ({
+      ...current,
+      mode: 'inactive',
+      hasExitedPlanModeInSession: true,
+      needsPlanModeExitReminder: true,
+      planModeReminderCount: undefined,
+      lastPlanModeReminderTurnCount: undefined,
+      resumePermissionMode: undefined,
+      latestSessionId: context.session.sessionId,
+      updatedAt: new Date().toISOString(),
+    }),
+  )
+
+  context.engine.setPermissionMode(nextPermissionMode)
+  context.engine.setPlanFilePath(undefined)
+  context.session.permissionMode = nextPermissionMode
+  context.session.permissionModeSource = 'repl_command'
+
+  printLines([
+    `Exited plan mode. Restored permission mode: ${nextPermissionMode}`,
+    ...(updated ? formatTaskBoardSummary(updated) : []),
+    '',
+  ])
+}
+
+async function handlePlanCommand(
+  args: string[],
+  context: ReplCommandContext,
+): Promise<void> {
+  const subcommand = args[0]?.toLowerCase()
+
+  if (subcommand === 'exit') {
+    await exitPlanMode(context)
+    return
+  }
+
+  if (subcommand === 'start') {
+    const title = args.slice(1).join(' ').trim()
+    const board = await getOrCreateCurrentTaskBoard(context)
+    if (!title) {
+      printLines([
+        ...(board ? formatTaskBoardSummary(board) : []),
+        '',
+      ])
+      return
+    }
+
+    const now = new Date().toISOString()
+    const task = createTaskRecord(title, now)
+    const updated = await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        currentTaskId: task.id,
+        tasks: [
+          ...current.tasks.map(existing =>
+            existing.status === 'in_progress'
+              ? setTaskStatus(existing, 'pending', now)
+              : existing,
+          ),
+          setTaskStatus(task, 'in_progress', now),
+        ],
+        updatedAt: now,
+      }),
+    )
+
+    printLines([
+      `Started task: ${title}`,
+      ...(updated ? formatTaskBoardSummary(updated) : []),
+      '',
+    ])
+    return
+  }
+
+  const board = await loadTaskBoardForSession(context.session.sessionId)
+  if (board?.mode === 'active' || context.session.permissionMode === 'plan') {
+    await showPlanState(context)
+    return
+  }
+
+  await enterPlanMode(context)
+}
+
 async function compactConversation(
   args: string[],
   context: ReplCommandContext,
 ): Promise<void> {
-  const messages = context.engine.getMessages()
+  const allMessages = context.engine.getMessages()
+  const messages = getMessagesAfterCompactBoundary(allMessages)
   if (messages.length === 0) {
     printLines([
       'Nothing to compact. The current conversation is already empty.',
@@ -134,34 +427,36 @@ async function compactConversation(
     return
   }
 
-  const transcriptLines = formatTranscript(messages, {
-    includeThinking: false,
-    maxMessages: 40,
-  })
   const instructionText = args.join(' ').trim()
-  const summaryText = [
-    'Conversation summary from the previous session:',
-    ...(transcriptLines.length > 0 ? transcriptLines : ['<empty>']),
-    ...(instructionText
-      ? ['', `Additional compact instructions: ${instructionText}`]
-      : []),
-  ].join('\n')
-  const summaryMessage = createTextMessage('assistant', summaryText)
-  const nextSession = await createSession({
+  const contextStats = context.engine.getContextStats()
+  const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
+  const { boundary, boundaryMessage, summaryMessage } = await compactSession({
+    sourceSessionId: context.session.sessionId,
+    messages,
     cwd: context.options.cwd,
-    mode: 'interactive',
     provider: context.session.provider,
     model: context.session.model,
+    trigger: 'manual',
+    reason: instructionText
+      ? `user requested /compact: ${instructionText}`
+      : 'user requested /compact',
+    instructionText,
+    contextStats,
+    env: configured.env,
   })
 
-  context.engine.resetMessages([summaryMessage])
-  await appendSessionMessages(nextSession.sessionId, [summaryMessage])
-  context.session.sessionId = nextSession.sessionId
-  context.session.mode = 'interactive'
+  context.engine.preparePostCompactRecovery(boundary.boundaryId)
+  context.engine.resetMessages([
+    ...allMessages,
+    boundaryMessage,
+    summaryMessage,
+  ])
 
   printLines([
-    'Compacted conversation into a summary and started a new session.',
-    `session id: ${nextSession.sessionId}`,
+    'Compacted conversation into a summary within the current session.',
+    `session id: ${context.session.sessionId}`,
+    `compact boundary: ${formatCompactBoundaryLabel(boundary)}`,
+    `context snapshot: ${contextStats.approxChars} chars / ${contextStats.approxTokens} tokens / ${contextStats.persistedToolResultCount} persisted tool results`,
     '',
   ])
 }
@@ -169,6 +464,14 @@ async function compactConversation(
 async function printDoctor(context: ReplCommandContext): Promise<void> {
   const cwd = context.options.cwd
   const configured = await buildConfigAwareEnvWithSources(cwd)
+  const resolvedMaxIterations = await resolveMaxIterations(
+    {
+      cwd,
+      maxIterations: context.options.maxIterations,
+    },
+    configured.env,
+    key => configured.keySources[key],
+  )
   const runtime = resolveLlmRuntimeConfig(
     {
       provider: context.session.provider as LlmProviderName,
@@ -177,6 +480,11 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     configured.env,
     key => configured.keySources[key],
   )
+  const compactRecommendation = context.engine.getCompactRecommendation()
+  const compactPressureValue =
+    compactRecommendation.percentLeft === undefined
+      ? `${compactRecommendation.level} (thresholds unavailable)`
+      : `${compactRecommendation.level} (${compactRecommendation.percentLeft}% until auto-compact)`
   const lines = [
     'dclaw doctor',
     '',
@@ -189,9 +497,49 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     statusLine('session mode', context.session.mode),
     statusLine('permission mode', context.session.permissionMode),
     statusLine('permission source', context.session.permissionModeSource),
+    statusLine(
+      'max iterations',
+      `${resolvedMaxIterations.maxIterations} (${resolvedMaxIterations.maxIterationsSource})`,
+    ),
+    statusLine('compact pressure', compactPressureValue),
+    statusLine(
+      'compact recommendation',
+      compactRecommendation.shouldCompact ? 'compact soon (dry-run)' : 'none',
+    ),
+    statusLine(
+      'compact tokens',
+      compactRecommendation.autoCompactThresholdTokens === undefined
+        ? `${compactRecommendation.tokenUsage} (thresholds unavailable)`
+        : `${compactRecommendation.tokenUsage}/${compactRecommendation.autoCompactThresholdTokens}`,
+    ),
+    statusLine(
+      'compact remaining',
+      compactRecommendation.percentLeft === undefined
+        ? 'unknown'
+        : `${compactRecommendation.percentLeft}% until auto-compact`,
+    ),
+    statusLine(
+      'compact used',
+      compactRecommendation.percentUsed === undefined
+        ? 'unknown'
+        : `${compactRecommendation.percentUsed}% of effective window`,
+    ),
+    statusLine(
+      'compact thresholds',
+      compactRecommendation.autoCompactThresholdTokens === undefined ||
+        compactRecommendation.warningThresholdTokens === undefined ||
+        compactRecommendation.blockingLimitTokens === undefined
+        ? 'unavailable'
+        : `warn ${compactRecommendation.warningThresholdTokens} / auto ${compactRecommendation.autoCompactThresholdTokens} / block ${compactRecommendation.blockingLimitTokens}`,
+    ),
     statusLine('provider', runtime.provider),
     statusLine('provider source', context.session.providerSource),
   ]
+  if (compactRecommendation.reasons.length > 0) {
+    lines.push(
+      statusLine('compact reasons', compactRecommendation.reasons.join('; ')),
+    )
+  }
 
   if (runtime.providerConfig.provider === 'anthropic') {
     const config = runtime.providerConfig
@@ -219,25 +567,8 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     lines.push(statusLine('model source', context.session.modelSource))
   }
 
+  appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])
   printLines(lines)
-}
-
-function getLimitsConfigStatus(): string {
-  const filePath = getModelLimitsConfigPath()
-  return existsSync(filePath) ? filePath : `not found (${filePath})`
-}
-
-function appendModelLimitLines(
-  lines: string[],
-  provider: 'anthropic' | 'openai',
-  model: string,
-): void {
-  const limits = resolveModelLimits(provider, model)
-  lines.push(statusLine('context window', String(limits.contextWindow)))
-  lines.push(statusLine('max output', String(limits.maxOutputTokens)))
-  lines.push(
-    statusLine('max output cap', String(limits.maxOutputTokensUpperLimit)),
-  )
 }
 
 function printCurrentModel(context: ReplCommandContext): void {
@@ -386,8 +717,10 @@ async function resumeConversation(
   }
 
   context.engine.resetMessages(resumed.messages)
+  context.engine.setSessionId(resumed.meta.sessionId)
   context.session.sessionId = resumed.meta.sessionId
   context.session.mode = 'resume'
+  await syncPlanModeRuntime(context)
 
   if (resumed.meta.provider === context.session.provider && resumed.meta.model) {
     context.engine.setModel(resumed.meta.model)
@@ -399,6 +732,8 @@ async function resumeConversation(
     includeThinking: false,
     maxMessages: 10,
   })
+  const compactBoundaries = getCompactBoundaryMessages(resumed.messages)
+  const lastCompactBoundary = getLastCompactBoundary(resumed.messages)
 
   printLines([
     `Resumed session: ${resumed.meta.sessionId}`,
@@ -407,6 +742,12 @@ async function resumeConversation(
       ? [
           `continuing with current provider: ${context.session.provider}`,
         ]
+      : []),
+    ...(compactBoundaries.length > 0
+      ? [`compact boundaries: ${compactBoundaries.length}`]
+      : []),
+    ...(lastCompactBoundary
+      ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
       : []),
     '',
     'restored transcript preview:',
@@ -437,11 +778,19 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     },
   },
   {
+    name: '/plan',
+    argumentHint: '[start <title>|exit]',
+    description: 'Enter plan mode, show the current plan state, or exit plan mode.',
+    async handle(args, context) {
+      await handlePlanCommand(args, context)
+    },
+  },
+  {
     name: '/session',
     aliases: ['/info'],
     description: 'Show current session info.',
-    handle(_args, context) {
-      printSessionInfo(context)
+    async handle(_args, context) {
+      await printSessionInfo(context)
     },
   },
   {
@@ -490,9 +839,9 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[N]',
     description:
       'Show the current conversation transcript, optionally limited to the latest N messages.',
-    handle(args, context) {
+    async handle(args, context) {
       if (args.length === 0) {
-        printTranscript(context.engine)
+        await printTranscript(context)
         return
       }
 
@@ -505,7 +854,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
         return
       }
 
-      printTranscript(context.engine, maxMessages)
+      await printTranscript(context, maxMessages)
     },
   },
   {

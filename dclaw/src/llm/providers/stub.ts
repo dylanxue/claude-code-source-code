@@ -135,6 +135,31 @@ export class StubLlmClient implements LlmClient {
   async createMessage(
     request: CreateMessageRequest,
   ): Promise<CreateMessageResponse> {
+    if (request.systemPrompt?.includes('You are generating a compact summary')) {
+      const lastUserMessage = findLastUserMessage(request.messages)
+      const prompt = lastUserMessage ? getTextContent(lastUserMessage) : ''
+      const transcriptSection =
+        prompt.split('## Transcript\n')[1]?.trim() ?? '<empty>'
+      const transcriptPreview = transcriptSection
+        .split('\n')
+        .slice(0, 6)
+        .join('\n')
+
+      return {
+        message: createTextMessage(
+          'assistant',
+          [
+            '<summary>',
+            'Primary request: continue the current session with a compacted summary.',
+            'Current work: preserve the latest technical context and constraints.',
+            'Transcript evidence:',
+            transcriptPreview,
+            '</summary>',
+          ].join('\n'),
+        ),
+      }
+    }
+
     const trailingToolResultOutputs = getTrailingToolResultOutputs(request.messages)
     if (trailingToolResultOutputs.length > 0) {
       const summary = [

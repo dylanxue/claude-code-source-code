@@ -4,6 +4,7 @@ import { getDclawConfigPath } from '../session/paths.js'
 
 export type DclawConfigFile = Record<string, unknown> & {
   permissionMode?: unknown
+  maxIterations?: unknown
 }
 
 export type ConfigEnvSource = 'user_config' | 'workspace_config'

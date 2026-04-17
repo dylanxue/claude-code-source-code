@@ -1,6 +1,8 @@
 import { appendSessionMessages } from '../session/store.js'
 import type { QueryEngine } from '../core/queryEngine.js'
 import {
+  formatAutoCompactLine,
+  formatCompactDryRunLine,
   formatLlmErrorLine,
   formatToolUseLine,
   formatVerboseLines,
@@ -17,11 +19,19 @@ export type InteractiveSessionPromptOptions = {
   env?: NodeJS.ProcessEnv
 }
 
+export type InteractiveSessionPromptResult = {
+  sessionId: string
+  autoCompact?: {
+    sessionId: string
+    boundaryId: string
+    reason: string
+    summaryMessageId: string
+  }
+}
+
 export async function runInteractiveSessionPrompt(
   options: InteractiveSessionPromptOptions,
-): Promise<void> {
-  const initialMessageCount = options.engine.getMessages().length
-
+): Promise<InteractiveSessionPromptResult> {
   if (options.stream) {
     let outputEndsWithNewline = true
     let activeReasoningKind: 'reasoning' | 'thinking' | null = null
@@ -103,12 +113,23 @@ export async function runInteractiveSessionPrompt(
 
           writeVerboseTextLines([formatLlmErrorLine(error)])
         },
+        onCompactDryRun(event) {
+          if (!options.verbose) {
+            return
+          }
+
+          writeVerboseTextLines([formatCompactDryRunLine(event)])
+        },
+        onAutoCompact(event) {
+          writeVerboseTextLines([formatAutoCompactLine(event)])
+        },
       },
     )
 
+    const activeSessionId = options.engine.getSessionId() ?? options.sessionId
     await appendSessionMessages(
-      options.sessionId,
-      result.messages.slice(initialMessageCount),
+      activeSessionId,
+      result.appendedMessages,
       options.env,
     )
     if (options.verbose) {
@@ -118,31 +139,39 @@ export async function runInteractiveSessionPrompt(
     } else if (!result.outputText.endsWith('\n')) {
       process.stdout.write('\n')
     }
-    return
+    return {
+      sessionId: activeSessionId,
+      ...(result.autoCompact ? { autoCompact: result.autoCompact } : {}),
+    }
   }
 
   const result = await options.engine.submitUserPrompt(options.prompt)
+  const activeSessionId = options.engine.getSessionId() ?? options.sessionId
   await appendSessionMessages(
-    options.sessionId,
-    result.messages.slice(initialMessageCount),
+    activeSessionId,
+    result.appendedMessages,
     options.env,
   )
 
   if (options.verbose) {
-    const verboseLines = formatVerboseLines(
-      result.messages.slice(initialMessageCount),
-      {
-        includeToolCalls: true,
-        includeReasoning: true,
-        includeContent: true,
-      },
-    )
+    const verboseLines = formatVerboseLines(result.appendedMessages, {
+      includeToolCalls: true,
+      includeReasoning: true,
+      includeContent: true,
+    })
     process.stdout.write(
       (verboseLines.length > 0 ? verboseLines.join('\n') : result.outputText) +
         '\n',
     )
-    return
+    return {
+      sessionId: activeSessionId,
+      ...(result.autoCompact ? { autoCompact: result.autoCompact } : {}),
+    }
   }
 
   process.stdout.write(result.outputText + '\n')
+  return {
+    sessionId: activeSessionId,
+    ...(result.autoCompact ? { autoCompact: result.autoCompact } : {}),
+  }
 }

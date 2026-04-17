@@ -6,12 +6,17 @@ import {
 } from '../../types/message.js'
 import { resolveModelLimits } from '../modelLimits.js'
 import {
+  getLlmMaxRetries,
+  getLlmRequestTimeoutMs,
   getHttpErrorDetails,
+  getStreamIdleTimeoutMs,
+  isStreamWatchdogEnabled,
   NonRetryableError,
   readSseEvents,
   RetryableHttpError,
   type SleepImpl,
   stringifyJson,
+  withTimeout,
   withRetry,
   type SseEvent,
 } from '../providerUtils.js'
@@ -266,7 +271,10 @@ export type OpenAiLlmClientOptions = {
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
   maxRetries?: number
+  requestTimeoutMs?: number
   sleepImpl?: SleepImpl
+  streamWatchdogEnabled?: boolean
+  streamIdleTimeoutMs?: number
 }
 
 type ResolvedOpenAiResponsesOptions = {
@@ -1155,7 +1163,9 @@ export class OpenAiLlmClient implements LlmClient {
   private readonly fetchImpl: typeof fetch
   private readonly env: NodeJS.ProcessEnv
   private readonly maxRetries: number
+  private readonly requestTimeoutMs: number
   private readonly sleepImpl?: SleepImpl
+  private readonly streamIdleTimeoutMs?: number
 
   constructor(options: OpenAiLlmClientOptions = {}) {
     const config = resolveOpenAiProviderConfig(options.env)
@@ -1170,8 +1180,15 @@ export class OpenAiLlmClient implements LlmClient {
     this.defaultStore = options.defaultStore ?? config.defaultStore
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
-    this.maxRetries = options.maxRetries ?? getMaxRetriesFromEnv(this.env)
+    this.maxRetries = options.maxRetries ?? getLlmMaxRetries(this.env)
+    this.requestTimeoutMs =
+      options.requestTimeoutMs ?? getLlmRequestTimeoutMs(this.env)
     this.sleepImpl = options.sleepImpl
+    const streamWatchdogEnabled =
+      options.streamWatchdogEnabled ?? isStreamWatchdogEnabled(this.env)
+    this.streamIdleTimeoutMs = streamWatchdogEnabled
+      ? (options.streamIdleTimeoutMs ?? getStreamIdleTimeoutMs(this.env))
+      : undefined
   }
 
   async createMessage(
@@ -1181,27 +1198,30 @@ export class OpenAiLlmClient implements LlmClient {
 
     if (this.apiStyle === 'chat-completions') {
       const parsed = await this.withRetry(async () => {
-        const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${this.apiKey!}`,
-          },
-          body: JSON.stringify(
-            buildChatCompletionsRequestBody(
-              request,
-              model,
-              limits.maxOutputTokens,
-              false,
+        return this.withRequestTimeout(async signal => {
+          const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${this.apiKey!}`,
+            },
+            body: JSON.stringify(
+              buildChatCompletionsRequestBody(
+                request,
+                model,
+                limits.maxOutputTokens,
+                false,
+              ),
             ),
-          ),
+            signal,
+          })
+
+          if (!response.ok) {
+            throw await this.createRequestError(response)
+          }
+
+          return (await response.json()) as OpenAiChatCompletionResponse
         })
-
-        if (!response.ok) {
-          throw await this.createRequestError(response)
-        }
-
-        return (await response.json()) as OpenAiChatCompletionResponse
       })
       const content = parseChatCompletionResponse(parsed)
       if (content.length === 0) {
@@ -1214,28 +1234,31 @@ export class OpenAiLlmClient implements LlmClient {
     }
 
     const parsed = await this.withRetry(async () => {
-      const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${this.apiKey!}`,
-        },
-        body: JSON.stringify(
-          buildResponsesRequestBody(
-            request,
-            model,
-            limits.maxOutputTokens,
-            false,
-            responsesOptions,
+      return this.withRequestTimeout(async signal => {
+        const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${this.apiKey!}`,
+          },
+          body: JSON.stringify(
+            buildResponsesRequestBody(
+              request,
+              model,
+              limits.maxOutputTokens,
+              false,
+              responsesOptions,
+            ),
           ),
-        ),
+          signal,
+        })
+
+        if (!response.ok) {
+          throw await this.createRequestError(response)
+        }
+
+        return (await response.json()) as OpenAiResponsesResponse
       })
-
-      if (!response.ok) {
-        throw await this.createRequestError(response)
-      }
-
-      return (await response.json()) as OpenAiResponsesResponse
     })
     const content = parseResponsesResponse(parsed)
     if (content.length === 0) {
@@ -1255,26 +1278,31 @@ export class OpenAiLlmClient implements LlmClient {
 
     if (this.apiStyle !== 'chat-completions') {
       return this.withRetry(async () => {
-        const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${this.apiKey!}`,
-          },
-          body: JSON.stringify(
-            buildResponsesRequestBody(
-              request,
-              model,
-              limits.maxOutputTokens,
-              true,
-              responsesOptions,
+        const response = await this.withRequestTimeout(async signal => {
+          const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${this.apiKey!}`,
+            },
+            body: JSON.stringify(
+              buildResponsesRequestBody(
+                request,
+                model,
+                limits.maxOutputTokens,
+                true,
+                responsesOptions,
+              ),
             ),
-          ),
-        })
+            signal,
+          })
 
-        if (!response.ok) {
-          throw await this.createRequestError(response)
-        }
+          if (!response.ok) {
+            throw await this.createRequestError(response)
+          }
+
+          return response
+        })
 
         const streamState: StreamingResponsesState = {
           textByOutputIndex: new Map(),
@@ -1287,33 +1315,39 @@ export class OpenAiLlmClient implements LlmClient {
         let sawStreamEvent = false
 
         try {
-          await readSseEvents(response, (event: SseEvent) => {
-            if (event.data === '[DONE]') {
-              return
-            }
-
-            sawStreamEvent = true
-            const payload = JSON.parse(event.data) as OpenAiResponsesStreamEvent
-            if (payload.type === 'error' && payload.error?.message) {
-              throw new Error(`OpenAI streaming request failed: ${payload.error.message}`)
-            }
-
-            if (
-              payload.type === 'response.completed' ||
-              payload.type === 'response.done'
-            ) {
-              if (payload.response) {
-                terminalResponse = payload.response
+          await readSseEvents(
+            response,
+            (event: SseEvent) => {
+              if (event.data === '[DONE]') {
+                return
               }
-            }
 
-            parseResponsesStreamEvent(streamState, payload, callbacks)
-          })
+              sawStreamEvent = true
+              const payload = JSON.parse(event.data) as OpenAiResponsesStreamEvent
+              if (payload.type === 'error' && payload.error?.message) {
+                throw new Error(`OpenAI streaming request failed: ${payload.error.message}`)
+              }
+
+              if (
+                payload.type === 'response.completed' ||
+                payload.type === 'response.done'
+              ) {
+                if (payload.response) {
+                  terminalResponse = payload.response
+                }
+              }
+
+              parseResponsesStreamEvent(streamState, payload, callbacks)
+            },
+            this.streamIdleTimeoutMs === undefined
+              ? undefined
+              : { idleTimeoutMs: this.streamIdleTimeoutMs },
+          )
         } catch (error) {
           if (sawStreamEvent) {
             throw new NonRetryableError(error)
           }
-          throw error
+          return this.createMessage(request)
         }
 
         const terminalContent = terminalResponse
@@ -1324,7 +1358,7 @@ export class OpenAiLlmClient implements LlmClient {
             ? terminalContent
             : buildResponsesStreamContent(streamState)
         if (content.length === 0) {
-          throw new Error('OpenAI streaming response did not contain supported content')
+          return this.createMessage(request)
         }
 
         return {
@@ -1334,20 +1368,25 @@ export class OpenAiLlmClient implements LlmClient {
     }
 
     return this.withRetry(async () => {
-      const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${this.apiKey!}`,
-        },
-        body: JSON.stringify(
-          buildChatCompletionsRequestBody(request, model, limits.maxOutputTokens, true),
-        ),
-      })
+      const response = await this.withRequestTimeout(async signal => {
+        const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${this.apiKey!}`,
+          },
+          body: JSON.stringify(
+            buildChatCompletionsRequestBody(request, model, limits.maxOutputTokens, true),
+          ),
+          signal,
+        })
 
-      if (!response.ok) {
-        throw await this.createRequestError(response)
-      }
+        if (!response.ok) {
+          throw await this.createRequestError(response)
+        }
+
+        return response
+      })
 
       let text = ''
       let reasoning = ''
@@ -1355,64 +1394,70 @@ export class OpenAiLlmClient implements LlmClient {
       let sawStreamEvent = false
 
       try {
-        await readSseEvents(response, (event: SseEvent) => {
-          if (event.data === '[DONE]') {
-            return
-          }
+        await readSseEvents(
+          response,
+          (event: SseEvent) => {
+            if (event.data === '[DONE]') {
+              return
+            }
 
-          sawStreamEvent = true
-          const chunk = JSON.parse(event.data) as OpenAiChatCompletionChunk
-          const delta = chunk.choices?.[0]?.delta
-          if (!delta) {
-            return
-          }
+            sawStreamEvent = true
+            const chunk = JSON.parse(event.data) as OpenAiChatCompletionChunk
+            const delta = chunk.choices?.[0]?.delta
+            if (!delta) {
+              return
+            }
 
-          if (typeof delta.content === 'string' && delta.content.length > 0) {
-            text += delta.content
-            callbacks.onTextDelta?.(delta.content)
-          }
+            if (typeof delta.content === 'string' && delta.content.length > 0) {
+              text += delta.content
+              callbacks.onTextDelta?.(delta.content)
+            }
 
-          if (
-            typeof delta.reasoning_content === 'string' &&
-            delta.reasoning_content.length > 0
-          ) {
-            reasoning += delta.reasoning_content
-            callbacks.onReasoningDelta?.({
-              kind: 'thinking',
-              text: delta.reasoning_content,
-            })
-          }
+            if (
+              typeof delta.reasoning_content === 'string' &&
+              delta.reasoning_content.length > 0
+            ) {
+              reasoning += delta.reasoning_content
+              callbacks.onReasoningDelta?.({
+                kind: 'thinking',
+                text: delta.reasoning_content,
+              })
+            }
 
-          for (const toolCallDelta of delta.tool_calls ?? []) {
-            const index = toolCallDelta.index ?? 0
-            if (!toolCalls[index]) {
-              toolCalls[index] = {
-                arguments: '',
+            for (const toolCallDelta of delta.tool_calls ?? []) {
+              const index = toolCallDelta.index ?? 0
+              if (!toolCalls[index]) {
+                toolCalls[index] = {
+                  arguments: '',
+                }
+              }
+
+              const entry = toolCalls[index]!
+              if (toolCallDelta.id) {
+                entry.id = toolCallDelta.id
+              }
+              if (toolCallDelta.function?.name) {
+                entry.name = toolCallDelta.function.name
+              }
+              if (toolCallDelta.function?.arguments) {
+                entry.arguments += toolCallDelta.function.arguments
               }
             }
-
-            const entry = toolCalls[index]!
-            if (toolCallDelta.id) {
-              entry.id = toolCallDelta.id
-            }
-            if (toolCallDelta.function?.name) {
-              entry.name = toolCallDelta.function.name
-            }
-            if (toolCallDelta.function?.arguments) {
-              entry.arguments += toolCallDelta.function.arguments
-            }
-          }
-        })
+          },
+          this.streamIdleTimeoutMs === undefined
+            ? undefined
+            : { idleTimeoutMs: this.streamIdleTimeoutMs },
+        )
       } catch (error) {
         if (sawStreamEvent) {
           throw new NonRetryableError(error)
         }
-        throw error
+        return this.createMessage(request)
       }
 
       const content = buildChatCompletionContent(text, reasoning, toolCalls)
       if (content.length === 0) {
-        throw new Error('OpenAI streaming response did not contain supported content')
+        return this.createMessage(request)
       }
 
       return {
@@ -1484,18 +1529,13 @@ export class OpenAiLlmClient implements LlmClient {
       sleepImpl: this.sleepImpl,
     })
   }
-}
 
-function getMaxRetriesFromEnv(env: NodeJS.ProcessEnv): number {
-  const raw = env.DCLAW_LLM_MAX_RETRIES
-  if (!raw) {
-    return 2
+  private withRequestTimeout<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    return withTimeout(operation, {
+      timeoutMs: this.requestTimeoutMs,
+      timeoutMessage: `OpenAI request timed out after ${this.requestTimeoutMs}ms`,
+    })
   }
-
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 2
-  }
-
-  return Math.floor(parsed)
 }

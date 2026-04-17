@@ -17,7 +17,24 @@ export type SseEvent = {
   data: string
 }
 
+export type ReadSseEventsOptions = {
+  idleTimeoutMs?: number
+}
+
 export type SleepImpl = (ms: number) => Promise<void>
+
+export type RuntimeConfigSource =
+  | 'env'
+  | 'user_config'
+  | 'workspace_config'
+  | 'default'
+
+export const DEFAULT_LLM_MAX_RETRIES = 10
+export const DEFAULT_LLM_TIMEOUT_MS = 10 * 60 * 1000
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90 * 1000
+export const DEFAULT_RETRY_INITIAL_DELAY_MS = 500
+export const DEFAULT_RETRY_MAX_DELAY_MS = 32 * 1000
+export const DEFAULT_RETRY_JITTER_RATIO = 0.25
 
 export type ProviderErrorKind =
   | 'auth'
@@ -110,6 +127,16 @@ export class NonRetryableError extends Error {
   }
 }
 
+export class ProviderTimeoutError extends TypeError {
+  readonly timeoutMs: number
+
+  constructor(message: string, timeoutMs: number) {
+    super(message)
+    this.name = 'ProviderTimeoutError'
+    this.timeoutMs = timeoutMs
+  }
+}
+
 export function trimOrUndefined(value: string | undefined): string | undefined {
   if (!value) {
     return undefined
@@ -174,6 +201,220 @@ export function sleep(ms: number): Promise<void> {
   })
 }
 
+function parsePositiveInteger(
+  raw: string | undefined,
+): number | undefined {
+  if (!raw) {
+    return undefined
+  }
+
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return undefined
+  }
+
+  return Math.floor(parsed)
+}
+
+function parseBooleanFlag(value: string | undefined): boolean | undefined {
+  const normalized = trimOrUndefined(value)?.toLowerCase()
+  if (!normalized) {
+    return undefined
+  }
+
+  if (
+    normalized === '1' ||
+    normalized === 'true' ||
+    normalized === 'yes' ||
+    normalized === 'on'
+  ) {
+    return true
+  }
+
+  if (
+    normalized === '0' ||
+    normalized === 'false' ||
+    normalized === 'no' ||
+    normalized === 'off'
+  ) {
+    return false
+  }
+
+  return undefined
+}
+
+function resolvePositiveIntegerSetting(
+  raw: string | undefined,
+  key: string,
+  fallback: number,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<RuntimeConfigSource, 'env' | 'default'> | undefined,
+): {
+  value: number
+  source: RuntimeConfigSource
+} {
+  const parsed = parsePositiveInteger(raw)
+  if (parsed !== undefined) {
+    return {
+      value: parsed,
+      source: getEnvSource?.(key) ?? 'env',
+    }
+  }
+
+  return {
+    value: fallback,
+    source: 'default',
+  }
+}
+
+function resolveBooleanFlagSetting(
+  raw: string | undefined,
+  key: string,
+  fallback: boolean,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<RuntimeConfigSource, 'env' | 'default'> | undefined,
+): {
+  value: boolean
+  source: RuntimeConfigSource
+} {
+  const parsed = parseBooleanFlag(raw)
+  if (parsed !== undefined) {
+    return {
+      value: parsed,
+      source: getEnvSource?.(key) ?? 'env',
+    }
+  }
+
+  return {
+    value: fallback,
+    source: 'default',
+  }
+}
+
+export function resolveLlmMaxRetries(
+  env: NodeJS.ProcessEnv,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<RuntimeConfigSource, 'env' | 'default'> | undefined,
+): {
+  value: number
+  source: RuntimeConfigSource
+} {
+  return resolvePositiveIntegerSetting(
+    env.DCLAW_LLM_MAX_RETRIES,
+    'DCLAW_LLM_MAX_RETRIES',
+    DEFAULT_LLM_MAX_RETRIES,
+    getEnvSource,
+  )
+}
+
+export function getLlmMaxRetries(
+  env: NodeJS.ProcessEnv,
+): number {
+  return resolveLlmMaxRetries(env).value
+}
+
+export function getLlmRequestTimeoutMs(
+  env: NodeJS.ProcessEnv,
+): number {
+  return resolveLlmRequestTimeoutMs(env).value
+}
+
+export function resolveLlmRequestTimeoutMs(
+  env: NodeJS.ProcessEnv,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<RuntimeConfigSource, 'env' | 'default'> | undefined,
+): {
+  value: number
+  source: RuntimeConfigSource
+} {
+  return resolvePositiveIntegerSetting(
+    env.DCLAW_LLM_TIMEOUT_MS,
+    'DCLAW_LLM_TIMEOUT_MS',
+    DEFAULT_LLM_TIMEOUT_MS,
+    getEnvSource,
+  )
+}
+
+export function isStreamWatchdogEnabled(
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return resolveStreamWatchdogEnabled(env).value
+}
+
+export function resolveStreamWatchdogEnabled(
+  env: NodeJS.ProcessEnv,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<RuntimeConfigSource, 'env' | 'default'> | undefined,
+): {
+  value: boolean
+  source: RuntimeConfigSource
+} {
+  return resolveBooleanFlagSetting(
+    env.DCLAW_ENABLE_STREAM_WATCHDOG,
+    'DCLAW_ENABLE_STREAM_WATCHDOG',
+    true,
+    getEnvSource,
+  )
+}
+
+export function getStreamIdleTimeoutMs(
+  env: NodeJS.ProcessEnv,
+): number {
+  return resolveStreamIdleTimeoutMs(env).value
+}
+
+export function resolveStreamIdleTimeoutMs(
+  env: NodeJS.ProcessEnv,
+  getEnvSource?: (
+    key: string,
+  ) => Exclude<RuntimeConfigSource, 'env' | 'default'> | undefined,
+): {
+  value: number
+  source: RuntimeConfigSource
+} {
+  return resolvePositiveIntegerSetting(
+    env.DCLAW_STREAM_IDLE_TIMEOUT_MS,
+    'DCLAW_STREAM_IDLE_TIMEOUT_MS',
+    DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+    getEnvSource,
+  )
+}
+
+export async function withTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  options: {
+    timeoutMs: number
+    timeoutMessage: string
+  },
+): Promise<T> {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, options.timeoutMs)
+
+  try {
+    return await operation(controller.signal)
+  } catch (error) {
+    if (
+      timedOut &&
+      error instanceof Error &&
+      error.name === 'AbortError'
+    ) {
+      throw new ProviderTimeoutError(options.timeoutMessage, options.timeoutMs)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export function getRetryAfterMs(
   headers: Headers | undefined,
   now = Date.now(),
@@ -216,14 +457,17 @@ export function getAnthropicRateLimitResetDelayMs(
 export function getRetryDelayMs(
   attempt: number,
   retryAfterMs: number | null,
-  maxDelayMs = 8000,
+  maxDelayMs = DEFAULT_RETRY_MAX_DELAY_MS,
 ): number {
   if (retryAfterMs !== null) {
     return retryAfterMs
   }
 
-  const baseDelay = Math.min(500 * Math.pow(2, attempt - 1), maxDelayMs)
-  const jitter = Math.random() * 0.25 * baseDelay
+  const baseDelay = Math.min(
+    DEFAULT_RETRY_INITIAL_DELAY_MS * Math.pow(2, attempt - 1),
+    maxDelayMs,
+  )
+  const jitter = Math.random() * DEFAULT_RETRY_JITTER_RATIO * baseDelay
   return Math.round(baseDelay + jitter)
 }
 
@@ -555,6 +799,7 @@ export async function withRetry<T>(
 export async function readSseEvents(
   response: Response,
   onEvent: (event: SseEvent) => void,
+  options: ReadSseEventsOptions = {},
 ): Promise<void> {
   if (!response.body) {
     throw new Error('Streaming response body is not available')
@@ -562,6 +807,16 @@ export async function readSseEvents(
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  const idleTimeoutMs = options.idleTimeoutMs
+  const idleTimeoutError =
+    idleTimeoutMs === undefined
+      ? undefined
+      : new ProviderTimeoutError(
+          `Provider stream timed out after ${idleTimeoutMs}ms without receiving data`,
+          idleTimeoutMs,
+        )
+  let idleTimedOut = false
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
   const parser = createParser({
     onEvent(event) {
       onEvent({
@@ -571,14 +826,53 @@ export async function readSseEvents(
     },
   })
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
+  function clearIdleTimer(): void {
+    if (idleTimer !== undefined) {
+      clearTimeout(idleTimer)
+      idleTimer = undefined
     }
-
-    parser.feed(decoder.decode(value, { stream: true }))
   }
 
-  parser.feed(decoder.decode())
+  function armIdleTimer(): void {
+    clearIdleTimer()
+    if (idleTimeoutMs === undefined) {
+      return
+    }
+
+    idleTimer = setTimeout(() => {
+      idleTimedOut = true
+      void reader.cancel(idleTimeoutError).catch(() => {})
+    }, idleTimeoutMs)
+  }
+
+  try {
+    while (true) {
+      armIdleTimer()
+      let result: Awaited<ReturnType<typeof reader.read>>
+      try {
+        result = await reader.read()
+      } catch (error) {
+        if (idleTimedOut && idleTimeoutError) {
+          throw idleTimeoutError
+        }
+        throw error
+      } finally {
+        clearIdleTimer()
+      }
+
+      if (idleTimedOut && idleTimeoutError) {
+        throw idleTimeoutError
+      }
+
+      if (result.done) {
+        break
+      }
+
+      parser.feed(decoder.decode(result.value, { stream: true }))
+    }
+
+    parser.feed(decoder.decode())
+  } finally {
+    clearIdleTimer()
+  }
 }

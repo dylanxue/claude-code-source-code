@@ -2,6 +2,8 @@ import { appendSessionMessages, createSession } from '../session/store.js'
 import { prepareCliRuntime } from './runtime.js'
 import type { PrintCommand } from './types.js'
 import {
+  formatAutoCompactLine,
+  formatCompactDryRunLine,
   formatLlmErrorLine,
   formatToolUseLine,
   formatVerboseContextLines,
@@ -41,6 +43,7 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
     provider: runtime.provider,
     model: runtime.model,
   })
+  engine.setSessionId(session.sessionId)
   const verboseContext = formatVerboseContextLines({
     mode: 'print',
     cwd: command.options.cwd,
@@ -55,7 +58,6 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
     sessionId: session.sessionId,
     queryTracePath,
   })
-  const initialMessageCount = engine.getMessages().length
   let streamedText = ''
   let outputEndsWithNewline = true
   let activeReasoningKind: 'reasoning' | 'thinking' | null = null
@@ -224,19 +226,40 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
 
           writeVerboseTextLines([formatLlmErrorLine(error)])
         },
+        onCompactDryRun(event) {
+          if (!command.options.verbose) {
+            return
+          }
+
+          if (command.options.outputFormat === 'sse') {
+            writeSseEvent('compact.dry_run', event)
+            return
+          }
+
+          writeVerboseTextLines([formatCompactDryRunLine(event)])
+        },
+        onAutoCompact(event) {
+          if (command.options.outputFormat === 'sse') {
+            writeSseEvent('compact.auto', event)
+            return
+          }
+
+          writeVerboseTextLines([formatAutoCompactLine(event)])
+        },
       })
     : await engine.submitUserPrompt(prompt)
 
+  const activeSessionId = engine.getSessionId() ?? session.sessionId
   await appendSessionMessages(
-    session.sessionId,
-    result.messages.slice(initialMessageCount),
+    activeSessionId,
+    result.appendedMessages,
   )
-  const addedMessages = result.messages.slice(initialMessageCount)
+  const addedMessages = result.appendedMessages
 
   if (command.options.outputFormat === 'sse') {
     writeSseEvent('response.complete', {
       outputText: result.outputText,
-      iterations: result.messages.length - initialMessageCount,
+      iterations: result.appendedMessages.length,
       assistantMessage: result.assistantMessage,
     })
     return

@@ -59,6 +59,20 @@ export type ResolvedToolResultBudget = Required<
   >
 >
 
+export function resolveToolResultBudgetOptions(
+  options: ToolResultBudgetOptions = {},
+): Required<ToolResultBudgetOptions> {
+  return {
+    defaultMaxResultSizeChars:
+      options.defaultMaxResultSizeChars ?? DEFAULT_MAX_RESULT_SIZE_CHARS,
+    maxToolResultsPerTurnChars:
+      options.maxToolResultsPerTurnChars ??
+      DEFAULT_MAX_TOOL_RESULTS_PER_TURN_CHARS,
+    previewChars: options.previewChars ?? DEFAULT_PREVIEW_CHARS,
+    env: options.env ?? process.env,
+  }
+}
+
 type Candidate = {
   messageIndex: number
   blockIndex: number
@@ -287,15 +301,7 @@ export async function applyToolResultBudget(
   metadataByToolUseId: ReadonlyMap<string, ToolResultBudgetMetadata>,
   options: ToolResultBudgetOptions = {},
 ): Promise<ToolResultBudgetResult> {
-  const resolvedOptions: Required<ToolResultBudgetOptions> = {
-    defaultMaxResultSizeChars:
-      options.defaultMaxResultSizeChars ?? DEFAULT_MAX_RESULT_SIZE_CHARS,
-    maxToolResultsPerTurnChars:
-      options.maxToolResultsPerTurnChars ??
-      DEFAULT_MAX_TOOL_RESULTS_PER_TURN_CHARS,
-    previewChars: options.previewChars ?? DEFAULT_PREVIEW_CHARS,
-    env: options.env ?? process.env,
-  }
+  const resolvedOptions = resolveToolResultBudgetOptions(options)
 
   const nextMessages = [...messages]
   const replacements: ToolResultBudgetReplacement[] = []

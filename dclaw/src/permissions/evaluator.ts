@@ -1,6 +1,7 @@
 import type { ToolContext, ToolValidationResult } from '../types/tool.js'
 import type { Tool } from '../tools/types.js'
 import { getBashManualApprovalReason } from '../tools/builtin/bash.js'
+import { resolve } from 'node:path'
 
 type PermissionDecision =
   | { ok: true }
@@ -66,6 +67,27 @@ function isFileEditTool(toolName: string): boolean {
   return toolName === 'Edit' || toolName === 'Write'
 }
 
+function isPlanFileMutationAllowed(
+  tool: Tool,
+  input: unknown,
+  context: ToolContext,
+): boolean {
+  if (!isFileEditTool(tool.name) || !context.planFilePath) {
+    return false
+  }
+
+  if (typeof input !== 'object' || input === null) {
+    return false
+  }
+
+  const candidate = 'file_path' in input ? input.file_path : undefined
+  if (typeof candidate !== 'string' || candidate.trim().length === 0) {
+    return false
+  }
+
+  return resolve(candidate) === resolve(context.planFilePath)
+}
+
 export async function evaluateToolPermission(
   tool: Tool,
   input: unknown,
@@ -86,7 +108,7 @@ export async function evaluateToolPermission(
   }
 
   if (context.permissionMode === 'plan') {
-    if (isReadOnly) {
+    if (isReadOnly || isPlanFileMutationAllowed(tool, input, context)) {
       return { ok: true }
     }
 

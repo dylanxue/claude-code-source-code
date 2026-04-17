@@ -1,17 +1,16 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import {
-  getModelLimitsConfigPath,
-  resolveModelLimits,
-} from '../llm/modelLimits.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
+import {
+  appendModelLimitLines,
+  appendReliabilityConfigLines,
+  getLimitsConfigStatus,
+  statusLine,
+} from './diagnostics.js'
+import { resolveMaxIterations } from './maxIterationsConfig.js'
 import { resolvePermissionMode } from './permissionModeConfig.js'
 import type { DoctorCommand } from './types.js'
-
-function statusLine(label: string, value: string): string {
-  return `${label.padEnd(18)} ${value}`
-}
 
 export async function runDoctor(command: DoctorCommand): Promise<void> {
   const cwd = resolve(command.options.cwd)
@@ -20,6 +19,14 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     cwd,
     permissionMode: command.options.permissionMode,
   }, configured.env)
+  const resolvedMaxIterations = await resolveMaxIterations(
+    {
+      cwd,
+      maxIterations: command.options.maxIterations,
+    },
+    configured.env,
+    key => configured.keySources[key],
+  )
   const lines = [
     'dclaw doctor',
     '',
@@ -33,6 +40,10 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     statusLine('permission override', command.options.permissionMode ?? 'none'),
     statusLine('permission mode', resolvedPermissionMode.permissionMode),
     statusLine('permission source', resolvedPermissionMode.permissionModeSource),
+    statusLine(
+      'max iterations',
+      `${resolvedMaxIterations.maxIterations} (${resolvedMaxIterations.maxIterationsSource})`,
+    ),
     statusLine(
       'system prompt',
       command.options.systemPrompt ? 'provided' : 'none',
@@ -56,7 +67,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     lines.push(statusLine('model source', runtime.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
     if (runtime.model) {
-      appendModelLimits(lines, 'anthropic', runtime.model)
+      appendModelLimitLines(lines, 'anthropic', runtime.model)
     }
   }
 
@@ -70,27 +81,10 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     lines.push(statusLine('model source', runtime.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
     if (runtime.model) {
-      appendModelLimits(lines, 'openai', runtime.model)
+      appendModelLimitLines(lines, 'openai', runtime.model)
     }
   }
 
+  appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])
   process.stdout.write(lines.join('\n') + '\n')
-}
-
-function getLimitsConfigStatus(): string {
-  const filePath = getModelLimitsConfigPath()
-  return existsSync(filePath) ? filePath : `not found (${filePath})`
-}
-
-function appendModelLimits(
-  lines: string[],
-  provider: 'anthropic' | 'openai',
-  model: string,
-): void {
-  const limits = resolveModelLimits(provider, model)
-  lines.push(statusLine('context window', String(limits.contextWindow)))
-  lines.push(statusLine('max output', String(limits.maxOutputTokens)))
-  lines.push(
-    statusLine('max output cap', String(limits.maxOutputTokensUpperLimit)),
-  )
 }

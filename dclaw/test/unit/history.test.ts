@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { runHistory } from '../../src/cli/history.js'
+import { compactSession } from '../../src/compact/compactSession.js'
 import { listSessionHistory } from '../../src/session/history.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
@@ -176,4 +177,66 @@ test('runHistory prints recent sessions', async () => {
     text,
     /last persisted tool result: \/tmp\/dclaw\/tool-results\/bash\.txt/,
   )
+})
+
+test('runHistory prints compact boundary metadata for compacted sessions', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-compact-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const output: string[] = []
+
+  try {
+    process.env = env
+    const source = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-compact-source',
+      env,
+    })
+    const messages = [
+      createTextMessage('user', 'please summarize'),
+      createTextMessage('assistant', 'working on it'),
+    ]
+    await appendSessionMessages(source.sessionId, messages, env)
+
+    await compactSession({
+      sourceSessionId: source.sessionId,
+      messages,
+      cwd: '/tmp/project',
+      provider: 'stub',
+      model: 'stub-model',
+      trigger: 'manual',
+      reason: 'user requested /compact',
+      env,
+    })
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    await runHistory({
+      mode: 'history',
+      options: {
+        cwd: '/tmp/project',
+        permissionMode: 'default',
+        stream: false,
+        verbose: false,
+        outputFormat: 'text',
+      },
+    })
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /compact boundaries: 1/)
+  assert.match(text, /last compact boundary: manual compact boundary compact_/)
 })

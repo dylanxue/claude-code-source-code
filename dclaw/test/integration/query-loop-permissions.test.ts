@@ -101,6 +101,35 @@ test('plan mode still allows read-only tools', async () => {
   }
 })
 
+test('plan mode allows mutating only the plan file', async () => {
+  const dir = await createTempDir('dclaw-plan-write-')
+  const planFilePath = join(dir, 'plan.md')
+  const registry = createDefaultToolRegistry()
+
+  try {
+    const result = await executeSingleTurn({
+      client: new StubLlmClient(),
+      messages: [
+        createTextMessage(
+          'user',
+          `tool:Write file_path=${planFilePath} content=#\\ Plan`,
+        ),
+      ],
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        availableTools: registry.list().map(tool => tool.name),
+        permissionMode: 'plan',
+        planFilePath,
+      }),
+    })
+
+    assert.match(result.outputText, /"didWrite": true/)
+    assert.equal(await readFile(planFilePath, 'utf8'), '# Plan')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('accept-edits mode still blocks Bash without interactive approval', async () => {
   const registry = createDefaultToolRegistry()
 

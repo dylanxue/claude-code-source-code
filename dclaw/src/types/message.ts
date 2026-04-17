@@ -1,3 +1,5 @@
+import type { CompactBoundary } from '../compact/types.js'
+
 export type TextAnnotation = {
   type?: string
   startIndex?: number
@@ -63,6 +65,7 @@ export type Message = {
   role: MessageRole
   content: ContentBlock[]
   createdAt: string
+  compactBoundary?: CompactBoundary
 }
 
 export function createMessage(

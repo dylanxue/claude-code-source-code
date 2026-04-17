@@ -43,6 +43,12 @@ export async function runHistory(command: HistoryCommand): Promise<void> {
         )
       }
     }
+    if (session.compactBoundaryCount > 0) {
+      lines.push(`   compact boundaries: ${session.compactBoundaryCount}`)
+      if (session.lastCompactBoundaryLabel) {
+        lines.push(`   last compact boundary: ${session.lastCompactBoundaryLabel}`)
+      }
+    }
     if (index < sessions.length - 1) {
       lines.push('')
     }

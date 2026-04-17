@@ -23,6 +23,19 @@ function takeValue(
   return { value, nextIndex: index + 1 }
 }
 
+function parsePositiveIntegerArg(value: string, flag: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new CliArgumentError(`${flag} must be a positive integer`)
+  }
+
+  const parsed = Number.parseInt(value, 10)
+  if (parsed <= 0) {
+    throw new CliArgumentError(`${flag} must be a positive integer`)
+  }
+
+  return parsed
+}
+
 export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCommand {
   const args = [...argv]
   const options = {
@@ -31,6 +44,7 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
     provider: undefined as LlmProviderName | undefined,
     outputFormat: 'text' as 'text' | 'sse',
     permissionMode: undefined as PermissionMode | undefined,
+    maxIterations: undefined as number | undefined,
     stream: false,
     verbose: false,
     systemPrompt: undefined as string | undefined,
@@ -116,6 +130,12 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
         i = result.nextIndex
         break
       }
+      case '--max-iterations': {
+        const result = takeValue(args, i, arg)
+        options.maxIterations = parsePositiveIntegerArg(result.value, arg)
+        i = result.nextIndex
+        break
+      }
       case '--cwd': {
         const result = takeValue(args, i, arg)
         options.cwd = resolve(result.value)
@@ -194,6 +214,7 @@ export function formatHelp(): string {
     '  -d, --verbose             Show reasoning, content, and tool-call events',
     '  --output-format <format>  Output format for --print (text, sse)',
     '  --permission-mode <mode>  Select permission mode',
+    '  --max-iterations <n>      Override the per-turn tool/LLM iteration cap',
     '  --system-prompt <text>    Append a one-off system prompt',
     '  --cwd <path>              Override working directory',
     '  -h, --help                Show help',

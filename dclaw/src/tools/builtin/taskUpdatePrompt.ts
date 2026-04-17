@@ -1,0 +1,35 @@
+export const DESCRIPTION = 'Update a task in the current session task list.'
+
+export const PROMPT = `Use this tool to update a task in the current session task list.
+
+## When to Use This Tool
+
+- Mark a task as \`in_progress\` when you start working on it
+- Mark a task as \`completed\` only when the work is fully done
+- Mark a task as \`deleted\` when it is no longer needed
+- Update the subject, description, metadata, owner, or dependencies when the task state changes
+
+## Status Workflow
+
+Status normally progresses: \`pending\` -> \`in_progress\` -> \`completed\`
+
+Use \`deleted\` only to remove a task permanently.
+
+## Important Rules
+
+- Make sure to read a task's latest state using \`TaskGet\` before updating it
+- Only mark a task as \`completed\` when you have fully accomplished it
+- Do not mark a task as \`completed\` if tests are failing, implementation is partial, or blockers remain
+- After resolving a task, call TaskList again to find the next available work
+
+## Fields You Can Update
+
+- **status**: New task status
+- **subject**: New task title
+- **description**: New task description
+- **activeForm**: Present continuous form shown while in progress
+- **owner**: Current task owner
+- **metadata**: Metadata keys to merge into the task
+- **addBlocks**: Tasks that cannot start until this task completes
+- **addBlockedBy**: Tasks that must complete before this task can start
+`

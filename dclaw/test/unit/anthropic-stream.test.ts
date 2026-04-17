@@ -192,3 +192,57 @@ test('AnthropicLlmClient preserves streaming thinking blocks', async () => {
     await once(server, 'close')
   }
 })
+
+test('AnthropicLlmClient falls back to non-streaming when the stream idles before first event', async () => {
+  let attempts = 0
+
+  const client = new AnthropicLlmClient({
+    apiKey: 'test-key',
+    defaultModel: 'claude-sonnet-4-6',
+    requestTimeoutMs: 1000,
+    streamWatchdogEnabled: true,
+    streamIdleTimeoutMs: 20,
+    fetchImpl: async (_input, init) => {
+      attempts += 1
+      const bodyText =
+        typeof init?.body === 'string' ? init.body : String(init?.body ?? '')
+      const body = JSON.parse(bodyText) as { stream?: boolean }
+
+      if (body.stream) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start() {},
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          },
+        )
+      }
+
+      return new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'fallback anthropic ok' }],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    },
+  })
+
+  const result =
+    (await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {},
+    )) ?? null
+
+  assert.ok(result)
+  assert.equal(attempts, 2)
+  assert.deepEqual(result.message.content, [
+    { type: 'text', text: 'fallback anthropic ok' },
+  ])
+})

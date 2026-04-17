@@ -43,6 +43,7 @@
 - [mvp-tech-design.md](./mvp-tech-design.md)
 - [prompt-system.md](./prompt-system.md)
 - [tool-spec.md](./tool-spec.md)
+- [plan-task-spec.md](./plan-task-spec.md)
 - [memory-spec.md](./memory-spec.md)
 - [agent-spec.md](./agent-spec.md)
 - [skill-spec.md](./skill-spec.md)

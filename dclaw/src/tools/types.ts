@@ -7,6 +7,7 @@ import type {
 export interface Tool<I = unknown, O = unknown> {
   name: string
   description: string
+  prompt(context: ToolContext): Promise<string> | string
   inputSchema: Record<string, unknown>
   outputSchema?: Record<string, unknown>
   maxResultSizeChars: number
@@ -21,6 +22,7 @@ export interface Tool<I = unknown, O = unknown> {
 }
 
 type DefaultableToolKeys =
+  | 'prompt'
   | 'maxResultSizeChars'
   | 'mapToolResult'
   | 'validate'
@@ -42,9 +44,11 @@ const TOOL_DEFAULTS = {
   ): ToolValidationResult => ({ ok: true }),
   isEnabled: (_context?: ToolContext): boolean => true,
   isReadOnly: (_input?: unknown): boolean => false,
-} satisfies Pick<Tool, DefaultableToolKeys>
+} satisfies Omit<Pick<Tool, DefaultableToolKeys>, 'prompt'>
 
-type ToolDefaults = typeof TOOL_DEFAULTS
+type ToolDefaults = typeof TOOL_DEFAULTS & {
+  prompt: (context: ToolContext) => Promise<string> | string
+}
 type AnyToolDef = ToolDef<any, any>
 type BuiltTool<D> = Omit<D, DefaultableToolKeys> & {
   [K in DefaultableToolKeys]-?: K extends keyof D
@@ -58,5 +62,6 @@ export function buildTool<D extends AnyToolDef>(definition: D): BuiltTool<D> {
   return {
     ...TOOL_DEFAULTS,
     ...definition,
+    prompt: definition.prompt ?? (() => definition.description),
   } as BuiltTool<D>
 }

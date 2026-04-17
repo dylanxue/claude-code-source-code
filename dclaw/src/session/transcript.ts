@@ -1,5 +1,9 @@
 import type { Message } from '../types/message.js'
 import {
+  formatCompactBoundaryLabel,
+} from '../compact/types.js'
+import { isCompactBoundaryMessage } from '../compact/boundaryMessage.js'
+import {
   isPersistedToolResultOutput,
   type PersistedToolResultOutput,
 } from '../core/toolResultBudget.js'
@@ -57,6 +61,12 @@ function summarizeToolResult(output: unknown): string {
 
 function formatMessage(message: Message, includeThinking: boolean): string[] {
   const lines: string[] = []
+
+  if (isCompactBoundaryMessage(message)) {
+    return [
+      `[compact boundary] ${formatCompactBoundaryLabel(message.compactBoundary!)}`,
+    ]
+  }
 
   if (message.role === 'user') {
     const text = message.content

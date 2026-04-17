@@ -1,7 +1,13 @@
+import {
+  getCompactBoundaryMessages,
+  getLastCompactBoundary,
+} from '../compact/boundaryMessage.js'
+import { formatCompactBoundaryLabel } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { loadSessionForResume } from '../session/resume.js'
 import type { SessionPersistedToolResultRecord } from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
+import { loadTaskBoardForSession } from '../tasks/store.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { runInteractiveReplLoop } from './repl.js'
@@ -81,6 +87,14 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     permissionMode,
     permissionModeSource,
   }
+  engine.setSessionId(replSession.sessionId)
+  const taskBoard = await loadTaskBoardForSession(replSession.sessionId)
+  if (taskBoard?.mode === 'active') {
+    engine.setPermissionMode('plan')
+    engine.setPlanFilePath(taskBoard.planFilePath)
+    replSession.permissionMode = 'plan'
+    replSession.permissionModeSource = 'task_board'
+  }
 
   const lines = [
     'dclaw resume mode is ready.',
@@ -91,9 +105,11 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     `provider source: ${runtime.providerSource}`,
     `model: ${runtime.model ?? 'default'}`,
     `model source: ${runtime.modelSource}`,
-    `permission mode: ${permissionMode}`,
-    `permission mode source: ${permissionModeSource}`,
+    `permission mode: ${replSession.permissionMode}`,
+    `permission mode source: ${replSession.permissionModeSource}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
+    ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
+    ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
   ]
 
   if (persistedToolResultInfo.count > 0) {
@@ -103,6 +119,16 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         `last persisted tool result: ${persistedToolResultInfo.lastPath}`,
       )
     }
+  }
+  const compactBoundaries = getCompactBoundaryMessages(resumed.messages)
+  const lastCompactBoundary = getLastCompactBoundary(resumed.messages)
+  if (compactBoundaries.length > 0) {
+    lines.push(`compact boundaries: ${compactBoundaries.length}`)
+  }
+  if (lastCompactBoundary) {
+    lines.push(
+      `last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`,
+    )
   }
 
   if (command.options.systemPrompt) {
@@ -170,13 +196,19 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         return
       }
 
-      await runInteractiveSessionPrompt({
+      const result = await runInteractiveSessionPrompt({
         engine,
         sessionId: replSession.sessionId,
         prompt,
         stream: command.options.stream,
         verbose: command.options.verbose,
       })
+      replSession.sessionId = result.sessionId
+      const runtimePermissionMode = engine.getPermissionMode()
+      if (runtimePermissionMode !== replSession.permissionMode) {
+        replSession.permissionMode = runtimePermissionMode
+        replSession.permissionModeSource = 'tool_runtime'
+      }
     },
   })
 }

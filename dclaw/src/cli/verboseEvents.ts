@@ -36,6 +36,32 @@ export type VerboseLlmErrorEvent = {
   }
 }
 
+export type VerboseCompactDryRunEvent = {
+  iteration: number
+  phase: 'iteration_start' | 'post_tool_results'
+  recommendation: {
+    level: string
+    shouldCompact: boolean
+    reasons: string[]
+    tokenUsage: number
+    effectiveContextWindowTokens?: number
+    autoCompactThresholdTokens?: number
+    percentLeft?: number
+    percentUsed?: number
+    isAboveWarningThreshold: boolean
+    isAboveErrorThreshold: boolean
+    isAboveAutoCompactThreshold: boolean
+    isAtBlockingLimit: boolean
+  }
+}
+
+export type VerboseAutoCompactEvent = {
+  sessionId: string
+  boundaryId: string
+  reason: string
+  summaryMessageId: string
+}
+
 function stringifyInline(value: unknown): string {
   if (typeof value === 'string') {
     return value
@@ -108,6 +134,41 @@ export function formatLlmErrorLine(error: VerboseLlmErrorEvent): string {
     parts.push(`streamed_text_chars=${error.streamedTextChars}`)
   }
   return parts.join(' ')
+}
+
+export function formatCompactDryRunLine(
+  event: VerboseCompactDryRunEvent,
+): string {
+  const parts = [
+    `[compact_dry_run] phase=${event.phase}`,
+    `pressure=${event.recommendation.level}`,
+    `tokens=${event.recommendation.tokenUsage}`,
+    `threshold=${event.recommendation.autoCompactThresholdTokens ?? 'unknown'}`,
+    `remaining=${event.recommendation.percentLeft === undefined ? 'unknown' : `${event.recommendation.percentLeft}%`}`,
+    `used=${event.recommendation.percentUsed === undefined ? 'unknown' : `${event.recommendation.percentUsed}%`}`,
+    `warning=${event.recommendation.isAboveWarningThreshold}`,
+    `auto=${event.recommendation.isAboveAutoCompactThreshold}`,
+    `blocking=${event.recommendation.isAtBlockingLimit}`,
+    `recommendation=${event.recommendation.shouldCompact ? 'compact_soon' : 'none'}`,
+  ]
+
+  if (event.recommendation.reasons.length > 0) {
+    parts.push(`reasons=${event.recommendation.reasons.join('; ')}`)
+  }
+
+  return parts.join(' ')
+}
+
+export function formatAutoCompactLine(
+  event: VerboseAutoCompactEvent,
+): string {
+  return [
+    '[autocompact]',
+    `session=${event.sessionId}`,
+    `boundary=${event.boundaryId}`,
+    `summary=${event.summaryMessageId}`,
+    `reason=${event.reason}`,
+  ].join(' ')
 }
 
 export function formatVerboseContextLines(
