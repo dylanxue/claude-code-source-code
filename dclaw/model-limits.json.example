@@ -1,0 +1,365 @@
+{
+  "providers": {
+    "anthropic": {
+      "*": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "claude-opus-4-6": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "claude-sonnet-4-6": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "claude-opus-4-5": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "claude-sonnet-4-5": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "claude-sonnet-4": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "claude-haiku-4-5": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "claude-3-7-sonnet": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "claude-3-5-sonnet": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 8192,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "claude-3-5-haiku": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 8192,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "claude-3-opus": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 4096,
+        "maxOutputTokensUpperLimit": 4096
+      },
+      "claude-3-sonnet": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 8192,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "claude-3-haiku": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 4096,
+        "maxOutputTokensUpperLimit": 4096
+      },
+      "kimi-k2.5": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 32768
+      },
+      "deepseek-chat": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 4096,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "deepseek-v3.2": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 4096,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "deepseek-reasoner": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 65536
+      },
+      "kimi-k2": {
+        "contextWindow": 128000,
+        "maxOutputTokens": 16384,
+        "maxOutputTokensUpperLimit": 16384
+      },
+      "glm-5.1": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-5-turbo": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-5": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.7-flashx": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.7-flash": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.7": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.6": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.5-airx": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5-air": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5-x": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5-flash": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "minimax-m2.7": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "minimax-m2.5": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "minimax-m2": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      }
+    },
+    "openai": {
+      "*": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5.4-pro": {
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5.4": {
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5-pro": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 272000,
+        "maxOutputTokensUpperLimit": 272000
+      },
+      "gpt-4.1-mini": {
+        "contextWindow": 1047576,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 32768
+      },
+      "gpt-4.1-nano": {
+        "contextWindow": 1047576,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 32768
+      },
+      "gpt-4.1": {
+        "contextWindow": 1047576,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 32768
+      },
+      "codex-mini-latest": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 100000,
+        "maxOutputTokensUpperLimit": 100000
+      },
+      "o4-mini": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 100000,
+        "maxOutputTokensUpperLimit": 100000
+      },
+      "gpt-5-codex": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5.1-codex": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5.3": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5.2": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5.1": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5-mini": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5-nano": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "gpt-5": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "kimi-k2.5": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 32768
+      },
+      "deepseek-chat": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 4096,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "deepseek-v3.2": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 4096,
+        "maxOutputTokensUpperLimit": 8192
+      },
+      "deepseek-reasoner": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 32768,
+        "maxOutputTokensUpperLimit": 65536
+      },
+      "kimi-k2": {
+        "contextWindow": 128000,
+        "maxOutputTokens": 16384,
+        "maxOutputTokensUpperLimit": 16384
+      },
+      "glm-5.1": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-5-turbo": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-5": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.7-flashx": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.7-flash": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.7": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.6": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 131072
+      },
+      "glm-4.5-airx": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5-air": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5-x": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5-flash": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "glm-4.5": {
+        "contextWindow": 131072,
+        "maxOutputTokens": 65536,
+        "maxOutputTokensUpperLimit": 98304
+      },
+      "minimax-m2.7": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "minimax-m2.5": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "minimax-m2": {
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 128000
+      }
+    },
+    "stub": {
+      "*": {
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 64000
+      }
+    }
+  }
+}

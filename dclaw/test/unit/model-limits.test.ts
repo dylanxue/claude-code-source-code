@@ -45,7 +45,55 @@ test('built-in openai model limits support modern responses models', () => {
     maxOutputTokensUpperLimit: 32_768,
   })
 
+  assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek-chat'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 4_096,
+    maxOutputTokensUpperLimit: 8_192,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek-v3.2'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 4_096,
+    maxOutputTokensUpperLimit: 8_192,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek-reasoner'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 32_768,
+    maxOutputTokensUpperLimit: 65_536,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'glm-5.1'), {
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    maxOutputTokensUpperLimit: 131_072,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.7-flash'), {
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    maxOutputTokensUpperLimit: 131_072,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.6'), {
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    maxOutputTokensUpperLimit: 131_072,
+  })
+
   assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.5'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 65_536,
+    maxOutputTokensUpperLimit: 98_304,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.5-airx'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 65_536,
+    maxOutputTokensUpperLimit: 98_304,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.5-flash'), {
     contextWindow: 131_072,
     maxOutputTokens: 65_536,
     maxOutputTokensUpperLimit: 98_304,
@@ -69,6 +117,24 @@ test('built-in anthropic model limits support compatibility models', () => {
     contextWindow: 256_000,
     maxOutputTokens: 32_768,
     maxOutputTokensUpperLimit: 32_768,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'deepseek-reasoner'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 32_768,
+    maxOutputTokensUpperLimit: 65_536,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'deepseek-v3.2'), {
+    contextWindow: 131_072,
+    maxOutputTokens: 4_096,
+    maxOutputTokensUpperLimit: 8_192,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'glm-5-turbo'), {
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    maxOutputTokensUpperLimit: 131_072,
   })
 
   assert.deepEqual(getBuiltInModelLimits('anthropic', 'glm-4.5'), {

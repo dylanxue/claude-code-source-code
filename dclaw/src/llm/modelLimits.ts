@@ -36,6 +36,30 @@ const DEFAULT_OPENAI_LIMITS: ModelLimits = {
 
 const COMPAT_MODEL_LIMIT_RULES: ModelLimitRule[] = [
   {
+    match: 'deepseek-chat',
+    limits: {
+      contextWindow: 131_072,
+      maxOutputTokens: 4_096,
+      maxOutputTokensUpperLimit: 8_192,
+    },
+  },
+  {
+    match: 'deepseek-v3.2',
+    limits: {
+      contextWindow: 131_072,
+      maxOutputTokens: 4_096,
+      maxOutputTokensUpperLimit: 8_192,
+    },
+  },
+  {
+    match: 'deepseek-reasoner',
+    limits: {
+      contextWindow: 131_072,
+      maxOutputTokens: 32_768,
+      maxOutputTokensUpperLimit: 65_536,
+    },
+  },
+  {
     match: 'kimi-k2.5',
     limits: {
       contextWindow: 256_000,
@@ -52,7 +76,79 @@ const COMPAT_MODEL_LIMIT_RULES: ModelLimitRule[] = [
     },
   },
   {
+    match: 'glm-5.1',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-5-turbo',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-5',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-4.7-flashx',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-4.7-flash',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-4.7',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-4.6',
+    limits: {
+      contextWindow: 204_800,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 131_072,
+    },
+  },
+  {
+    match: 'glm-4.5-airx',
+    limits: {
+      contextWindow: 131_072,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 98_304,
+    },
+  },
+  {
     match: 'glm-4.5-air',
+    limits: {
+      contextWindow: 131_072,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 98_304,
+    },
+  },
+  {
+    match: 'glm-4.5-x',
     limits: {
       contextWindow: 131_072,
       maxOutputTokens: 65_536,
@@ -63,8 +159,8 @@ const COMPAT_MODEL_LIMIT_RULES: ModelLimitRule[] = [
     match: 'glm-4.5-flash',
     limits: {
       contextWindow: 131_072,
-      maxOutputTokens: 16_384,
-      maxOutputTokensUpperLimit: 16_384,
+      maxOutputTokens: 65_536,
+      maxOutputTokensUpperLimit: 98_304,
     },
   },
   {
