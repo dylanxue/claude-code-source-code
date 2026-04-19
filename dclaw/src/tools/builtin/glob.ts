@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { DESCRIPTION, PROMPT } from './globPrompt.js'
 import {
   DEFAULT_EXCLUDED_SEARCH_DIRECTORIES,
   fallbackGlob,
@@ -49,8 +50,11 @@ function getSearchRoot(path: string | undefined, cwd: string): string {
 
 export const globTool: Tool<GlobToolInput, GlobToolOutput> = buildTool({
   name: 'Glob',
-  description: 'Fast file pattern matching tool.',
+  description: DESCRIPTION,
   maxResultSizeChars: 100_000,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {

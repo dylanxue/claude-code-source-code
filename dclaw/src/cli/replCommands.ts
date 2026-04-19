@@ -18,6 +18,10 @@ import {
   readPlanFile,
 } from '../tasks/planFiles.js'
 import {
+  appendPlanSnapshotForFile,
+  recoverTaskBoardPlanFile,
+} from '../tasks/planSnapshots.js'
+import {
   createTaskRecord,
   getCurrentTask,
   setTaskStatus,
@@ -34,6 +38,10 @@ import type { TaskBoard } from '../tasks/types.js'
 import { formatTranscript } from '../session/transcript.js'
 import type { PermissionMode } from '../types/tool.js'
 import {
+  getModelVisibleMessages,
+  type Message,
+} from '../types/message.js'
+import {
   buildConfigAwareEnvWithSources,
   loadDclawConfigFiles,
 } from './configFile.js'
@@ -47,6 +55,10 @@ import { resolveMaxIterations } from './maxIterationsConfig.js'
 import { runHistory } from './history.js'
 import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { CommonCliOptions } from './types.js'
+
+function getCurrentModelVisibleMessages(engine: QueryEngine): Message[] {
+  return getModelVisibleMessages(engine.getMessages())
+}
 
 export type ReplSessionState = {
   sessionId: string
@@ -63,6 +75,7 @@ export type ReplCommandContext = {
   engine: QueryEngine
   options: CommonCliOptions
   session: ReplSessionState
+  rotateQueryTrace?: (sessionId?: string) => Promise<string | undefined>
 }
 
 type ReplCommandDefinition = {
@@ -118,13 +131,23 @@ async function syncPlanModeRuntime(
   context: ReplCommandContext,
 ): Promise<TaskBoard | null> {
   const loadedBoard = await loadTaskBoardForSession(context.session.sessionId)
-  const board = loadedBoard ? await ensureBoardPlanFile(loadedBoard) : null
+  const board = loadedBoard
+    ? await recoverTaskBoardPlanFile(
+        loadedBoard,
+        context.engine.getMessages(),
+      )
+    : null
   const activePlanFilePath = board?.mode === 'active' ? board.planFilePath : undefined
 
   context.engine.setPlanFilePath(activePlanFilePath)
   if (board?.mode === 'active') {
     context.engine.setPermissionMode('plan')
     context.session.permissionMode = 'plan'
+    context.session.permissionModeSource = 'task_board'
+  } else if (context.session.permissionMode === 'plan') {
+    const nextPermissionMode = board?.resumePermissionMode ?? 'default'
+    context.engine.setPermissionMode(nextPermissionMode)
+    context.session.permissionMode = nextPermissionMode
     context.session.permissionModeSource = 'task_board'
   }
 
@@ -153,6 +176,9 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     `permission mode: ${context.session.permissionMode}`,
     `permission mode source: ${context.session.permissionModeSource}`,
     `stream: ${context.options.stream ? 'enabled' : 'disabled'}`,
+    ...(context.engine.getQueryTracePath()
+      ? [`query trace: ${context.engine.getQueryTracePath()}`]
+      : []),
     ...(meta?.taskBoardId ? [`task board: ${meta.taskBoardId}`] : []),
     ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
     ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
@@ -196,6 +222,11 @@ function clearTerminal(): void {
 }
 
 async function clearConversation(context: ReplCommandContext): Promise<void> {
+  const board = await loadTaskBoardForSession(context.session.sessionId)
+  const nextPermissionMode =
+    context.session.permissionMode === 'plan'
+      ? board?.resumePermissionMode ?? 'default'
+      : (context.session.permissionMode as PermissionMode)
   const nextSession = await createSession({
     cwd: context.options.cwd,
     mode: 'interactive',
@@ -205,13 +236,20 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
 
   context.engine.resetMessages()
   context.engine.setSessionId(nextSession.sessionId)
+  context.engine.setPermissionMode(nextPermissionMode)
   context.engine.setPlanFilePath(undefined)
   context.session.sessionId = nextSession.sessionId
   context.session.mode = 'interactive'
+  context.session.permissionMode = nextPermissionMode
+  const queryTracePath = await context.rotateQueryTrace?.(nextSession.sessionId)
+  if (nextPermissionMode === 'plan') {
+    context.session.permissionModeSource = 'task_board'
+  }
 
   printLines([
     'Started a new empty session.',
     `session id: ${nextSession.sessionId}`,
+    ...(queryTracePath ? [`query trace: ${queryTracePath}`] : []),
     '',
   ])
 }
@@ -309,6 +347,11 @@ async function enterPlanMode(context: ReplCommandContext): Promise<void> {
   context.engine.setPlanFilePath(updated?.planFilePath ?? board.planFilePath)
   context.session.permissionMode = 'plan'
   context.session.permissionModeSource = 'repl_command'
+  await appendPlanSnapshotForFile(
+    context.session.sessionId,
+    updated?.planFilePath ?? board.planFilePath,
+    'repl-enter-plan-mode',
+  )
 
   printLines([
     'Entered plan mode for this REPL session.',
@@ -347,6 +390,11 @@ async function exitPlanMode(context: ReplCommandContext): Promise<void> {
   context.engine.setPlanFilePath(undefined)
   context.session.permissionMode = nextPermissionMode
   context.session.permissionModeSource = 'repl_command'
+  await appendPlanSnapshotForFile(
+    context.session.sessionId,
+    updated?.planFilePath ?? board.planFilePath,
+    'repl-exit-plan-mode',
+  )
 
   printLines([
     `Exited plan mode. Restored permission mode: ${nextPermissionMode}`,
@@ -418,7 +466,9 @@ async function compactConversation(
   context: ReplCommandContext,
 ): Promise<void> {
   const allMessages = context.engine.getMessages()
-  const messages = getMessagesAfterCompactBoundary(allMessages)
+  const messages = getMessagesAfterCompactBoundary(
+    getCurrentModelVisibleMessages(context.engine),
+  )
   if (messages.length === 0) {
     printLines([
       'Nothing to compact. The current conversation is already empty.',
@@ -720,13 +770,15 @@ async function resumeConversation(
   context.engine.setSessionId(resumed.meta.sessionId)
   context.session.sessionId = resumed.meta.sessionId
   context.session.mode = 'resume'
-  await syncPlanModeRuntime(context)
+  const queryTracePath = await context.rotateQueryTrace?.(resumed.meta.sessionId)
+  const taskBoard = await syncPlanModeRuntime(context)
 
   if (resumed.meta.provider === context.session.provider && resumed.meta.model) {
     context.engine.setModel(resumed.meta.model)
     context.session.model = resumed.meta.model
     context.session.modelSource = 'resumed_session'
   }
+  const currentTask = taskBoard ? getCurrentTask(taskBoard) : undefined
 
   const transcriptLines = formatTranscript(resumed.messages, {
     includeThinking: false,
@@ -749,6 +801,11 @@ async function resumeConversation(
     ...(lastCompactBoundary
       ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
       : []),
+    ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
+    ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
+    ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
+    ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...(queryTracePath ? [`query trace: ${queryTracePath}`] : []),
     '',
     'restored transcript preview:',
     ...(transcriptLines.length > 0 ? transcriptLines : ['<empty>']),

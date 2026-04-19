@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSession } from '../../src/session/store.js'
@@ -94,13 +94,29 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
       }),
       env,
     )
+    await writeFile(
+      board.planFilePath!,
+      [
+        '# Implementation Plan',
+        '',
+        '## Scope',
+        '- Inspect the current approval flow',
+        '- Show the full plan body before approval',
+      ].join('\n'),
+      'utf8',
+    )
+
+    let capturedPreview: string | undefined
 
     const context = createToolContext({
       cwd: '/tmp/project',
       sessionId: session.sessionId,
       permissionMode: 'plan',
       planFilePath: board.planFilePath,
-      askUserQuestions: async () => ({ decision: 'Approve' }),
+      askUserQuestions: async questions => {
+        capturedPreview = questions[0]?.options[0]?.preview
+        return { decision: 'Approve' }
+      },
     })
 
     const result = await exitPlanModeTool.call(
@@ -111,6 +127,20 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
     )
 
     assert.equal(result.output.status, 'approved')
+    assert.equal(
+      capturedPreview,
+      [
+        '# Implementation Plan',
+        '',
+        '## Scope',
+        '- Inspect the current approval flow',
+        '- Show the full plan body before approval',
+      ].join('\n'),
+    )
+    assert.equal(
+      result.output.planPreview,
+      '- Inspect the current approval flow',
+    )
     assert.equal(context.permissionMode, 'accept-edits')
     assert.equal(context.planFilePath, undefined)
 

@@ -7,7 +7,9 @@ import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { loadSessionForResume } from '../session/resume.js'
 import type { SessionPersistedToolResultRecord } from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
+import { recoverTaskBoardPlanFile } from '../tasks/planSnapshots.js'
 import { loadTaskBoardForSession } from '../tasks/store.js'
+import { getCurrentTask } from '../tasks/taskState.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { runInteractiveReplLoop } from './repl.js'
@@ -16,6 +18,7 @@ import {
   type ReplSessionState,
 } from './replCommands.js'
 import { prepareCliRuntime } from './runtime.js'
+import { getCliErrorOutput } from './errorFormatting.js'
 import type { ResumeCommand } from './types.js'
 import { formatVerboseContextLines } from './verboseEvents.js'
 
@@ -70,7 +73,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     claudeMdEntries,
     toolRegistry,
     engine,
-    queryTracePath,
+    rotateQueryTrace,
     permissionMode,
     permissionModeSource,
   } = await prepareCliRuntime(command.options, 'interactive', resumed.messages)
@@ -88,13 +91,18 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     permissionModeSource,
   }
   engine.setSessionId(replSession.sessionId)
-  const taskBoard = await loadTaskBoardForSession(replSession.sessionId)
+  const queryTracePath = await rotateQueryTrace(replSession.sessionId)
+  const loadedTaskBoard = await loadTaskBoardForSession(replSession.sessionId)
+  const taskBoard = loadedTaskBoard
+    ? await recoverTaskBoardPlanFile(loadedTaskBoard, resumed.messages)
+    : null
   if (taskBoard?.mode === 'active') {
     engine.setPermissionMode('plan')
     engine.setPlanFilePath(taskBoard.planFilePath)
     replSession.permissionMode = 'plan'
     replSession.permissionModeSource = 'task_board'
   }
+  const currentTask = taskBoard ? getCurrentTask(taskBoard) : undefined
 
   const lines = [
     'dclaw resume mode is ready.',
@@ -110,6 +118,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
     ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
     ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
+    ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
+    ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
   ]
 
   if (persistedToolResultInfo.count > 0) {
@@ -191,6 +201,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
           engine,
           options: command.options,
           session: replSession,
+          rotateQueryTrace,
         })
       ) {
         return
@@ -209,6 +220,15 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         replSession.permissionMode = runtimePermissionMode
         replSession.permissionModeSource = 'tool_runtime'
       }
+    },
+    onPromptError(error) {
+      const output = getCliErrorOutput(command, error)
+      if (output.stream === 'stdout') {
+        process.stdout.write(output.text)
+        return
+      }
+
+      process.stderr.write(output.text)
     },
   })
 }

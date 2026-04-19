@@ -28,3 +28,19 @@ test('buildSystemPrompt includes plan mode instructions and plan file context', 
   assert.match(prompt, /only file you may edit during planning/)
   assert.match(prompt, /pending work summary:/)
 })
+
+test('buildSystemPrompt nudges complex work toward task tracking without globally forcing plan mode', () => {
+  const prompt = buildSystemPrompt(
+    assemblePromptContext({
+      cwd: '/tmp/project',
+      provider: 'stub',
+      model: 'stub-model',
+      mode: 'interactive',
+      permissionMode: 'accept-edits',
+    }),
+  )
+
+  assert.match(prompt, /TaskCreate and TaskUpdate/)
+  assert.doesNotMatch(prompt, /EnterPlanMode/)
+  assert.doesNotMatch(prompt, /Prefer direct execution for simple requests/)
+})

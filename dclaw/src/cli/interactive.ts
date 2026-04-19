@@ -4,6 +4,7 @@ import type { InteractiveCommand } from './types.js'
 import { formatVerboseContextLines } from './verboseEvents.js'
 import { runInteractiveReplLoop } from './repl.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
+import { getCliErrorOutput } from './errorFormatting.js'
 import {
   maybeHandleReplCommand,
   type ReplSessionState,
@@ -15,7 +16,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     claudeMdEntries,
     toolRegistry,
     engine,
-    queryTracePath,
+    rotateQueryTrace,
     permissionMode,
     permissionModeSource,
   } = await prepareCliRuntime(command.options, 'interactive')
@@ -27,6 +28,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     model: runtime.model,
   })
   engine.setSessionId(session.sessionId)
+  const queryTracePath = await rotateQueryTrace(session.sessionId)
   const replSession: ReplSessionState = {
     sessionId: session.sessionId,
     mode: 'interactive',
@@ -98,6 +100,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
           engine,
           options: command.options,
           session: replSession,
+          rotateQueryTrace,
         })
       ) {
         return
@@ -116,6 +119,15 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
         replSession.permissionMode = runtimePermissionMode
         replSession.permissionModeSource = 'tool_runtime'
       }
+    },
+    onPromptError(error) {
+      const output = getCliErrorOutput(command, error)
+      if (output.stream === 'stdout') {
+        process.stdout.write(output.text)
+        return
+      }
+
+      process.stderr.write(output.text)
     },
   })
 }

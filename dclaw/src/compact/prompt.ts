@@ -23,6 +23,10 @@ export function getCompactSystemPrompt(): string {
 export function buildCompactUserPrompt(
   input: BuildCompactPromptInput,
 ): string {
+  const summaryGoalLines = [
+    'Summarize the conversation context below so the compacted session can continue work without replaying the full transcript.',
+    'Focus on current goals, recent implementation progress, concrete file references, unresolved issues, and any constraints the assistant must continue following.',
+  ]
   const instructionSection =
     input.instructionText && input.instructionText.trim().length > 0
       ? [
@@ -40,8 +44,7 @@ export function buildCompactUserPrompt(
         ]
       : []
   return [
-    'Summarize the conversation context below so the compacted session can continue work without replaying the full transcript.',
-    'Focus on current goals, recent implementation progress, concrete file references, unresolved issues, and any constraints the assistant must continue following.',
+    ...summaryGoalLines,
     '',
     ...instructionSection,
     ...contextStatsSection,

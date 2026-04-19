@@ -5,7 +5,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { compactSession } from '../../src/compact/compactSession.js'
 import { getTaskBoardPath } from '../../src/session/paths.js'
-import { ensurePlanFileForTaskBoard, readPlanFile } from '../../src/tasks/planFiles.js'
+import {
+  ensurePlanFileForTaskBoard,
+  getDefaultPlanFilePath,
+  readPlanFile,
+} from '../../src/tasks/planFiles.js'
 import { createTaskBoard, loadTaskBoard, loadTaskBoardForSession } from '../../src/tasks/store.js'
 import { createSession, loadSessionMeta } from '../../src/session/store.js'
 import { createTextMessage } from '../../src/types/message.js'
@@ -39,6 +43,7 @@ test('task board store persists and can be linked to a session', async () => {
     assert.ok(loadedBoard)
     assert.equal(loadedBoard.workspaceId, '/tmp/project')
     assert.equal(loadedBoard.latestSessionId, session.sessionId)
+    assert.equal(loadedBoard.planFilePath, undefined)
     assert.equal(linkedBoard?.boardId, 'board-test')
   } finally {
     await rm(homeDir, { recursive: true, force: true })
@@ -61,11 +66,57 @@ test('ensurePlanFileForTaskBoard creates a reusable plan scaffold', async () => 
     const content = await readPlanFile(result.filePath)
 
     assert.equal(result.created, true)
-    assert.equal(result.filePath, board.planFilePath)
+    assert.equal(result.filePath, getDefaultPlanFilePath(board.boardId, env))
     assert.ok(content)
     assert.match(content, /# Plan/)
     assert.match(content, /## Goal/)
     assert.match(content, /## Verification/)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('loadTaskBoard clears stale planFilePath for inactive boards when the file is missing', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-stale-plan-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const boardId = 'board-stale-plan'
+    const boardPath = getTaskBoardPath(boardId, env)
+    const now = new Date().toISOString()
+    await mkdir(join(homeDir, '.dclaw', 'task-boards'), { recursive: true })
+
+    await writeFile(
+      boardPath,
+      JSON.stringify(
+        {
+          boardId,
+          workspaceId: '/tmp/project',
+          rootSessionId: 'session-stale-plan',
+          latestSessionId: 'session-stale-plan',
+          planFilePath: join(
+            homeDir,
+            '.dclaw',
+            'plans',
+            'plan_board-stale-plan.md',
+          ),
+          mode: 'inactive',
+          createdAt: now,
+          updatedAt: now,
+          tasks: [],
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    )
+
+    const board = await loadTaskBoard(boardId, env)
+    const rewritten = await readFile(boardPath, 'utf8')
+
+    assert.ok(board)
+    assert.equal(board?.planFilePath, undefined)
+    assert.doesNotMatch(rewritten, /planFilePath/)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

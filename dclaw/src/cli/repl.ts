@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline/promises'
+import { registerInteractiveQuestionHost } from './interactiveQuestionHost.js'
 
 export type ReplLoopOptions = {
   initialPrompt?: string
@@ -6,6 +7,7 @@ export type ReplLoopOptions = {
   output?: NodeJS.WritableStream
   promptText?: string
   onPrompt: (prompt: string) => Promise<void>
+  onPromptError?: (error: unknown) => Promise<void> | void
 }
 
 const EXIT_COMMANDS = new Set([
@@ -39,12 +41,25 @@ export async function runInteractiveReplLoop(
   const output = options.output ?? process.stdout
   const promptText = options.promptText ?? 'dclaw> '
   const initialPrompt = trimPrompt(options.initialPrompt)
+  const interactive = canStartInteractiveRepl(input, output)
 
-  if (initialPrompt) {
-    await options.onPrompt(initialPrompt)
+  const runPrompt = async (prompt: string): Promise<void> => {
+    try {
+      await options.onPrompt(prompt)
+    } catch (error) {
+      if (!interactive || !options.onPromptError) {
+        throw error
+      }
+
+      await options.onPromptError(error)
+    }
   }
 
-  if (!canStartInteractiveRepl(input, output)) {
+  if (initialPrompt) {
+    await runPrompt(initialPrompt)
+  }
+
+  if (!interactive) {
     return
   }
 
@@ -54,6 +69,11 @@ export async function runInteractiveReplLoop(
     input,
     output,
     terminal: true,
+  })
+  const unregisterQuestionHost = registerInteractiveQuestionHost({
+    question(prompt: string) {
+      return rl.question(prompt)
+    },
   })
   const isClosed = (): boolean =>
     (rl as typeof rl & { closed?: boolean }).closed === true
@@ -75,12 +95,13 @@ export async function runInteractiveReplLoop(
         break
       }
 
-      await options.onPrompt(trimmed)
+      await runPrompt(trimmed)
       if (!isClosed()) {
         rl.prompt()
       }
     }
   } finally {
+    unregisterQuestionHost()
     rl.close()
   }
 }

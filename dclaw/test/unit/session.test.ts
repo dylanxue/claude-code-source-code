@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getMessagesAfterCompactBoundary } from '../../src/compact/boundaryMessage.js'
-import { compactSession } from '../../src/compact/compactSession.js'
+import {
+  compactSession,
+} from '../../src/compact/compactSession.js'
 import { createCompactBoundaryMessage } from '../../src/compact/boundaryMessage.js'
 import { createCompactSummaryMessage } from '../../src/compact/compactSummary.js'
 import { computeContextStats } from '../../src/core/contextStats.js'
@@ -24,6 +26,7 @@ import {
   updateTaskBoard,
 } from '../../src/tasks/store.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
+import { buildTool } from '../../src/tools/types.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 import { createToolContext } from '../helpers/toolContext.js'
 import type {
@@ -31,6 +34,7 @@ import type {
   CreateMessageResponse,
   LlmClient,
 } from '../../src/llm/types.js'
+import { QueryLoopLlmError } from '../../src/core/queryErrors.js'
 
 class CapturingLlmClient implements LlmClient {
   readonly providerName = 'capture'
@@ -54,6 +58,31 @@ class FailingLlmClient implements LlmClient {
 
   async createMessage(): Promise<CreateMessageResponse> {
     throw new Error('compact summarize failed')
+  }
+}
+
+class ToolThenFailingStreamClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    if (this.requests.length === 1) {
+      return {
+        message: createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'tool_readme',
+            name: 'EchoTool',
+            input: {},
+          },
+        ]),
+      }
+    }
+
+    throw new TypeError('terminated')
   }
 }
 
@@ -98,6 +127,60 @@ test('QueryEngine resolves the system prompt from current runtime state', async 
     client.requests[0]?.systemPrompt,
     'permission=plan; session=session-plan; model=stub-model',
   )
+})
+
+test('QueryEngine preserves completed turn messages when a later iteration fails', async () => {
+  const client = new ToolThenFailingStreamClient()
+  const registry = new ToolRegistry()
+  registry.register(buildTool({
+    name: 'EchoTool',
+    description: 'Return a stable tool result.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        ok: { type: 'boolean' },
+      },
+      required: ['ok'],
+      additionalProperties: false,
+    },
+    isReadOnly() {
+      return true
+    },
+    async call() {
+      return {
+        ok: true,
+        output: { ok: true },
+      }
+    },
+  }))
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: ['EchoTool'],
+    }),
+  })
+
+  await assert.rejects(
+    engine.submitUserPrompt('continue the work'),
+    error => {
+      assert.ok(error instanceof QueryLoopLlmError)
+      return true
+    },
+  )
+
+  const messages = engine.getMessages()
+  assert.equal(messages.length, 3)
+  assert.equal(messages[0]?.role, 'user')
+  assert.equal(messages[1]?.role, 'assistant')
+  assert.equal(messages[2]?.role, 'user')
+  assert.equal(messages[2]?.content[0]?.type, 'tool_result')
 })
 
 test('session store persists transcript messages for resume', async () => {
@@ -279,6 +362,7 @@ test('compactSession summarize prompt stays focused on transcript even when plan
     await rm(homeDir, { recursive: true, force: true })
   }
 })
+
 
 test('compactSession leaves the original session untouched when summarization fails', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-compact-fail-'))
@@ -510,6 +594,7 @@ test('QueryEngine forces a task reminder on the first post-compact turn when tas
     await rm(homeDir, { recursive: true, force: true })
   }
 })
+
 
 test('session meta records persisted tool result replacements', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-meta-'))

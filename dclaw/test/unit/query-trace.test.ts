@@ -87,6 +87,44 @@ test('query trace is controlled only by DCLAW_QUERY_TRACE', () => {
   assert.equal(shouldEnableQueryTrace({ DCLAW_QUERY_TRACE: 'false' }), false)
 })
 
+test('query trace file paths and events can be scoped to a session id', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-session-'))
+  const sessionId = 'session-trace-123'
+  const tracePath = createQueryTraceFilePath(
+    {
+      ...process.env,
+      DCLAW_HOME: join(dir, '.dclaw-home'),
+    },
+    sessionId,
+  )
+
+  try {
+    assert.match(tracePath, new RegExp(`${sessionId}-`))
+
+    const queryTraceSink = await createFileQueryTraceSink(tracePath, sessionId)
+    queryTraceSink.record({ event: 'manual.record' })
+    await queryTraceSink.flush()
+
+    const lines = (await readFile(tracePath, 'utf8'))
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => JSON.parse(line) as { event: string; sessionId?: string })
+
+    assert.deepEqual(lines.map(line => ({
+      event: line.event,
+      sessionId: line.sessionId,
+    })), [
+      {
+        event: 'manual.record',
+        sessionId,
+      },
+    ])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('query trace summarizes reasoning and thinking blocks', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-'))
   const tracePath = createQueryTraceFilePath({

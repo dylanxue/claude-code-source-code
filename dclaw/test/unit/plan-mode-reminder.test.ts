@@ -6,15 +6,23 @@ import { join } from 'node:path'
 import { QueryEngine } from '../../src/core/queryEngine.js'
 import type { CompactBoundary } from '../../src/compact/types.js'
 import { createCompactBoundaryMessage } from '../../src/compact/boundaryMessage.js'
-import { createTextMessage, getTextContent, type Message } from '../../src/types/message.js'
+import {
+  createMessage,
+  createTextMessage,
+  getTextContent,
+  type Message,
+} from '../../src/types/message.js'
 import type {
   CreateMessageRequest,
   CreateMessageResponse,
   LlmClient,
 } from '../../src/llm/types.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
+import { ToolRegistry } from '../../src/tools/registry.js'
+import { buildTool } from '../../src/tools/types.js'
 import { createSession } from '../../src/session/store.js'
 import {
+  ensureTaskBoardPlanFile,
   getOrCreateTaskBoardForSession,
   loadTaskBoardForSession,
   updateTaskBoard,
@@ -59,9 +67,12 @@ test('QueryEngine injects a plan_mode reminder as a temporary system-reminder me
       sessionId: 'session-plan-mode-reminder',
       env,
     })
-    const board = await getOrCreateTaskBoardForSession(
-      session.sessionId,
-      '/tmp/project',
+    const board = await ensureTaskBoardPlanFile(
+      await getOrCreateTaskBoardForSession(
+        session.sessionId,
+        '/tmp/project',
+        env,
+      ),
       env,
     )
     await updateTaskBoard(
@@ -162,10 +173,22 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
       }),
     })
 
-    await engine.submitUserPrompt('start implementation')
+    const firstResult = await engine.submitUserPrompt('start implementation')
     const firstReminders = findReminderMessages(client.requests[0])
     assert.equal(firstReminders.length, 1)
     assert.match(getTextContent(firstReminders[0]!), /## Exited Plan Mode/)
+    assert.equal(
+      firstResult.appendedMessages.some(message =>
+        getTextContent(message).includes('## Exited Plan Mode'),
+      ),
+      false,
+    )
+    assert.equal(
+      engine.getMessages().some(message =>
+        getTextContent(message).includes('## Exited Plan Mode'),
+      ),
+      false,
+    )
 
     const boardAfterFirstTurn = await loadTaskBoardForSession(session.sessionId, env)
     assert.ok(boardAfterFirstTurn)
@@ -174,6 +197,147 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
     await engine.submitUserPrompt('continue implementation')
     const secondReminders = findReminderMessages(client.requests[1])
     assert.equal(secondReminders.length, 0)
+  } finally {
+    process.env = originalEnv
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('QueryEngine refreshes planning prompt state after exiting plan mode mid-turn', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-exit-mid-turn-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+
+  try {
+    process.env = env
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-plan-exit-mid-turn',
+      env,
+    })
+    const board = await ensureTaskBoardPlanFile(
+      await getOrCreateTaskBoardForSession(
+        session.sessionId,
+        '/tmp/project',
+        env,
+      ),
+      env,
+    )
+    await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        mode: 'active',
+        updatedAt: new Date().toISOString(),
+      }),
+      env,
+    )
+
+    const client = new (class implements LlmClient {
+      readonly providerName = 'capture'
+      requests: CreateMessageRequest[] = []
+
+      async createMessage(
+        request: CreateMessageRequest,
+      ): Promise<CreateMessageResponse> {
+        this.requests.push(request)
+        if (this.requests.length === 1) {
+          return {
+            message: createMessage('assistant', [
+              {
+                type: 'tool_use',
+                id: 'tool_exit_plan',
+                name: 'ExitPlanModeStub',
+                input: {},
+              },
+            ]),
+          }
+        }
+
+        return {
+          message: createTextMessage('assistant', 'implementation can continue'),
+        }
+      }
+    })()
+    const registry = new ToolRegistry()
+    registry.register(
+      buildTool({
+        name: 'ExitPlanModeStub',
+        description: 'Exit plan mode in the current session.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            status: { type: 'string' },
+          },
+          required: ['status'],
+          additionalProperties: false,
+        },
+        isReadOnly() {
+          return true
+        },
+        async call(_input, context) {
+          context.setPermissionMode?.('default')
+          context.setPlanFilePath?.(undefined)
+          await updateTaskBoard(
+            board.boardId,
+            current => ({
+              ...current,
+              mode: 'inactive',
+              hasExitedPlanModeInSession: true,
+              needsPlanModeExitReminder: true,
+              updatedAt: new Date().toISOString(),
+            }),
+            env,
+          )
+
+          return {
+            ok: true,
+            output: { status: 'approved' },
+          }
+        },
+      }),
+    )
+
+    const engine = new QueryEngine({
+      client,
+      model: 'stub-model',
+      modelLimitsEnv: env,
+      systemPromptResolver: async state => `permission mode: ${state.permissionMode}`,
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        cwd: '/tmp/project',
+        sessionId: session.sessionId,
+        permissionMode: 'plan',
+        planFilePath: board.planFilePath,
+        availableTools: registry.list().map(tool => tool.name),
+      }),
+    })
+
+    const result = await engine.submitUserPrompt('finish the plan and continue')
+
+    assert.equal(result.outputText, 'implementation can continue')
+    assert.equal(client.requests.length, 2)
+    assert.equal(client.requests[0]?.systemPrompt, 'permission mode: plan')
+    assert.equal(client.requests[1]?.systemPrompt, 'permission mode: default')
+
+    const firstReminderText = findReminderMessages(client.requests[0])
+      .map(message => getTextContent(message))
+      .join('\n')
+    const secondReminderText = findReminderMessages(client.requests[1])
+      .map(message => getTextContent(message))
+      .join('\n')
+
+    assert.match(firstReminderText, /## Plan Mode/)
+    assert.doesNotMatch(secondReminderText, /## Plan Mode/)
+    assert.match(secondReminderText, /## Exited Plan Mode/)
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })
@@ -228,11 +392,23 @@ test('QueryEngine injects a plan_mode_reentry reminder once when planning resume
       }),
     })
 
-    await engine.submitUserPrompt('refine the plan')
+    const firstResult = await engine.submitUserPrompt('refine the plan')
     const reminders = findReminderMessages(client.requests[0])
     assert.equal(reminders.length, 2)
     assert.match(getTextContent(reminders[0]!), /## Re-entering Plan Mode/)
     assert.match(getTextContent(reminders[1]!), /## Plan Mode/)
+    assert.equal(
+      firstResult.appendedMessages.some(message =>
+        getTextContent(message).includes('## Re-entering Plan Mode'),
+      ),
+      false,
+    )
+    assert.equal(
+      engine.getMessages().some(message =>
+        getTextContent(message).includes('## Re-entering Plan Mode'),
+      ),
+      false,
+    )
 
     const boardAfterFirstTurn = await loadTaskBoardForSession(session.sessionId, env)
     assert.ok(boardAfterFirstTurn)
@@ -324,7 +500,7 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
       initialMessages: [compactBoundaryMessage, compactSummary],
     })
 
-    await engine.submitUserPrompt('continue after compact')
+    const result = await engine.submitUserPrompt('continue after compact')
 
     const reminders = findReminderMessages(client.requests[0])
     assert.equal(reminders.length, 2)
@@ -334,6 +510,18 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
     assert.ok(reminderTexts.some(text => /Current task: Review auth flow/.test(text)))
     assert.ok(reminderTexts.some(text => /Current step: Reviewing auth flow/.test(text)))
     assert.ok(reminderTexts.some(text => /# Task Tool Reminder/.test(text)))
+    assert.equal(
+      result.appendedMessages.some(message =>
+        getTextContent(message).includes('## Plan Mode'),
+      ),
+      false,
+    )
+    assert.equal(
+      engine.getMessages().some(message =>
+        getTextContent(message).includes('## Plan Mode'),
+      ),
+      false,
+    )
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })

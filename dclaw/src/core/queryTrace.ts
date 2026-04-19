@@ -5,6 +5,7 @@ import { getQueryTracesDir } from '../session/paths.js'
 
 export type QueryTraceEvent = {
   timestamp: string
+  sessionId?: string
   event: string
   iteration?: number
   data?: Record<string, unknown>
@@ -33,13 +34,22 @@ export function shouldEnableQueryTrace(
 
 export function createQueryTraceFilePath(
   env: NodeJS.ProcessEnv = process.env,
+  sessionId?: string,
 ): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  return join(getQueryTracesDir(env), `${stamp}-${randomUUID()}.jsonl`)
+  const sessionLabel =
+    typeof sessionId === 'string' && sessionId.trim().length > 0
+      ? `${sessionId.trim()}-`
+      : ''
+  return join(
+    getQueryTracesDir(env),
+    `${stamp}-${sessionLabel}${randomUUID()}.jsonl`,
+  )
 }
 
 export async function createFileQueryTraceSink(
   filePath: string,
+  sessionId?: string,
 ): Promise<QueryTraceSink> {
   await mkdir(dirname(filePath), { recursive: true })
 
@@ -51,6 +61,7 @@ export async function createFileQueryTraceSink(
       const line =
         JSON.stringify({
           timestamp: new Date().toISOString(),
+          ...(sessionId ? { sessionId } : {}),
           ...event,
         }) + '\n'
 

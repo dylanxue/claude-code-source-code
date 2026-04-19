@@ -49,6 +49,9 @@ export async function runHistory(command: HistoryCommand): Promise<void> {
         lines.push(`   last compact boundary: ${session.lastCompactBoundaryLabel}`)
       }
     }
+    session.planningSummary.forEach(line => {
+      lines.push(`   ${line}`)
+    })
     if (index < sessions.length - 1) {
       lines.push('')
     }

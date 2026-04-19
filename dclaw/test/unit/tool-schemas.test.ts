@@ -199,17 +199,91 @@ test('query loop forwards declared tool schemas to the llm client', async () => 
   const readProperties = readTool?.inputSchema?.properties as
     | Record<string, { description?: string }>
     | undefined
-  assert.match(readTool?.description ?? '', /Read the whole file when it is reasonably small/)
-  assert.match(readTool?.description ?? '', /search for specific content first/i)
+  assert.match(readTool?.description ?? '', /absolute path/i)
+  assert.match(readTool?.description ?? '', /use offset and limit/i)
   assert.match(readProperties?.offset?.description ?? '', /specific section/i)
   assert.match(readProperties?.limit?.description ?? '', /specific portion of a larger file/i)
+})
+
+test('query loop forwards dedicated long prompts for implemented core tools', async () => {
+  const client = new CapturingLlmClient()
+  const registry = createDefaultToolRegistry()
+  const toolContext = createToolContext({
+    availableTools: [
+      'Bash',
+      'Glob',
+      'Grep',
+      'Read',
+      'Edit',
+      'Write',
+      'WebFetch',
+      'AskUserQuestion',
+      'ExitPlanMode',
+    ],
+    askUserQuestions: async () => ({ decision: 'Approve' }),
+  })
+
+  await executeSingleTurn({
+    client,
+    messages: [createTextMessage('user', 'hello')],
+    toolRegistry: registry,
+    toolContext,
+  })
+
+  const tools = client.requests[0]?.tools
+  assert.ok(tools)
+
+  const bash = tools.find(tool => tool.name === 'Bash')
+  assert.match(bash?.description ?? '', /Prefer specialized tools over Bash/i)
+  assert.match(bash?.description ?? '', /run_in_background/i)
+
+  const glob = tools.find(tool => tool.name === 'Glob')
+  assert.match(glob?.description ?? '', /find files by path pattern/i)
+  assert.match(glob?.description ?? '', /If you need to search file contents, use Grep instead/i)
+
+  const grep = tools.find(tool => tool.name === 'Grep')
+  assert.match(grep?.description ?? '', /ALWAYS use Grep for content-search tasks/i)
+  assert.match(grep?.description ?? '', /instead of running "grep" or "rg" through Bash/i)
+
+  const read = tools.find(tool => tool.name === 'Read')
+  assert.match(read?.description ?? '', /For larger files.*use offset and limit/i)
+  assert.match(read?.description ?? '', /Partial reads are tracked as partial views/i)
+
+  const edit = tools.find(tool => tool.name === 'Edit')
+  assert.match(edit?.description ?? '', /must use the Read tool before editing/i)
+  assert.match(edit?.description ?? '', /old_string matches multiple locations/i)
+
+  const write = tools.find(tool => tool.name === 'Write')
+  assert.match(write?.description ?? '', /If the target file already exists, you MUST use the Read tool first/i)
+  assert.match(write?.description ?? '', /Prefer Edit for targeted modifications/i)
+
+  const webFetch = tools.find(tool => tool.name === 'WebFetch')
+  assert.match(webFetch?.description ?? '', /prompt should clearly describe what information to extract/i)
+  assert.match(webFetch?.description ?? '', /GitHub pages or repository workflows, prefer Bash with gh/i)
+
+  const askUserQuestion = tools.find(tool => tool.name === 'AskUserQuestion')
+  assert.match(askUserQuestion?.description ?? '', /Users will always be able to select "Other"/i)
+  assert.match(askUserQuestion?.description ?? '', /\(Recommended\)/i)
+  assert.match(askUserQuestion?.description ?? '', /clarify requirements or choose between approaches/i)
+  assert.match(askUserQuestion?.description ?? '', /Do not reference "the plan"/i)
+
+  const exitPlanMode = tools.find(tool => tool.name === 'ExitPlanMode')
+  assert.match(exitPlanMode?.description ?? '', /does not take the full plan content as input/i)
+  assert.match(exitPlanMode?.description ?? '', /Do NOT use AskUserQuestion to ask "Is this plan okay\?"/i)
 })
 
 test('query loop forwards Claude Code style task tool prompts to the llm client', async () => {
   const client = new CapturingLlmClient()
   const registry = createDefaultToolRegistry()
   const toolContext = createToolContext({
-    availableTools: ['TaskCreate', 'TaskList', 'TaskGet', 'TaskUpdate'],
+    availableTools: [
+      'EnterPlanMode',
+      'TaskCreate',
+      'TaskList',
+      'TaskGet',
+      'TaskUpdate',
+    ],
+    askUserQuestions: async () => ({ decision: 'Approve' }),
   })
 
   await executeSingleTurn({
@@ -225,6 +299,8 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   const taskCreate = tools.find(tool => tool.name === 'TaskCreate')
   assert.match(taskCreate?.description ?? '', /Complex multi-step tasks/i)
   assert.match(taskCreate?.description ?? '', /Check TaskList first/i)
+  assert.match(taskCreate?.description ?? '', /fewer than 3 trivial steps/i)
+  assert.match(taskCreate?.description ?? '', /follow-up tasks/i)
 
   const taskList = tools.find(tool => tool.name === 'TaskList')
   assert.match(taskList?.description ?? '', /prefer working on tasks in ID order/i)
@@ -235,6 +311,13 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   const taskUpdate = tools.find(tool => tool.name === 'TaskUpdate')
   assert.match(taskUpdate?.description ?? '', /TaskGet.*before updating/i)
   assert.match(taskUpdate?.description ?? '', /Only mark a task as `completed`/i)
+  assert.match(taskUpdate?.description ?? '', /create a new task describing the blocker/i)
+  assert.match(taskUpdate?.description ?? '', /## Examples/i)
+
+  const enterPlanMode = tools.find(tool => tool.name === 'EnterPlanMode')
+  assert.match(enterPlanMode?.description ?? '', /Prefer using EnterPlanMode/i)
+  assert.match(enterPlanMode?.description ?? '', /Multi-file changes/i)
+  assert.match(enterPlanMode?.description ?? '', /err on the side of planning/i)
 })
 
 test('query loop stores model-facing tool results separately from raw tool results', async () => {

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { getTaskBoardPath, getTaskBoardsDir } from '../session/paths.js'
 import { loadSessionMeta, updateSessionMeta } from '../session/store.js'
-import { getDefaultPlanFilePath } from './planFiles.js'
 import { ensurePlanFileForTaskBoard } from './planFiles.js'
 import { createTaskRecord, getTaskActiveText } from './taskState.js'
 import type { TaskBoard, TaskRecord } from './types.js'
@@ -153,7 +152,6 @@ export async function createTaskBoard(
     workspaceId: input.workspaceId,
     rootSessionId: input.rootSessionId,
     latestSessionId: input.latestSessionId ?? input.rootSessionId,
-    planFilePath: getDefaultPlanFilePath(boardId, env),
     mode: 'inactive',
     createdAt: now,
     updatedAt: now,
@@ -175,7 +173,9 @@ export async function loadTaskBoard(
 
   const board = normalizeTaskBoard(rawBoard as TaskBoard)
   if (needsTaskBoardMigration(rawBoard)) {
-    await writeTaskBoard(board, env)
+    const migratedBoard = board
+    await writeTaskBoard(migratedBoard, env)
+    return migratedBoard
   }
 
   return board

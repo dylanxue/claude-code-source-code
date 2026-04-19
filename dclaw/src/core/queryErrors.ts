@@ -1,4 +1,5 @@
 import type { ProviderErrorKind, ProviderErrorSubtype } from '../llm/providerUtils.js'
+import type { Message } from '../types/message.js'
 
 export type QueryLoopLlmErrorContext = {
   iteration: number
@@ -20,12 +21,23 @@ export type QueryLoopLlmErrorContext = {
 export class QueryLoopLlmError extends Error {
   readonly causeValue: unknown
   readonly llmError: QueryLoopLlmErrorContext
+  readonly addedMessages: Message[]
+  readonly usedPostCompactAttachments: boolean
 
-  constructor(causeValue: unknown, llmError: QueryLoopLlmErrorContext) {
+  constructor(
+    causeValue: unknown,
+    llmError: QueryLoopLlmErrorContext,
+    options: {
+      addedMessages?: Message[]
+      usedPostCompactAttachments?: boolean
+    } = {},
+  ) {
     super(causeValue instanceof Error ? causeValue.message : llmError.message)
     this.name = 'QueryLoopLlmError'
     this.causeValue = causeValue
     this.llmError = llmError
+    this.addedMessages = [...(options.addedMessages ?? [])]
+    this.usedPostCompactAttachments =
+      options.usedPostCompactAttachments === true
   }
 }
-

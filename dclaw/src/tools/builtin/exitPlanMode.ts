@@ -5,9 +5,11 @@ import {
   loadTaskBoardForSession,
   updateTaskBoard,
 } from '../../tasks/store.js'
+import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import type { PlanModeRequest } from '../../tasks/types.js'
 import type { PermissionMode, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { DESCRIPTION, PROMPT } from './exitPlanModePrompt.js'
 
 export type ExitPlanModeInput = {
   note?: string
@@ -48,8 +50,10 @@ export const exitPlanModeTool: Tool<
   ExitPlanModeOutput
 > = buildTool({
   name: 'ExitPlanMode',
-  description:
-    'Request to exit plan mode after the plan is ready and ask the user for approval to start implementation.',
+  description: DESCRIPTION,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -119,9 +123,9 @@ export const exitPlanModeTool: Tool<
     }
 
     const board = await ensureTaskBoardPlanFile(loadedBoard)
-    const planPreview = extractPlanPreview(
-      board.planFilePath ? await readPlanFile(board.planFilePath) : null,
-    )
+    const planContent =
+      board.planFilePath ? await readPlanFile(board.planFilePath) : null
+    const planPreview = extractPlanPreview(planContent)
 
     if (board.mode !== 'active') {
       const resumedPermissionMode = board.resumePermissionMode ?? context.permissionMode
@@ -161,7 +165,7 @@ export const exitPlanModeTool: Tool<
           {
             label: 'Approve',
             description: 'Leave plan mode and allow implementation to begin.',
-            preview: planPreview,
+            preview: planContent ?? undefined,
           },
           {
             label: 'Keep Planning',
@@ -216,6 +220,11 @@ export const exitPlanModeTool: Tool<
 
     context.setPermissionMode?.(resumedPermissionMode)
     context.setPlanFilePath?.(undefined)
+    await appendPlanSnapshotForFile(
+      context.sessionId,
+      updated.planFilePath,
+      'exit-plan-mode',
+    )
 
     return {
       ok: true,

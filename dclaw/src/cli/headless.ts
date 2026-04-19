@@ -30,7 +30,7 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
   const {
     runtime,
     engine,
-    queryTracePath,
+    rotateQueryTrace,
     permissionMode,
     permissionModeSource,
   } = await prepareCliRuntime(
@@ -44,6 +44,7 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
     model: runtime.model,
   })
   engine.setSessionId(session.sessionId)
+  const queryTracePath = await rotateQueryTrace(session.sessionId)
   const verboseContext = formatVerboseContextLines({
     mode: 'print',
     cwd: command.options.cwd,

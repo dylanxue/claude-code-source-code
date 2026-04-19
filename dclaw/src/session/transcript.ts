@@ -4,6 +4,12 @@ import {
 } from '../compact/types.js'
 import { isCompactBoundaryMessage } from '../compact/boundaryMessage.js'
 import {
+  describePlanModeToolResult,
+  describePlanModeToolUse,
+  describeSystemReminderText,
+} from '../tasks/observability.js'
+import { describePlanSnapshotText } from '../tasks/planSnapshots.js'
+import {
   isPersistedToolResultOutput,
   type PersistedToolResultOutput,
 } from '../core/toolResultBudget.js'
@@ -59,7 +65,15 @@ function summarizeToolResult(output: unknown): string {
   return truncate(stringifyValue(output))
 }
 
-function formatMessage(message: Message, includeThinking: boolean): string[] {
+type TranscriptFormatState = {
+  toolUses: Map<string, { name: string; input: Record<string, unknown> }>
+}
+
+function formatMessage(
+  message: Message,
+  includeThinking: boolean,
+  state: TranscriptFormatState,
+): string[] {
   const lines: string[] = []
 
   if (isCompactBoundaryMessage(message)) {
@@ -75,11 +89,29 @@ function formatMessage(message: Message, includeThinking: boolean): string[] {
       .join('\n')
 
     if (text.length > 0) {
-      lines.push(`user: ${truncate(text)}`)
+      const reminderText = describeSystemReminderText(text)
+      const snapshotText = describePlanSnapshotText(text)
+      lines.push(
+        snapshotText
+          ? snapshotText
+          : reminderText
+          ? truncate(reminderText)
+          : `user: ${truncate(text)}`,
+      )
     }
 
     for (const block of message.content) {
       if (block.type !== 'tool_result') {
+        continue
+      }
+      const toolUse = state.toolUses.get(block.toolUseId)
+      const planModeSummary = describePlanModeToolResult(
+        toolUse?.name,
+        block.output,
+        block.rawOutput,
+      )
+      if (planModeSummary) {
+        lines.push(planModeSummary)
         continue
       }
       const persistedSuffix = isPersistedToolResultOutput(block.output)
@@ -132,6 +164,15 @@ function formatMessage(message: Message, includeThinking: boolean): string[] {
           }
           break
         case 'tool_use':
+          state.toolUses.set(block.id, {
+            name: block.name,
+            input: block.input,
+          })
+          const planModeSummary = describePlanModeToolUse(block.name, block.input)
+          if (planModeSummary) {
+            lines.push(planModeSummary)
+            break
+          }
           lines.push(
             `[tool use] ${block.name} ${truncate(stringifyValue(block.input))}`,
           )
@@ -149,7 +190,12 @@ function formatMessage(message: Message, includeThinking: boolean): string[] {
     .filter(block => block.type === 'text')
     .map(block => block.text)
     .join('\n')
-  return [`system: ${truncate(systemText || '[non-text content]')}`]
+  const snapshotText = describePlanSnapshotText(systemText)
+  return [
+    snapshotText
+      ? snapshotText
+      : `system: ${truncate(systemText || '[non-text content]')}`,
+  ]
 }
 
 export function formatTranscript(
@@ -165,13 +211,16 @@ export function formatTranscript(
   const omittedCount = messages.length - visibleMessages.length
 
   const lines: string[] = []
+  const state: TranscriptFormatState = {
+    toolUses: new Map(),
+  }
   if (omittedCount > 0) {
     lines.push(`... ${omittedCount} earlier messages omitted ...`)
     lines.push('')
   }
 
   visibleMessages.forEach((message, index) => {
-    lines.push(...formatMessage(message, includeThinking))
+    lines.push(...formatMessage(message, includeThinking, state))
     if (index < visibleMessages.length - 1) {
       lines.push('')
     }

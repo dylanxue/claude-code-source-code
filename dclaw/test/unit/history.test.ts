@@ -7,6 +7,11 @@ import { runHistory } from '../../src/cli/history.js'
 import { compactSession } from '../../src/compact/compactSession.js'
 import { listSessionHistory } from '../../src/session/history.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
+import {
+  ensureTaskBoardPlanFile,
+  getOrCreateTaskBoardForSession,
+  updateTaskBoard,
+} from '../../src/tasks/store.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 
 test('listSessionHistory sorts sessions by updatedAt descending', async () => {
@@ -177,6 +182,91 @@ test('runHistory prints recent sessions', async () => {
     text,
     /last persisted tool result: \/tmp\/dclaw\/tool-results\/bash\.txt/,
   )
+})
+
+test('runHistory prints planning summary when a task board is attached', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-plan-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const output: string[] = []
+
+  try {
+    process.env = env
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-history-plan',
+      env,
+    })
+    const board = await ensureTaskBoardPlanFile(
+      await getOrCreateTaskBoardForSession(
+        session.sessionId,
+        '/tmp/project',
+        env,
+      ),
+      env,
+    )
+    await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        mode: 'active',
+        currentTaskId: '1',
+        currentStep: 'Reviewing auth flow',
+        tasks: [
+          {
+            id: '1',
+            subject: 'Review auth flow',
+            description: 'Review auth flow before implementation',
+            status: 'in_progress',
+            blocks: [],
+            blockedBy: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      }),
+      env,
+    )
+    await appendSessionMessages(
+      session.sessionId,
+      [createTextMessage('user', 'continue planning')],
+      env,
+    )
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    await runHistory({
+      mode: 'history',
+      options: {
+        cwd: '/tmp/project',
+        permissionMode: 'default',
+        stream: false,
+        verbose: false,
+        outputFormat: 'text',
+      },
+    })
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /session-history-plan/)
+  assert.match(text, /plan mode state: active/)
+  assert.match(text, /plan file:/)
+  assert.match(text, /current task: Review auth flow/)
+  assert.match(text, /current step: Reviewing auth flow/)
 })
 
 test('runHistory prints compact boundary metadata for compacted sessions', async () => {

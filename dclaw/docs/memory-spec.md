@@ -17,8 +17,8 @@ memory 使用本地文件持久化。
 建议路径：
 
 ```text
-默认: ~/.dclaw/projects/<project>/memory/
-若设置 DCLAW_HOME: <DCLAW_HOME>/projects/<project>/memory/
+默认: ~/.dclaw/projects/<sanitized-workspace>/memory/
+若设置 DCLAW_HOME: <DCLAW_HOME>/projects/<sanitized-workspace>/memory/
 ```
 
 ### 2.2 `MEMORY.md`
@@ -48,6 +48,21 @@ memory 使用本地文件持久化。
 2. 生成 manifest
 3. 选择与当前 query 最相关的少量 memory
 4. 注入上下文
+
+### 2.5 当前实现状态
+
+当前已完成 `阶段 10-1`：
+
+- 已新增 `src/memory/paths.ts / frontmatter.ts / store.ts / manifest.ts / recall.ts`
+- 已落地 memory 目录路径、`MEMORY.md` 入口、独立 memory markdown 文件
+- 已落地最小 frontmatter 与 file-based manifest
+- 已提供 deterministic `recall` helper，供后续 `10-2` 接入 query-time recall / prompt 注入
+
+当前尚未完成：
+
+- query-time prompt 注入
+- 自动/手动写回策略收口
+- team memory sync
 
 ## 3. memory 类型
 

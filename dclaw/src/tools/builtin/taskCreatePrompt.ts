@@ -12,6 +12,7 @@ Use this tool proactively in these scenarios:
 - The user explicitly asks for a todo list or task tracking
 - The user provides multiple requests or a list of things to do
 - After receiving new instructions, when you should capture the new requirements as tasks
+- When you finish a task and discover follow-up work that should also be tracked
 
 ## When NOT to Use This Tool
 
@@ -19,6 +20,7 @@ Skip using this tool when:
 
 - There is only a single straightforward task
 - The work is trivial and tracking adds no value
+- The task can be completed in fewer than 3 trivial steps
 - The task is purely conversational or informational
 
 ## Task Fields
@@ -35,4 +37,5 @@ All tasks are created with status \`pending\`.
 - After creating tasks, use TaskUpdate to add dependencies when needed
 - When you begin work on a task, mark it as \`in_progress\` before starting
 - When you finish the work completely, mark it as \`completed\`
+- When finishing a task reveals new work, create follow-up tasks instead of leaving that work implicit
 `

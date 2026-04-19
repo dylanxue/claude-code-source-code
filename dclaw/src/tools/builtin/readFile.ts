@@ -2,17 +2,16 @@ import { readFile, stat } from 'node:fs/promises'
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
+import {
+  DESCRIPTION as READ_DESCRIPTION,
+  FILE_PATH_DESCRIPTION,
+  LIMIT_DESCRIPTION,
+  OFFSET_DESCRIPTION,
+  PATH_ALIAS_DESCRIPTION,
+  PROMPT,
+} from './readFilePrompt.js'
 
 const DEFAULT_MAX_READ_SIZE_BYTES = 256 * 1024
-const READ_DESCRIPTION =
-  'Read a file from the local filesystem. Read the whole file when it is reasonably small. For large files, use offset and limit to read specific portions, or search for specific content first.'
-const FILE_PATH_DESCRIPTION = 'Absolute path to the file to read.'
-const PATH_ALIAS_DESCRIPTION =
-  'Alias for file_path. Prefer file_path for Claude Code compatibility.'
-const OFFSET_DESCRIPTION =
-  '1-based starting line number. Use with limit when the file is too large to read at once or when you only need a specific section.'
-const LIMIT_DESCRIPTION =
-  'Maximum number of lines to read. Use with offset to read a specific portion of a larger file.'
 
 export type ReadFileToolInput = {
   file_path?: string
@@ -52,6 +51,9 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
   name: 'Read',
   description: READ_DESCRIPTION,
   maxResultSizeChars: 50_000,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {

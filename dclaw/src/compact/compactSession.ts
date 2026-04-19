@@ -9,7 +9,6 @@ import {
   loadSessionMeta,
   type SessionMeta,
 } from '../session/store.js'
-import { loadTaskBoard } from '../tasks/store.js'
 import type { Message } from '../types/message.js'
 import { createCompactSummaryMessage } from './compactSummary.js'
 import { createCompactBoundaryMessage } from './boundaryMessage.js'
@@ -48,10 +47,6 @@ export async function compactSession(
     includeThinking: false,
     maxMessages: input.transcriptMessageLimit ?? 40,
   })
-  const sourceBoard =
-    sourceMeta?.taskBoardId
-      ? await loadTaskBoard(sourceMeta.taskBoardId, env)
-      : null
   const compactSummary = await summarizeCompactSession({
     client:
       input.client ?? createLlmClient(input.provider as LlmProviderName, env),

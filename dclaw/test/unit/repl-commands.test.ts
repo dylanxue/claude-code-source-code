@@ -10,8 +10,15 @@ import { maybeHandleReplCommand } from '../../src/cli/replCommands.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { createTextMessage } from '../../src/types/message.js'
 import type { CommonCliOptions } from '../../src/cli/types.js'
-import { appendSessionMessages, createSession } from '../../src/session/store.js'
-import { loadTaskBoardForSession } from '../../src/tasks/store.js'
+import {
+  appendSessionMessages,
+  createSession,
+  loadSessionMeta,
+} from '../../src/session/store.js'
+import {
+  createSessionTask,
+  loadTaskBoardForSession,
+} from '../../src/tasks/store.js'
 import type { ReplSessionState } from '../../src/cli/replCommands.js'
 
 function createEngine() {
@@ -125,7 +132,7 @@ test('maybeHandleReplCommand prints diagnostics for /doctor', async () => {
   assert.match(text, /compact remaining\s+unknown/)
   assert.match(text, /compact used\s+unknown/)
   assert.match(text, /compact thresholds\s+unavailable/)
-  assert.match(text, /max iterations\s+128 \(default\)/)
+  assert.match(text, /max iterations\s+\d+ \((default|user_config)\)/)
   assert.match(text, /provider/)
   assert.match(text, /resolved model/)
   assert.match(text, /max retries/)
@@ -473,6 +480,56 @@ test('maybeHandleReplCommand resets engine state and updates session info on /cl
   assert.deepEqual(context.engine.getMessages(), [])
 })
 
+test('maybeHandleReplCommand leaves plan mode when /clear starts a fresh session', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-clear-plan-state-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const context = createCommandContext()
+  let newMeta:
+    | Awaited<ReturnType<typeof loadSessionMeta>>
+    | undefined
+    | null
+
+  try {
+    process.env = env
+    await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: context.session.sessionId,
+      env,
+    })
+    await maybeHandleReplCommand('/plan', context)
+    assert.equal(context.session.permissionMode, 'plan')
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    const handled = await maybeHandleReplCommand('/clear', context)
+
+    assert.equal(handled, true)
+    newMeta = await loadSessionMeta(context.session.sessionId, env)
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /Started a new empty session\./)
+  assert.equal(context.session.permissionMode, 'default')
+  assert.equal(context.engine.getPlanFilePath(), undefined)
+  assert.ok(newMeta)
+  assert.equal(newMeta?.taskBoardId, undefined)
+})
+
 test('maybeHandleReplCommand compacts the conversation into a summary within the current session', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-compact-'))
   const env = { ...process.env, HOME: homeDir }
@@ -643,6 +700,134 @@ test('maybeHandleReplCommand resumes a saved session and restores its messages',
   assert.equal(context.engine.getMessages().length, 2)
   assert.equal(context.session.model, 'restored-model')
   assert.equal(context.session.modelSource, 'resumed_session')
+})
+
+test('maybeHandleReplCommand rotates query trace paths when switching sessions', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-query-trace-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const rotatedSessionIds: string[] = []
+  const context = {
+    ...createCommandContext(),
+    rotateQueryTrace: async (sessionId?: string) => {
+      rotatedSessionIds.push(sessionId ?? '<none>')
+      return sessionId
+        ? `/tmp/query-traces/${sessionId}.jsonl`
+        : undefined
+    },
+  }
+
+  try {
+    process.env = env
+    const resumedSession = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'trace-model',
+      env,
+    })
+    await appendSessionMessages(
+      resumedSession.sessionId,
+      [
+        createTextMessage('user', 'restored user'),
+        createTextMessage('assistant', 'restored assistant'),
+      ],
+      env,
+    )
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    assert.equal(
+      await maybeHandleReplCommand(`/resume ${resumedSession.sessionId}`, context),
+      true,
+    )
+    const resumedTraceSessionId = context.session.sessionId
+    assert.equal(await maybeHandleReplCommand('/clear', context), true)
+    const clearedTraceSessionId = context.session.sessionId
+
+    assert.deepEqual(rotatedSessionIds, [
+      resumedTraceSessionId,
+      clearedTraceSessionId,
+    ])
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, new RegExp(`query trace: /tmp/query-traces/${rotatedSessionIds[0]}\\.jsonl`))
+  assert.match(text, new RegExp(`query trace: /tmp/query-traces/${rotatedSessionIds[1]}\\.jsonl`))
+})
+
+test('maybeHandleReplCommand does not materialize a plan file when resuming a task-only session', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-resume-task-only-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const context = createCommandContext()
+  let board: Awaited<ReturnType<typeof loadTaskBoardForSession>> | undefined | null
+
+  try {
+    process.env = env
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'task-only-model',
+      sessionId: 'task-only-session',
+      env,
+    })
+    await createSessionTask(
+      session.sessionId,
+      '/tmp/project',
+      {
+        subject: 'Investigate auth edge cases',
+        description: 'Gather the outstanding execution tasks before coding.',
+      },
+      env,
+    )
+
+    context.session.permissionMode = 'plan'
+    context.session.permissionModeSource = 'repl_command'
+    context.engine.setPermissionMode('plan')
+    context.engine.setPlanFilePath('/tmp/project/old-plan.md')
+
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    const handled = await maybeHandleReplCommand(
+      `/resume ${session.sessionId}`,
+      context,
+    )
+
+    assert.equal(handled, true)
+    board = await loadTaskBoardForSession('task-only-session', env)
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /plan mode state: inactive/)
+  assert.doesNotMatch(text, /plan file:/)
+  assert.equal(context.session.permissionMode, 'default')
+  assert.equal(context.engine.getPlanFilePath(), undefined)
+  assert.ok(board)
+  assert.equal(board?.planFilePath, undefined)
 })
 
 test('maybeHandleReplCommand shows recent sessions when /resume has no session id', async () => {

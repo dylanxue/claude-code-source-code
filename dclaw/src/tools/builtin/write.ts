@@ -2,7 +2,9 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ToolContext, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
+import { DESCRIPTION, PROMPT } from './writePrompt.js'
 import {
   createStructuredPatch,
   type StructuredPatchHunk,
@@ -110,7 +112,10 @@ async function prepareWriteState(
 
 export const writeTool: Tool<WriteToolInput, WriteToolOutput> = buildTool({
   name: 'Write',
-  description: 'Write a file to the local filesystem.',
+  description: DESCRIPTION,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -243,6 +248,18 @@ export const writeTool: Tool<WriteToolInput, WriteToolOutput> = buildTool({
             originalFile,
             input.content,
           )
+    if (
+      type !== 'noop' &&
+      context.sessionId &&
+      context.planFilePath &&
+      absolutePath === context.planFilePath
+    ) {
+      await appendPlanSnapshotForFile(
+        context.sessionId,
+        absolutePath,
+        'write-plan-file',
+      )
+    }
 
     return {
       ok: true,

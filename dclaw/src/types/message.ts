@@ -66,6 +66,7 @@ export type Message = {
   content: ContentBlock[]
   createdAt: string
   compactBoundary?: CompactBoundary
+  transcriptOnly?: boolean
 }
 
 export function createMessage(
@@ -82,6 +83,16 @@ export function createMessage(
 
 export function createTextMessage(role: MessageRole, text: string): Message {
   return createMessage(role, [{ type: 'text', text }])
+}
+
+export function createTranscriptOnlyTextMessage(
+  role: MessageRole,
+  text: string,
+): Message {
+  return {
+    ...createTextMessage(role, text),
+    transcriptOnly: true,
+  }
 }
 
 export function createToolUseMessage(
@@ -126,4 +137,8 @@ export function getToolUseBlocks(message: Message): ToolUseContentBlock[] {
   return message.content.filter(
     (block): block is ToolUseContentBlock => block.type === 'tool_use',
   )
+}
+
+export function getModelVisibleMessages(messages: Message[]): Message[] {
+  return messages.filter(message => message.transcriptOnly !== true)
 }

@@ -9,6 +9,7 @@ import {
 } from '../../session/paths.js'
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { DESCRIPTION, PROMPT } from './bashPrompt.js'
 
 const execAsync = promisify(exec)
 const DEFAULT_TIMEOUT_MS = getEnvTimeout(
@@ -902,8 +903,11 @@ function buildExecutionEnvironment(
 
 export const bashTool: Tool<BashToolInput, BashToolOutput> = buildTool({
   name: 'Bash',
-  description: 'Execute a shell command.',
+  description: DESCRIPTION,
   maxResultSizeChars: 30_000,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {

@@ -2,6 +2,8 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ToolContext, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
+import { DESCRIPTION, PROMPT } from './editPrompt.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
 import {
   createStructuredPatch,
@@ -187,7 +189,10 @@ function replaceAll(
 
 export const editTool: Tool<EditToolInput, EditToolOutput> = buildTool({
   name: 'Edit',
-  description: 'Edit a file in place.',
+  description: DESCRIPTION,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -332,6 +337,17 @@ export const editTool: Tool<EditToolInput, EditToolOutput> = buildTool({
       currentContent,
       replacement.content,
     )
+    if (
+      context.sessionId &&
+      context.planFilePath &&
+      absolutePath === context.planFilePath
+    ) {
+      await appendPlanSnapshotForFile(
+        context.sessionId,
+        absolutePath,
+        'edit-plan-file',
+      )
+    }
 
     return {
       ok: true,

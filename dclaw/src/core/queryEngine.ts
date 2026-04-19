@@ -1,5 +1,7 @@
 import { compactSession } from '../compact/compactSession.js'
-import { getMessagesAfterCompactBoundary } from '../compact/boundaryMessage.js'
+import {
+  getMessagesAfterCompactBoundary,
+} from '../compact/boundaryMessage.js'
 import {
   evaluateCompactPressure,
   type CompactRecommendation,
@@ -18,6 +20,7 @@ import { type SessionMode } from '../session/store.js'
 import type { PermissionMode, ToolContext } from '../types/tool.js'
 import {
   createTextMessage,
+  getModelVisibleMessages,
   type Message,
 } from '../types/message.js'
 import { loadTaskBoardForSession } from '../tasks/store.js'
@@ -27,6 +30,7 @@ import {
   executeSingleTurn,
   type QueryLoopRequest,
 } from './queryLoop.js'
+import { QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
 import {
   createPlanModeReminderMessages,
@@ -88,7 +92,7 @@ export class QueryEngine {
   private readonly toolContext: ToolContext
   private readonly maxIterations: number
   private readonly messages: Message[]
-  private readonly queryTraceSink?: QueryTraceSink
+  private queryTraceSink?: QueryTraceSink
   private postCompactReadState?: {
     boundaryId: string
     entries: PostCompactReadStateSnapshot
@@ -148,8 +152,16 @@ export class QueryEngine {
     this.toolContext.sessionId = sessionId
   }
 
+  setQueryTraceSink(queryTraceSink: QueryTraceSink | undefined): void {
+    this.queryTraceSink = queryTraceSink
+  }
+
   getSessionId(): string | undefined {
     return this.toolContext.sessionId
+  }
+
+  getQueryTracePath(): string | undefined {
+    return this.queryTraceSink?.filePath
   }
 
   getPermissionMode(): PermissionMode {
@@ -182,7 +194,9 @@ export class QueryEngine {
     })
   }
 
-  private async getTransientContextMessages(): Promise<{
+  private async getTransientContextMessages(
+    baseMessages: Message[] = this.getMessages(),
+  ): Promise<{
     messages: Message[]
     usedPostCompactAttachments: boolean
   }> {
@@ -197,17 +211,14 @@ export class QueryEngine {
       this.toolContext.sessionId,
       this.modelLimitsEnv,
     )
-    const allMessages = this.getMessages()
+    const allMessages = baseMessages
     const messages = getMessagesAfterCompactBoundary(allMessages)
     const transientMessages: Message[] = []
-    const lastBoundary = allMessages.at(-2)?.compactBoundary
+    const recoveryReadState = this.postCompactReadState?.entries
     const postCompactAttachments = await createPostCompactAttachmentMessages(
       allMessages,
       board,
-      lastBoundary &&
-        this.postCompactReadState?.boundaryId === lastBoundary.boundaryId
-        ? this.postCompactReadState.entries
-        : undefined,
+      recoveryReadState,
       this.toolContext.availableTools,
     )
     transientMessages.push(...postCompactAttachments)
@@ -220,14 +231,13 @@ export class QueryEngine {
     if (postCompactPlanModeReminder) {
       transientMessages.push(postCompactPlanModeReminder)
     } else {
-      transientMessages.push(
-        ...(await createPlanModeReminderMessages(
-          messages,
-          board,
-          this.toolContext.permissionMode,
-          this.modelLimitsEnv,
-        )),
+      const planModeReminderMessages = await createPlanModeReminderMessages(
+        messages,
+        board,
+        this.toolContext.permissionMode,
+        this.modelLimitsEnv,
       )
+      transientMessages.push(...planModeReminderMessages)
     }
 
     const taskReminderMessage = createTaskToolReminderMessage(
@@ -246,7 +256,9 @@ export class QueryEngine {
   }
 
   getContextStats(): ContextStats {
-    const visibleMessages = getMessagesAfterCompactBoundary(this.getMessages())
+    const visibleMessages = getMessagesAfterCompactBoundary(
+      getModelVisibleMessages(this.getMessages()),
+    )
     const modelLimits =
       this.provider && this.provider !== 'stub'
         ? resolveModelLimits(this.provider, this.model, this.modelLimitsEnv)
@@ -312,7 +324,9 @@ export class QueryEngine {
     try {
       const { boundary, boundaryMessage, summaryMessage } = await compactSession({
         sourceSessionId,
-        messages: getMessagesAfterCompactBoundary(this.getMessages()),
+        messages: getMessagesAfterCompactBoundary(
+          getModelVisibleMessages(this.getMessages()),
+        ),
         cwd: this.toolContext.cwd,
         provider: this.provider,
         model: this.model,
@@ -364,36 +378,62 @@ export class QueryEngine {
     streamHandlers?: QueryStreamHandlers,
   ): Promise<QueryResult> {
     const autoCompact = await this.autoCompactIfNeeded(streamHandlers)
-    const [systemPrompt, transientContext] = await Promise.all([
-      this.getResolvedSystemPrompt(),
-      this.getTransientContextMessages(),
-    ])
-    const priorMessages = getMessagesAfterCompactBoundary(this.getMessages())
+    const persistedMessagesBeforeUser = this.getMessages()
+    const priorMessages = getMessagesAfterCompactBoundary(
+      getModelVisibleMessages(persistedMessagesBeforeUser),
+    )
     const userMessage = createTextMessage('user', prompt)
     this.messages.push(userMessage)
+    const baseTurnMessages = [...priorMessages, userMessage]
+    const persistedMessagesWithUser = this.getMessages()
     const modelLimits = this.getResolvedModelLimits()
     const toolResultBudgetOptions = this.getResolvedToolResultBudgetOptions()
 
-    const response = await executeSingleTurn({
-      client: this.client,
-      modelLimits,
-      model: this.model,
-      systemPrompt,
-      messages: [
-        ...priorMessages,
-        ...transientContext.messages,
-        userMessage,
-      ],
-      toolRegistry: this.toolRegistry,
-      toolContext: this.toolContext,
-      maxIterations: this.maxIterations,
-      toolResultBudgetOptions,
-      streamHandlers,
-      queryTraceSink: this.queryTraceSink,
-    })
+    let response
+    try {
+      response = await executeSingleTurn({
+        client: this.client,
+        modelLimits,
+        model: this.model,
+        messages: baseTurnMessages,
+        resolveIterationRequest: async workingMessages => {
+          const currentTurnMessages = workingMessages.slice(baseTurnMessages.length)
+          const [systemPrompt, transientContext] = await Promise.all([
+            this.getResolvedSystemPrompt(),
+            this.getTransientContextMessages(
+              currentTurnMessages.length === 0
+                ? persistedMessagesBeforeUser
+                : [...persistedMessagesWithUser, ...currentTurnMessages],
+            ),
+          ])
+
+          return {
+            systemPrompt,
+            messages: [...workingMessages, ...transientContext.messages],
+            usedPostCompactAttachments: transientContext.usedPostCompactAttachments,
+          }
+        },
+        toolRegistry: this.toolRegistry,
+        toolContext: this.toolContext,
+        maxIterations: this.maxIterations,
+        toolResultBudgetOptions,
+        streamHandlers,
+        queryTraceSink: this.queryTraceSink,
+      })
+    } catch (error) {
+      if (error instanceof QueryLoopLlmError) {
+        if (error.addedMessages.length > 0) {
+          this.messages.push(...error.addedMessages)
+        }
+        if (error.usedPostCompactAttachments) {
+          this.postCompactReadState = undefined
+        }
+      }
+      throw error
+    }
 
     this.messages.push(...response.addedMessages)
-    if (transientContext.usedPostCompactAttachments) {
+    if (response.usedPostCompactAttachments) {
       this.postCompactReadState = undefined
     }
 

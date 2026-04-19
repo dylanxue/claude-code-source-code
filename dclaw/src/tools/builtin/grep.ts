@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { DESCRIPTION, PROMPT } from './grepPrompt.js'
 import {
   DEFAULT_EXCLUDED_SEARCH_DIRECTORIES,
   fallbackGrep,
@@ -363,8 +364,11 @@ function shapeFallbackGrepOutput(
 
 export const grepTool: Tool<GrepToolInput, GrepToolOutput> = buildTool({
   name: 'Grep',
-  description: 'Search file contents with regex.',
+  description: DESCRIPTION,
   maxResultSizeChars: 20_000,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {

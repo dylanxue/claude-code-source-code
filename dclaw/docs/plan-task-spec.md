@@ -49,7 +49,7 @@
 因此阶段 9 的近期实现优先级应明确为：
 
 1. 把模型侧 enter / exit flow 做起来
-2. 把确认事件落到 transcript 可观察面
+2. 把确认事件落到 transcript 可观察面，并避免把 runtime reminder 混成新的持久化真值
 3. 把现有 compact summary 级 carry-over 升级为更完整的结构化 plan attachment / runtime 语义
 
 这里还需要补一条新的对齐结论：
@@ -427,7 +427,7 @@ When in plan mode:
 
 建议分层：
 
-- transcript：保存用户/assistant/tool 消息，以及 enter/exit plan mode 的确认事件摘要
+- transcript：保存用户/assistant/tool 消息，以及 enter/exit plan mode 的确认事件摘要；runtime reminder 不应作为独立持久化真值
 - plan file：保存计划正文真值
 - task board：保存结构化 task/current step/request 状态，以及必要的 checklist/待办摘要真值
 
@@ -468,7 +468,7 @@ When in plan mode:
 1. 模型发起 `EnterPlanMode` / `ExitPlanMode` 请求
 2. transcript 中的 plan mode 事件
 3. `resume` / `history` / `/session` 展示摘要
-4. 将当前 compact summary 级 carry-over 升级为结构化 attachment / runtime 语义，并继续沿用同一 board 与同一 plan file
+4. 将当前首版 runtime attachment 继续升级为以 plan 真值恢复为核心的 transcript / attachment / runtime 语义，并继续沿用同一 board 与同一 plan file
 5. 与 task 面板或 `/task` 观察入口打通
 
 ## 11. 验收标准
@@ -480,7 +480,7 @@ When in plan mode:
 - plan file 在重启、`resume` 与 `compact` 后可延续
 - task/current step 在重启或 `resume` 后可恢复
 - `compact` 或后续继续任务时，可复用同一 board，并继续收到 plan-mode 指令
-- 当前首版允许这条能力先通过 compact summary 文本 carry-over 达成；后续再升级为结构化 attachment / runtime 语义
+- 当前首版已不只依赖 compact summary 文本 carry-over；compact 后第一轮已经会通过 runtime attachment 恢复最近文件、plan file、plan-mode reminder 与 task/current step。阶段 8 已按当前范围收口，主线继续围绕 full compact；`partial compact / reactive compact` 都已像 `TodoWrite` 一样作为非主线路径主动舍弃。后续再继续补齐以 plan 真值恢复和 planning 生命周期为核心的 transcript / attachment / runtime 语义
 - prompt 能区分“正在计划”与“正在执行”，并知道 plan file 位置
 - 模型在 `plan mode` 下不会默认进入实施口径
 - interactive 主路径可使用 `TaskCreate / TaskList / TaskGet / TaskUpdate`

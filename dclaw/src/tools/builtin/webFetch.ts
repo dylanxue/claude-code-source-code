@@ -1,5 +1,6 @@
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { DESCRIPTION, PROMPT } from './webFetchPrompt.js'
 
 const MAX_RESULT_CHARS = 16_000
 const MAX_METADATA_CHARS = 300
@@ -454,9 +455,11 @@ function buildResultText(
 
 export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTool({
   name: 'WebFetch',
-  description:
-    'Fetch public web content from a URL, extract readable text, and return it with lightweight metadata. Prefer specialized tools for authenticated sites.',
+  description: DESCRIPTION,
   maxResultSizeChars: 40_000,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {

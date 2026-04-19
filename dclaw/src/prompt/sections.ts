@@ -14,6 +14,7 @@ export function getDoingTasksSection(): string {
     '- Read context before making changes.',
     '- Do not claim success for checks you did not run.',
     '- Use the available tools carefully and report outcomes faithfully.',
+    '- For multi-step or cross-cutting work, create and maintain a task list with TaskCreate and TaskUpdate.',
   ].join('\n')
 }
 

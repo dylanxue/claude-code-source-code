@@ -83,6 +83,51 @@ Claude Code 当前源码就是这样做的：
 
 说明 MCP tools/resources 的存在及使用方式。
 
+### 3.7.1 Reminder / Attachment 注入边界
+
+这里需要补一条与 Claude Code 当前源码对齐的总原则：
+
+- 不是所有工具都应把额外说明做成 runtime reminder
+- reminder / attachment 主要用于承载“动态、会变化、按会话增量更新”的信息
+- 静态、稳定的工具使用规则，仍应优先留在 tool prompt
+
+Claude Code 当前源码中，除 `plan / task / todo` 外，真正明确走 reminder / attachment 注入的工具相关信息，主要有：
+
+- `Agent`
+  - agent 类型列表不再稳定内嵌在 tool prompt 中
+  - 通过 `agent_listing_delta` 这类 `<system-reminder>` runtime message 注入
+  - 目的之一是避免 agent 池变化导致 tool schema / prompt cache 抖动
+- `ToolSearch`
+  - deferred tools 的“当前有哪些可加载工具”通过 `deferred_tools_delta` 注入
+  - `ToolSearch` 自身 prompt 只说明“如何加载 deferred tools”，不重复内嵌整份动态列表
+- `Skill`
+  - “当前任务相关的 skills”与“已调用 skill 的持续约束”通过 `skill_discovery` / `invoked_skills` 注入
+  - `Skill` tool prompt 只负责说明调用规则，不负责承载每轮动态 skill 清单
+- `MCP`
+  - MCP server 自带 instructions 在 delta 模式下通过 `mcp_instructions_delta` 注入
+  - 目的同样是避免把会随 server 连接状态变化的说明长期塞进 system prompt 或 tool prompt
+
+这意味着 `dclaw` 后续实现时应遵循：
+
+- 只有“当前可用、当前相关、当前会变”的能力信息，才考虑走 reminder
+- reminder 的职责是告诉模型“此刻有哪些动态能力可用”
+- tool prompt 的职责仍然是告诉模型“这个 tool 应该如何使用”
+- 不应把 reminder 当作第二套全局 prompt 来无限扩张
+
+另外还有一条很关键的对齐边界：
+
+- 如果 `dclaw` 还没有实现某项能力背后的真实动态机制，就不要伪装成 Claude Code 那样已经有完整 delta 注入
+- 例如：
+  - 没有 deferred tools，就不要提前模拟 `ToolSearch` reminder
+  - 没有动态 skill discovery，就不要伪装成每轮都能自动 surfaced skill list
+  - 没有 agent pool delta，就不要实现一套名不副实的 agent listing attachment
+
+在这些能力尚未完整落地前，`dclaw` 可以做的最小近似是：
+
+- 在对应阶段按条件注入简短的 `<system-reminder>`
+- 只做“方案提醒”，不伪装成完整的 Claude Code delta 协议
+- 且提醒必须是条件式、阶段式注入，而不是写回全局 system prompt
+
 ### 3.8 language / output style section
 
 注入语言偏好和输出风格。
@@ -146,6 +191,27 @@ headless 模式不能使用不同 prompt 体系，只能改变 section 注入内
 4. 保持 session 稳定性
    - Claude Code 会尽量保持同一 session 内 tool description 稳定，避免 prompt cache 抖动
    - `dclaw` 首版可先实现正确性，后续再考虑 session 级 cache
+
+### 5.5 Reminder 基础设施
+
+为了继续向 Claude Code 靠拢，`dclaw` 后续还需要把“tool prompt”和“runtime reminder”明确分层：
+
+1. 静态规则走 tool prompt
+   - 例如 `Task*`、`Edit`、`Write`、`WebFetch` 的固定使用规则
+
+2. 动态清单走 reminder / attachment
+   - 例如某轮会话里新增的 agent types
+   - 当前 task 相关的 surfaced skills
+   - 当前连接的 MCP server instructions
+   - deferred tools 的当前可用集合
+
+3. runtime reminder 必须条件式触发
+   - 只在该能力真实存在且当前相关时注入
+   - 不做无条件、常驻、全局式扩写
+
+4. reminder 的文本应尽量短、增量化
+   - Claude Code 的方向不是“再造一份大 system prompt”
+   - 而是把动态信息做成可恢复、可重放、可增量更新的 runtime message
 
 ## 6. 当前已实现的最小形态
 

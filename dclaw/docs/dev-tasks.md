@@ -2,223 +2,38 @@
 
 ## 当前迭代
 
-目标：结束 `v0.1` 收尾并切换到 `v0.2` 主线；当前优先推进阶段 8、9、10，把上下文管理 / 自动压缩、Plan / Task 与 Memory 做成新的核心主线。
+目标：结束 `v0.1` 收尾并切换到 `v0.2` 主线；阶段 8 已按当前范围收口，当前优先推进阶段 9、10，把 Plan / Task 与 Memory 做成新的核心主线。
 心智：原则上你的设计要严格对齐 Claude Code 的通用能力（源码在本项目下，跟dclaw目录平级的目录就是claude code的源码)，不额外“加戏”
 
+最近核对结论：
+- `compact` 主路径实现与当前文档描述基本一致；manual compact、消息级 boundary/runtime slicing、共享 `contextStats`、dry-run recommendation、最小 autocompact，以及首版 post-compact attachment 恢复均已真实落地
+- 当前没有发现“文档已标完成但代码未落地”的重大偏差；阶段 8 已按当前产品范围收口，`partial compact / reactive compact` 都已像 `TodoWrite` 一样明确主动舍弃；阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复 / planning 生命周期规则也都已收口，当前主线转到阶段 10-2 的 recall 与 prompt 注入，而不是继续把 task board 全量 transcript 化
+
 ## Todo
-- [x] `P0 / 阶段 8-5`：把 compact summary 从“本地 transcript 重组”升级为“模型生成 summary”
 
-- [x] 明确当前实现边界：
-  - 现有 `compactSummary` 仍主要承载受控 transcript 视图，不等同于 Claude Code 的 compact summarize call
-  - 现有 `instructionText / contextStats` 可继续作为模型 summary 的输入材料；具体恢复信息应逐步转移到 post-compact runtime attachment，而不是继续塞进 summary
+- [x] `P0 / 阶段 10-1`：建立 memory 文件系统骨架，先对齐 Claude Code `memdir` 风格
 
-- [x] 为 compact 建立独立的 summarization prompt / call path：
-  - 手动 compact 走同一条 summarize path
-  - autocompact 复用同一条 summarize path
-  - 避免手动 / 自动各自维护两套摘要逻辑
-
-- [x] 失败路径要求：
-  - summarize call 失败时保留原消息，不丢上下文
-  - 首版不急着补所有 retry 策略，但要保留后续接 reactive compact 的接口
-
-- [x] 验证标准：
-  - compact summary 不再只是 transcript 行列表
-  - summary 能稳定保留当前工作、最近决策、关键文件与用户要求
-
-- [x] `P0 / 阶段 8-6`：把 compact boundary 从 session meta 扩展到消息级 runtime 语义
-
-- [x] 建立消息级 compact boundary 结构，而不只是在 `SessionMeta` 上记录 source / target
-
-- [x] 明确模型可见上下文的切片规则：
-  - query 前只消费最近一次 compact boundary 之后的上下文
-  - compact boundary 成为 runtime context slicing 的协议，而不只是 history 展示信息
-
-- [x] 梳理 transcript / resume / history 的关系，避免“观察面 boundary”和“模型实际看到的 boundary”语义分叉
-
-- [x] 验证标准：
-  - compact boundary 既可观察，也真正参与模型上下文裁剪
-
-- [x] `P1 / 阶段 8-7`：补 post-compact 结构化 attachment 恢复（首版）
-
-- [ ] 当前代码已具备最小 plan-mode carry-over：
-  - compact 后第一轮会强制补一次 full `plan_mode` reminder
-  - 当前最近文件、`plan file`、`current task / current step` 与 first-turn `task reminder` 也已开始通过 runtime message 恢复
-
-- [x] 下一步不要继续把所有恢复信息都堆进 summary 文本；应优先补齐结构化恢复：
-  - [x] 最近读过的关键文件恢复
-  - [x] plan file 恢复
-  - [x] plan mode 恢复
-  - [x] task 摘要恢复
-  - [x] current step 摘要恢复
-
-- [ ] 首版不追求 Claude Code 的全部 attachment 面，只补最影响 first post-compact turn 的核心上下文
-
-- [x] 验证标准：
-  - compact 后首轮模型仍知道最近文件、planning 状态与当前任务焦点
-
-- [ ] `P1 / 阶段 8-8`：补 partial compact 与 reactive compact
-
-- [ ] partial compact：
-  - 支持“总结一部分、保留 recent tail”，而不是每次都整段切新 session
-  - recent tail 保留时不破坏现有 compact boundary 语义
-
-- [ ] reactive compact：
-  - 在 prompt-too-long 等真实失败后触发恢复，而不只靠预估阈值
-  - 避免一次失败后进入无穷重试
-
-- [ ] 当前明确暂不进入主线：
-  - `microcompact`
-  - `session memory compact`
-  - `context collapse`
-
-- [ ] 原则：先补齐 Claude Code compaction 的第一层主路径，再考虑更深层调度体系
-
-- [x] 已完成阶段 9 主线调整：移除 `TodoWrite` 与 `/todo`，对外主线统一收敛到 `Task*` 与 plan file
-
-- [ ] `P0 / 阶段 9-2`：把现有 `permissionMode=plan` 升级为真正可用的 plan mode 体验
-
-- [ ] 明确 `plan mode` 的产品规则，对齐 Claude Code：
-  - 模型可以建议进入或发起进入请求
-  - 真正切换当前 session 到 `plan mode` 必须经过用户确认
-  - 用户显式输入 `/plan` 可直接进入
-  - 退出 `plan mode` 并开始实施时保留明确的确认点
-
-- [ ] 补齐与 Claude Code 当前实现的关键差异：
-  - [x] 接入模型侧 `EnterPlanMode`
-  - [x] 接入模型侧 `ExitPlanMode`
-  - [x] 为常规 interactive turn 接入最小 attachment-style plan-mode reminder：
-    - `plan_mode`
-    - `plan_mode_exit`
-    - `plan_mode_reentry`
-    - 当前以临时 `<system-reminder>` user meta message 近似，不写回 session transcript
-  - [x] 为 post-compact 第一轮补齐 Claude Code 风格的 plan-mode carry-over：
-    - 即使普通 plan-mode reminder 仍在节流窗口内
-    - 只要当前 session 是 freshly compacted 且仍处于 `plan mode`
-    - 也会强制补一次 full `plan_mode` reminder
-  - 将现有 compact 后的最小 plan-mode carry-over 升级为更完整的结构化 attachment / runtime 语义，而不是只停留在 summary 文本
-
-- [ ] 为 `plan mode` 增加 plan file 主线：
-  - 进入 `plan mode` 后创建或绑定当前 session 的 plan file
-  - plan file 作为计划正文真值
-  - 退出 `plan mode` 审批时展示 plan file 内容，而不是只看结构化状态
-
-- [ ] 将 compact/resume 与 plan mode 打通：
-  - 当前已具备 compact summary 级别的最小 plan-mode reminder carry-over
-  - 当前也已具备 query-time 的最小 attachment-style carry-over：
-    - 常规 interactive turn 可收到 `plan_mode / plan_mode_exit / plan_mode_reentry`
-    - compact 后第一轮若仍处于 `plan mode`，会强制补一次 full `plan_mode` reminder
-  - 后续补齐结构化 attachment、runtime 恢复与 resume 展示的一致性
-  - 恢复时带回同一 plan file 与 planning 语义
-
-- [ ] 为工具层之外的行为增加最小 runtime 语义：
-  - plan mode 下模型目标从“直接完成任务”切到“探索、澄清、出方案、等批准”
-  - plan mode 下优先使用只读工具、plan file 更新和结构化 task 更新
-  - plan mode 下避免直接承诺“已完成实现”
-
-- [ ] 设计最小进入路径，首版至少覆盖：
-  - 用户显式 `/plan`
-  - 后续可接入模型主动触发的 `EnterPlanMode` 请求
-  - 暂不支持模型静默自动切换 session 状态
-
-- [x] 已移除 `/todo` 相关命令与 `TodoWrite` tool，避免继续保留偏离 Claude Code 当前主路径的 checklist 入口
-
-- [x] 新增 `P0 / 阶段 9-2b`：把 `Task*` 的模型提示方式对齐到 Claude Code
-  - 当前差距：
-    - 这个差距已补齐：`dclaw` 现在也会向模型发送各 tool 的长版 `prompt()`
-    - `TaskCreate / TaskList / TaskGet / TaskUpdate` 已接入独立 prompt 文件
-  - 需要补齐的基础设施：
-    - [x] 扩展 `src/tools/types.ts`，支持 `prompt()`
-    - [x] 调整 `src/core/queryLoop.ts` 的 tool definition 组装，发送长版 tool prompt
-  - 需要补齐的 task tool prompt：
-    - [x] `TaskCreate`
-      - 复杂任务时使用
-      - trivial 单任务时不使用
-      - 创建前先 `TaskList`
-    - [x] `TaskList`
-      - 看当前有哪些 task
-      - 完成后再次 list
-      - 多任务可选时按 ID 顺序优先
-    - [x] `TaskGet`
-      - 开始前读取完整描述和依赖
-      - 开始前确认 `blockedBy` 为空
-    - [x] `TaskUpdate`
-      - 更新前先 `TaskGet`
-      - 开工前标 `in_progress`
-      - 完成后标 `completed`
-      - 未完全完成时不得标 completed
-      - 支持 `deleted` / `addBlocks` / `addBlockedBy`
-  - 文案边界：
-    - 全局 system prompt 只保留 plan/task 高层边界
-    - 细粒度 task workflow 下沉到各 tool prompt
-  - 当前明确不做：
-    - teammate / swarm 专属 prompt 分支
-    - mailbox / hook / verification nudge 等 Claude Code 扩展
-  - 已验证：
-    - [x] 单测覆盖模型侧收到的 `Task*` tool description 已为长版 prompt
-    - [x] 单测覆盖 Claude Code 风格的关键规则片段
-    - [x] `QueryEngine` 已补上最小 runtime task reminder：
-      - 当已有 task board 且最近几轮 assistant 未使用 `TaskCreate / TaskUpdate` 时
-      - 当前轮会临时附加 Claude Code 风格的 task-tool reminder
-      - 提醒形态已从“拼接到 system prompt”收敛为“临时 `<system-reminder>` user meta message”
-      - 当前仍不写回 session transcript，只作用于当轮 prompt
-    - [x] `TaskUpdate` 已补上更接近 Claude Code 的结果引导：
-      - `in_progress` 时提示继续执行并维护任务状态
-      - `completed` 时提示立即调用 `TaskList` 看下一项
-
-- [ ] 在 `interactive` / `resume` 恢复时显示当前是否处于 plan mode、当前步骤是什么
-
-- [ ] 在 prompt runtime context 中注入当前 plan mode / plan file / task / current step 摘要，让模型知道“正在计划”还是“正在执行”
-
-- [ ] 验证标准：
-  - plan mode 下模型能看到 plan file 路径、task 摘要和当前步骤
-  - 变更型工具仍被权限层拦住
-  - 模型不会在未退出 plan mode 的情况下直接进入实施口径
-  - 发给模型的 `Task*` tool definition 已包含长版 task tool prompt，而不是短描述
-
-- [ ] `P1 / 阶段 9-3`：补 plan / task 与会话恢复、transcript 的衔接
-
-- [ ] 在 `resume`、`history`、`/session` 中展示 task / current step 摘要与 plan mode 状态
-
-- [ ] 明确哪些内容属于 transcript，哪些内容只属于 task store，避免执行状态散落在消息历史里
-
-- [ ] 为 `/clear`、`/resume`、新 session 创建时的 task board / planning state 生命周期定规则
-
-- [ ] 将 task board 关键状态变更与 transcript / runtime 观察面打通，避免只有本地文件真值、消息层却不可见
-
-- [ ] 将 plan file 与 transcript / runtime 观察面打通，避免只记录 mode 不记录计划正文真值
-
-- [ ] 明确 plan mode 的确认事件如何进入 transcript：
-  - enter request / allow / reject
-  - exit request / allow / reject
-  - 避免把这些状态只藏在内存里导致恢复后失真
-
-- [ ] 下一步将这条能力从“summary 文本级 carry-over”升级为 Claude Code 风格的结构化 attachment / runtime 语义
-
-- [ ] 验证标准：不会因为切 session 或 compact 导致 plan file、task 状态或 planning 语义丢失
-
-- [ ] `P0 / 阶段 10-1`：建立 memory 文件系统骨架，先对齐 Claude Code `memdir` 风格
-
-- [ ] 新建 `src/memory/`，先落：
+- [x] 新建 `src/memory/`，先落：
   - `paths.ts`
   - `store.ts`
   - `frontmatter.ts`
   - `manifest.ts`
   - `recall.ts`
 
-- [ ] 按 `docs/memory-spec.md` 先实现路径约定：
-  - `~/.dclaw/projects/<project>/memory/`
+- [x] 按 `docs/memory-spec.md` 先实现路径约定：
+  - `~/.dclaw/projects/<sanitized-workspace>/memory/`
   - `MEMORY.md`
   - memory 独立 markdown 文件
 
-- [ ] 定义 memory frontmatter 最小字段：
+- [x] 定义 memory frontmatter 最小字段：
   - `name`
   - `description`
   - `type`
   - `updated_at`
 
-- [ ] 先把 memory 做成 file-based manifest，不急着做复杂 ranking
+- [x] 先把 memory 做成 file-based manifest，不急着做复杂 ranking
 
-- [ ] 验证标准：给定一个 workspace，能稳定创建 / 读取 / 枚举 memory 文件与索引
+- [x] 验证标准：给定一个 workspace，能稳定创建 / 读取 / 枚举 memory 文件与索引
 
 - [ ] `P0 / 阶段 10-2`：实现 query-time recall 与 prompt 注入
 
@@ -252,28 +67,12 @@
 
 - [ ] `P0 / 文档与测试`：补齐 `v0.2` 文档口径与核心回归用例
 
-- [x] 更新 `README / project-status / phases / architecture / work-log` 中阶段 8-10 的实现状态与边界
-
-- [x] 为阶段 8 增加单测：
-  - compact boundary 持久化
-  - `/compact` 后 same-session boundary 追加
-  - autocompact dry-run / fallback
-
-- [ ] 为阶段 9 增加单测：
-  - task board store 持久化
-  - plan mode 恢复
-  - plan mode 下权限限制
-
 - [ ] 为阶段 10 增加单测：
-  - memory frontmatter 解析
-  - recall 筛选
-  - prompt 注入上限
+  - [x] memory frontmatter 解析
+  - [x] recall 筛选
+  - [ ] prompt 注入上限
 
 - [ ] 验证标准：`compact / plan / memory` 三条主线均有最小单测护栏
-## In Progress
-
-- [x] 将 `v0.2` 主线正式切换到阶段 8-10，并同步 README / 状态页 / 阶段文档 / 任务清单的版本口径
-- [x] 将阶段 8 的抽象 TODO 下钻为“手动 compact -> 共享统计 -> autocompact”的执行顺序，并与现有 `tool result budget / persistence` 接轨
 
 ## Deferred
 
@@ -297,6 +96,47 @@
 - [ ] `v0.2+ / 低优先级`：将 provider / Responses 的 annotation、specialized output types 与更广事件覆盖继续接到 transcript / verbose / headless 展示层
 
 ## Done
+- [x] `P1 / 阶段 9-3`：收口 plan 真值恢复与 planning 生命周期规则
+
+- [x] 按 Claude Code 外部主线收窄实现边界：
+  - transcript 继续以 `EnterPlanMode / ExitPlanMode` 工具事件与 plan 真值恢复线索为主
+  - task board 继续作为 file-backed 执行状态真值，不把“所有 task 状态变更都写入 transcript”当目标
+  - 重点收口在 plan file 于 `compact / resume / clear-context` 之后的恢复语义，以及 planning 生命周期规则
+
+- [x] 为 `/clear`、`/resume`、新 session 创建时的 planning 生命周期补齐规则：
+  - `/clear` 会开启新 session，并清掉旧 planning runtime / plan file
+  - `resume` 仅在 `taskBoard.mode === active` 时恢复 plan mode
+  - task-only session 不会凭空 materialize plan file
+
+- [x] 收口 plan file 真值的恢复链路：
+  - 不再只依赖本地 `planFilePath`
+  - 已对齐到更接近 Claude Code 的 transcript/attachment 恢复思路
+  - `resume`、`compact` 后的 plan 延续已有明确可恢复来源
+
+- [x] 保持观察面边界：
+  - `resume / history / /session` 继续显示 `plan mode state / plan file / current task / current step`
+  - transcript 不镜像 task board 全量状态，只保留 plan 恢复所需的关键信息
+
+- [x] 将 `v0.2` 主线正式切换到阶段 8-10，并同步 README / 状态页 / 阶段文档 / 任务清单的版本口径
+
+- [x] 将阶段 8 的抽象 TODO 下钻为“手动 compact -> 共享统计 -> autocompact”的执行顺序，并与现有 `tool result budget / persistence` 接轨
+
+- [x] `阶段 8-8a / partial compact`：主动舍弃，不再进入主线
+  - 这项能力虽然能在 Claude Code 外部源码中看到，但 `dclaw` 当前没有对应的 message selector / rewind 交互入口
+  - 若仅为了复用底层能力而保留一套内部 partial compact core，会让 `dclaw` 多出一条没有产品入口、也不会和 auto compact 联动的分叉路径
+  - 按“无穷向 Claude Code 源码靠拢、不自己加戏”的规则，当前不再保留 partial compact，实现与任务项都一并回滚
+  - 这项取舍与 `TodoWrite` 类似：不是“暂时没做”，而是当前明确主动舍弃
+
+- [x] `阶段 8-8b / reactive compact`：主动舍弃，不再进入主线
+  - Claude Code 外部源码当前仅可见调用点与 feature gate，真实实现文件未在当前源码树中提供，且明确是 ant-only
+  - 在无法直接对齐 Claude Code 外部主线前，`dclaw` 不自行补一版失败后自动 compact / retry 策略
+  - 这项取舍与 `partial compact` 和 `TodoWrite` 一样：属于当前明确主动不做，而不是延后排期
+
+- [x] 阶段 8：按当前范围结束
+  - 主路径统一收敛到 `full compact + autocompact + post-compact runtime attachment 恢复`
+  - `partial compact / reactive compact` 都不再进入 `dclaw` 当前主线
+  - 后续如 Claude Code 外部源码出现新的可对齐主线路径，再重新评估
+
 - [x] `P0 / 阶段 8-1`：建立 `compact` 最小内核的数据结构与目录骨架
 
 - [x] 新建 `src/compact/`，先落 `types.ts / compactSession.ts / compactSummary.ts` 的最小模块边界
@@ -358,6 +198,54 @@
 
 - [x] 验证标准：在小模型 / 长会话下可稳定触发一次自动 compact，并保留可恢复边界
 
+- [x] `P0 / 阶段 8-5`：把 compact summary 从“本地 transcript 重组”升级为“模型生成 summary”
+
+- [x] 明确当前实现边界：
+  - 现有 `compactSummary` 仍主要承载受控 transcript 视图，不等同于 Claude Code 的 compact summarize call
+  - 现有 `instructionText / contextStats` 可继续作为模型 summary 的输入材料；具体恢复信息应逐步转移到 post-compact runtime attachment，而不是继续塞进 summary
+
+- [x] 为 compact 建立独立的 summarization prompt / call path：
+  - 手动 compact 走同一条 summarize path
+  - autocompact 复用同一条 summarize path
+  - 避免手动 / 自动各自维护两套摘要逻辑
+
+- [x] 失败路径要求：
+  - summarize call 失败时保留原消息，不丢上下文
+  - 首版不急着补所有 retry 策略，但要保留后续接 reactive compact 的接口
+
+- [x] 验证标准：
+  - compact summary 不再只是 transcript 行列表
+  - summary 能稳定保留当前工作、最近决策、关键文件与用户要求
+
+- [x] `P0 / 阶段 8-6`：把 compact boundary 从 session meta 扩展到消息级 runtime 语义
+
+- [x] 建立消息级 compact boundary 结构，而不只是在 `SessionMeta` 上记录 source / target
+
+- [x] 明确模型可见上下文的切片规则：
+  - query 前只消费最近一次 compact boundary 之后的上下文
+  - compact boundary 成为 runtime context slicing 的协议，而不只是 history 展示信息
+
+- [x] 梳理 transcript / resume / history 的关系，避免“观察面 boundary”和“模型实际看到的 boundary”语义分叉
+
+- [x] 验证标准：
+  - compact boundary 既可观察，也真正参与模型上下文裁剪
+
+- [x] `P1 / 阶段 8-7`：补 post-compact 结构化 attachment 恢复（首版）
+
+- [x] compact 后第一轮已具备最小 planning/task carry-over：
+  - 当前最近文件、`plan file`、`current task / current step` 与 first-turn `task reminder` 已通过 runtime message 恢复
+  - 当前 compact 后第一轮若仍处于 `plan mode`，会强制补一次 full `plan_mode` reminder
+
+- [x] 已把首版恢复重心从 summary 文本转向结构化 runtime attachment：
+  - 最近读过的关键文件恢复
+  - plan file 恢复
+  - plan mode 恢复
+  - task 摘要恢复
+  - current step 摘要恢复
+
+- [x] 验证标准：
+  - compact 后首轮模型仍知道最近文件、planning 状态与当前任务焦点
+
 - [x] `P0 / 阶段 9-1`：建立 plan / task / todo 的最小存储内核
 
 - [x] 先按 `docs/plan-task-spec.md` 的首版方案落地：引入 `task board`，由 session meta 挂接 `taskBoardId`
@@ -384,7 +272,7 @@
   - Claude Code 存在 V1 `TodoWrite` 与 V2 `TaskCreate / TaskList / TaskGet / TaskUpdate` 两层能力
   - Claude Code 当前 interactive 主路径已偏向 `Task*`
   - `plan mode` 的核心不只是权限限制，还包括 plan file 与 compact/resume 后的持续指令
-  - `dclaw` 当前已对齐到 “plan file + prompt 感知 planning 状态” 这一层，但与 Claude Code 仍有明确差异：Claude Code 还具备模型侧 `EnterPlanMode / ExitPlanMode` 和 compact 后的 plan-mode reminder / attachment 机制
+  - `dclaw` 当前已补上模型侧 `EnterPlanMode / ExitPlanMode`、compact 后首轮的 plan-mode reminder / attachment，以及 `resume/history/transcript` 的首版 planning 观察面；与 Claude Code 的剩余差异已收敛到审批展示和更完整的 transcript / attachment 语义
 
 - [x] 已决定不再保留 `TodoWrite` tool 与 `/todo` 命令：
   - V1 checklist 路径只作为 Claude Code 源码参照，不再作为 `dclaw` 产品面能力
@@ -420,6 +308,53 @@
   - 当前 plan file 路径
   - 当前 task / current step 摘要
   - “继续 planning、不要直接实施”的 reminder
+
+- [x] `P0 / 阶段 9-2b`：把 `Task*` 的模型提示方式对齐到 Claude Code
+  - `dclaw` 现在会向模型发送各 tool 的长版 `prompt()`
+  - `TaskCreate / TaskList / TaskGet / TaskUpdate` 已接入独立 prompt 文件
+  - `src/tools/types.ts` 已扩展支持 `prompt()`
+  - `src/core/queryLoop.ts` 已按长版 tool prompt 组装 `Task*` definitions
+  - `QueryEngine` 已补上最小 runtime task reminder
+  - `TaskUpdate` 已补上更接近 Claude Code 的完成态引导
+
+- [x] `P0 / 阶段 9-2`：把 `ExitPlanMode` 审批收口到完整 plan file 正文展示
+  - 已按 Claude Code 外部主线把退出审批从“只给 preview”收口到“直接展示完整 plan file 正文”
+  - `ExitPlanMode` 审批选项现在传递完整 plan file 内容，而不是只传首行 `planPreview`
+  - 终端 question host 已接通 `preview` 展示，用户可在批准前直接审阅完整 plan 正文
+  - 保持范围克制：不扩写新的 plan-mode 产品设计，只收口审批展示本身
+  - 验证结果：
+    - plan mode 下模型仍能看到 plan file 路径、task 摘要和当前步骤
+    - 变更型工具仍被权限层拦住
+    - 模型不会在未退出 plan mode 的情况下直接进入实施口径
+    - 发给模型的 `Task*` tool definition 仍保持长版 task tool prompt
+    - 用户在批准退出 plan mode 前，已能直接看到完整 plan file 正文，而不只是 preview
+
+- [x] `P0 / 阶段 9-2` 已完成的最小 plan mode 主路径：
+  - 已完成阶段 9 主线调整：移除 `TodoWrite` 与 `/todo`，对外主线统一收敛到 `Task*` 与 plan file
+  - 已移除 `/todo` 相关命令与 `TodoWrite` tool，避免继续保留偏离 Claude Code 当前主路径的 checklist 入口
+  - 已接入模型侧 `EnterPlanMode / ExitPlanMode`
+  - 模型发起进入或退出时，真正切换当前 session 到 `plan mode` 仍需用户确认
+  - 用户显式输入 `/plan` 可直接进入 plan mode
+  - 已为常规 interactive turn 接入 `plan_mode / plan_mode_exit / plan_mode_reentry` reminder
+  - 已为 post-compact 第一轮补齐强制 full `plan_mode` reminder
+  - 已为 plan mode 注入最小 runtime 语义：优先探索 / 澄清 / 写 plan file，避免直接进入实施口径
+  - 已在 prompt runtime context 中注入当前 plan mode / plan file / task / current step 摘要，让模型知道“正在计划”还是“正在执行”
+  - 已让 `resume / history / /session / transcript` 具备首版统一的 planning 观察面：
+    - `resume / history / /session` 均可看到 `plan mode state / plan file / current task / current step`
+    - transcript 已可读方式呈现 `EnterPlanMode / ExitPlanMode` 的 request / approval / rejection 语义
+  - 已按 Claude Code 外部主线收敛 transcript 语义：保留 `EnterPlanMode / ExitPlanMode` 工具事件与 plan file 真值持久化，不再把 `plan_mode / plan_mode_exit / plan_mode_reentry` runtime reminder 单独写入 transcript
+
+- [x] 为阶段 9 增加单测：
+  - task board store 持久化
+  - plan mode 进入 / 退出与 reminder 恢复
+  - plan mode 下权限限制
+
+- [x] `P0 / 文档与测试` 已完成部分：
+  - 已更新 `README / project-status / phases / architecture / work-log` 中阶段 8-10 的实现状态与边界
+  - 已为阶段 8 增加单测：
+    - compact boundary 持久化
+    - `/compact` 后 same-session boundary 追加
+    - autocompact dry-run / fallback
 
 - [x] 初始化 `dclaw/` 目录结构
 - [x] 初始化 TypeScript 基础工程
@@ -593,9 +528,9 @@
 - 阶段 5：Tool 协议与基础工具 `in progress`
 - 阶段 6：权限模式与 Hooks `in progress`
 - 阶段 7：Session、历史与恢复 `in progress`
-- 阶段 8：上下文管理与自动压缩 `in progress`
+- 阶段 8：上下文管理与自动压缩 `completed`
 - 阶段 9：Plan / Task `in progress`
-- 阶段 10：Memory `not started`
+- 阶段 10：Memory `in progress`
 - 阶段 11：多代理、Worktree 与协作执行 `not started`
 - 阶段 12：MCP、Skills、Plugins 与 Remote Bridge `not started`
 - 阶段 13：Coding 场景增强 `not started`

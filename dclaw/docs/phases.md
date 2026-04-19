@@ -2,16 +2,16 @@
 
 ## 当前快照
 
-- 当前处于 `v0.2` 启动阶段
-- 当前主线：推进阶段 8、9、10，把上下文管理 / 自动压缩、Plan / Task、Memory 做成新的核心主线
+- 当前处于 `v0.2` 推进阶段
+- 当前主线：阶段 8 已收口，继续推进阶段 9、10，把 Plan / Task、Memory 做成新的核心主线
 - 当前已知进展：
   - 阶段 1-2 已基本完成
   - 阶段 3-5 已打通最小主链路并持续收紧语义
   - 阶段 6 已接入最小 permission evaluator
   - 阶段 7 已接入 session store、`resume`、history 与基础 REPL commands
-  - 阶段 8 已从首段 model-aware `tool result budget` 推进到 manual compact、共享 `contextStats`、模型生成 compact summary 与最小 autocompact
+  - 阶段 8 已按当前范围收口：主路径为 manual compact、共享 `contextStats`、模型生成 compact summary、最小 autocompact 与 post-compact 恢复
   - 阶段 9 已接入 task board、plan file、最小 `Task*` 与基础 plan mode runtime 摘要
-  - 阶段 10 仍处于设计完成、尚未编码的状态
+  - 阶段 10 已完成 `10-1` memory 文件系统骨架，正在推进后续 recall / 注入主链路
 
 ## 核心 12 阶段
 
@@ -160,14 +160,15 @@
 
 - 当前已补齐消息级 compact boundary 与 runtime slicing 协议，compact 不再依赖 session-level source / target 元数据
 - 当前 compact 后的上下文恢复已开始从 summary 文本 carry-over 转向 query-time runtime attachment；最近文件、plan file、plan mode、current task / current step 与 task reminder 已可通过首轮恢复层注入
-- 当前仍只有“整段 compact 到 boundary + summary”的主路径；partial compact、recent tail preservation、reactive compact 仍未接入
+- 当前阶段 8 已按当前范围收口，主路径统一围绕“整段 compact 到 boundary + summary”以及 autocompact / post-compact 恢复
 - `microcompact / session memory compact / context collapse` 这类更深层上下文调度当前不进入最近主线，避免阶段 8 过早发散
+- 最近一次代码/文档核对结论：`compact` 主路径实现与本阶段文档描述基本一致；当前没有发现“已完成项只是文档口径、代码未真正落地”的重大偏差。按当前产品取舍，`partial compact / reactive compact` 都已像 `TodoWrite` 一样主动舍弃，不再保留没有用户入口或没有外部源码实现可对齐的内部能力；阶段 8 因此按当前范围结束
 
-阶段 8 下一步优先级：
+阶段 8 收口结论：
 
-1. 补齐 post-compact attachment 恢复，优先覆盖最近文件、plan file、plan mode、task/runtime 摘要
-2. 再推进 partial compact 与 reactive compact
-3. 更深的多层压缩策略继续下调到后续阶段
+1. 主路径保留 `full compact + autocompact + post-compact runtime attachment 恢复`
+2. `partial compact / reactive compact` 都不进入 `dclaw` 当前主线
+3. 后续仅在 Claude Code 外部源码出现新的可对齐主线路径时再重新评估
 
 ### 阶段 9：Plan / Task 执行框架
 
@@ -211,12 +212,12 @@
   - `plan_mode`
   - `plan_mode_exit`
   - `plan_mode_reentry`
-  - 当前以临时 `<system-reminder>` user meta message 近似，不写回 transcript
+  - 当前以临时 `<system-reminder>` user meta message 近似；这些 reminder 仅作为当轮 runtime 注入，不再单独持久化到 transcript
   - compact 后第一轮若仍处于 `plan mode`，会强制补一次 full `plan_mode` reminder
 - 已接通 compact 后最小 plan-mode carry-over：
-  - compact summary 中会带上 plan-mode reminder
-  - 可带回 plan file 路径、current step 与 pending work 摘要
-- 当前这部分仍只是“summary 文本级延续”，不是 Claude Code 那种更完整的结构化 attachment / runtime 语义
+  - 当前已不只依赖 compact summary 文本
+  - compact 后第一轮会通过 runtime attachment 恢复最近文件、plan file、full `plan_mode` reminder，以及带 `current task / current step` 的 task reminder
+- 当前这部分已进入首版结构化 runtime attachment 形态，并已接通 `resume / history / transcript` 的 planning 观察面；阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复路径 / planning 生命周期规则都已收口，而不是把 task board 全量状态写进 transcript
 - 仍未接入 swarm / teammate 相关的 task hook 扩展
 
 阶段边界补充：
@@ -249,6 +250,25 @@
 - memory types
 - recall
 - team memory sync
+
+当前阶段进展补充：
+
+- 已完成 `10-1` 的 file-based memory 骨架，对齐 Claude Code `memdir` 风格落地最小目录与模块边界
+- 当前已新增 `src/memory/paths.ts / frontmatter.ts / store.ts / manifest.ts / recall.ts`
+- 当前已落地：
+  - `~/.dclaw/projects/<sanitized-workspace>/memory/`
+  - `MEMORY.md`
+  - 独立 memory markdown 文件
+  - `name / description / type / updated_at` 最小 frontmatter
+  - 基于 frontmatter 的 file-based manifest
+- 当前 `recall.ts` 仅提供 deterministic helper，尚未接入 prompt/query 主路径
+- 当前已补 memory 单测护栏，覆盖 frontmatter、路径、store、manifest 与轻量 recall 筛选
+
+阶段边界补充：
+
+- `10-1` 先收口 memory 文件系统骨架，不提前扩写自动写回、复杂 ranking 或 team sync
+- `10-2` 再进入 query-time recall 与 prompt 注入
+- `10-3` 再明确写回策略、去重升级与与 `CLAUDE.md` / transcript / task 的边界
 
 ### 阶段 11：多代理、Worktree 与协作执行
 

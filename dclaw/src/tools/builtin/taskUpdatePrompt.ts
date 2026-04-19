@@ -8,6 +8,7 @@ export const PROMPT = `Use this tool to update a task in the current session tas
 - Mark a task as \`completed\` only when the work is fully done
 - Mark a task as \`deleted\` when it is no longer needed
 - Update the subject, description, metadata, owner, or dependencies when the task state changes
+- If you become blocked, keep the task active and create a new task describing the blocker that must be resolved
 
 ## Status Workflow
 
@@ -21,6 +22,7 @@ Use \`deleted\` only to remove a task permanently.
 - Only mark a task as \`completed\` when you have fully accomplished it
 - Do not mark a task as \`completed\` if tests are failing, implementation is partial, or blockers remain
 - After resolving a task, call TaskList again to find the next available work
+- If you cannot finish because of an unresolved blocker, keep the task \`in_progress\` and create a separate task for the blocker
 
 ## Fields You Can Update
 
@@ -32,4 +34,26 @@ Use \`deleted\` only to remove a task permanently.
 - **metadata**: Metadata keys to merge into the task
 - **addBlocks**: Tasks that cannot start until this task completes
 - **addBlockedBy**: Tasks that must complete before this task can start
+
+## Examples
+
+Mark a task as in progress when starting work:
+\`\`\`json
+{"taskId":"1","status":"in_progress"}
+\`\`\`
+
+Mark a task as completed after finishing work:
+\`\`\`json
+{"taskId":"1","status":"completed"}
+\`\`\`
+
+Delete a task that is no longer needed:
+\`\`\`json
+{"taskId":"1","status":"deleted"}
+\`\`\`
+
+Set up task dependencies:
+\`\`\`json
+{"taskId":"2","addBlockedBy":["1"]}
+\`\`\`
 `

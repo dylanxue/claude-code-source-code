@@ -97,6 +97,11 @@ export function formatReasoningDeltaPrefix(
   return kind === 'reasoning' ? '[reasoning] ' : '[reasoning:thinking] '
 }
 
+export function formatProgressThinkingLine(summary?: string): string {
+  const normalized = summary?.trim()
+  return `[thinking] ${normalized && normalized.length > 0 ? normalized : 'Working on it...'}`
+}
+
 function formatContentBlock(block: ContentBlock): string | null {
   if (block.type !== 'text') {
     return null
@@ -118,6 +123,55 @@ export function formatToolUseLine(toolUse: {
   input: Record<string, unknown>
 }): string {
   return `[tool_call] ${toolUse.name} ${stringifyInline(toolUse.input)}`
+}
+
+export function formatProgressToolUseLine(toolUse: {
+  name: string
+}): string {
+  return `[tool] ${toolUse.name}`
+}
+
+function getToolResultSummary(output: unknown): string | undefined {
+  if (typeof output !== 'object' || output === null) {
+    return undefined
+  }
+
+  if ('summary' in output && typeof output.summary === 'string') {
+    const summary = output.summary.trim()
+    return summary.length > 0 ? summary : undefined
+  }
+
+  return undefined
+}
+
+function getToolResultError(output: unknown): string | undefined {
+  if (typeof output !== 'object' || output === null) {
+    return undefined
+  }
+
+  if ('error' in output && typeof output.error === 'string') {
+    const error = output.error.trim()
+    return error.length > 0 ? error : undefined
+  }
+
+  return undefined
+}
+
+export function formatProgressToolResultLine(
+  toolName: string | undefined,
+  output: unknown,
+): string {
+  const summary = getToolResultSummary(output)
+  if (summary) {
+    return `[tool] ${summary}`
+  }
+
+  const error = getToolResultError(output)
+  if (error) {
+    return `[tool] ${(toolName ?? 'Tool').trim()} failed: ${error}`
+  }
+
+  return `[tool] ${(toolName ?? 'Tool').trim()} completed`
 }
 
 export function formatLlmErrorLine(error: VerboseLlmErrorEvent): string {
@@ -265,6 +319,29 @@ export function formatVerboseMessageLines(
     ],
     options,
   )
+}
+
+export function formatProgressReasoningLines(
+  message: Pick<Message, 'role' | 'content'>,
+): string[] {
+  if (message.role !== 'assistant') {
+    return []
+  }
+
+  const lines: string[] = []
+
+  for (const block of message.content) {
+    if (block.type !== 'reasoning' || block.summary.length === 0) {
+      continue
+    }
+
+    const summary = block.summary.join(' ').trim()
+    if (summary.length > 0) {
+      lines.push(formatProgressThinkingLine(summary))
+    }
+  }
+
+  return lines
 }
 
 export function getVerboseReasoningBlocks(

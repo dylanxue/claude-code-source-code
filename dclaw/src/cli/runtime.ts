@@ -37,7 +37,7 @@ export type PreparedCliRuntime = {
   claudeMdEntries: Awaited<ReturnType<typeof loadClaudeMdEntries>>
   toolRegistry: ReturnType<typeof createDefaultToolRegistry>
   engine: QueryEngine
-  queryTracePath?: string
+  rotateQueryTrace: (sessionId?: string) => Promise<string | undefined>
 }
 
 export async function prepareCliRuntime(
@@ -60,9 +60,7 @@ export async function prepareCliRuntime(
   const claudeMdEntries = await loadClaudeMdEntries(options.cwd)
 
   const toolRegistry = createDefaultToolRegistry()
-  const queryTraceSink = shouldEnableQueryTrace(configured.env)
-    ? await createFileQueryTraceSink(createQueryTraceFilePath(configured.env))
-    : undefined
+  const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
   const engine = new QueryEngine({
     client: createLlmClient(runtime.provider, configured.env),
     provider: runtime.provider,
@@ -106,7 +104,6 @@ export async function prepareCliRuntime(
     },
     initialMessages,
     maxIterations: resolvedMaxIterations.maxIterations,
-    queryTraceSink,
     sessionMode: mode === 'print' ? 'print' : 'interactive',
   })
 
@@ -117,7 +114,19 @@ export async function prepareCliRuntime(
     claudeMdEntries,
     toolRegistry,
     engine,
-    queryTracePath: queryTraceSink?.filePath,
+    rotateQueryTrace: async (sessionId?: string) => {
+      if (!queryTraceEnabled || !sessionId) {
+        engine.setQueryTraceSink(undefined)
+        return undefined
+      }
+
+      const queryTraceSink = await createFileQueryTraceSink(
+        createQueryTraceFilePath(configured.env, sessionId),
+        sessionId,
+      )
+      engine.setQueryTraceSink(queryTraceSink)
+      return queryTraceSink.filePath
+    },
   }
 }
 

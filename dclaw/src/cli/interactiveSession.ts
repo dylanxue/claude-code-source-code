@@ -4,6 +4,10 @@ import {
   formatAutoCompactLine,
   formatCompactDryRunLine,
   formatLlmErrorLine,
+  formatProgressReasoningLines,
+  formatProgressThinkingLine,
+  formatProgressToolResultLine,
+  formatProgressToolUseLine,
   formatToolUseLine,
   formatVerboseLines,
   formatVerboseMessageLines,
@@ -32,12 +36,30 @@ export type InteractiveSessionPromptResult = {
 export async function runInteractiveSessionPrompt(
   options: InteractiveSessionPromptOptions,
 ): Promise<InteractiveSessionPromptResult> {
-  if (options.stream) {
+  const initialMessageCount = options.engine.getMessages().length
+  const persistPartialTurnIfNeeded = async (): Promise<void> => {
+    const activeSessionId = options.engine.getSessionId() ?? options.sessionId
+    const partialMessages = options.engine
+      .getMessages()
+      .slice(initialMessageCount)
+    if (partialMessages.length === 0) {
+      return
+    }
+
+    await appendSessionMessages(
+      activeSessionId,
+      partialMessages,
+      options.env,
+    ).catch(() => undefined)
+  }
+
+  if (options.stream || !options.verbose) {
     let outputEndsWithNewline = true
     let activeReasoningKind: 'reasoning' | 'thinking' | null = null
     const streamedReasoningIterations = new Set<number>()
-    const writeVerboseTextLines = (verboseLines: string[]): void => {
-      if (verboseLines.length === 0) {
+    const activeToolUses = new Map<string, string>()
+    const writeEventTextLines = (lines: string[]): void => {
+      if (lines.length === 0) {
         return
       }
 
@@ -49,82 +71,112 @@ export async function runInteractiveSessionPrompt(
       if (!outputEndsWithNewline) {
         process.stdout.write('\n')
       }
-      process.stdout.write(verboseLines.join('\n') + '\n')
+      process.stdout.write(lines.join('\n') + '\n')
       outputEndsWithNewline = true
     }
+    if (!options.verbose) {
+      writeEventTextLines([formatProgressThinkingLine()])
+    }
 
-    const result = await options.engine.submitUserPromptWithHandlers(
-      options.prompt,
-      {
-        onTextDelta(text) {
-          if (activeReasoningKind) {
-            process.stdout.write('\n')
-            activeReasoningKind = null
-            outputEndsWithNewline = true
-          }
-          process.stdout.write(text)
-          if (text.length > 0) {
-            outputEndsWithNewline = text.endsWith('\n')
-          }
-        },
-        onReasoningDelta(delta) {
-          if (!options.verbose || delta.text.length === 0) {
-            return
-          }
-
-          streamedReasoningIterations.add(delta.iteration)
-          if (activeReasoningKind !== delta.kind) {
-            if (!outputEndsWithNewline) {
-              process.stdout.write('\n')
+    let result
+    try {
+      result = await options.engine.submitUserPromptWithHandlers(
+        options.prompt,
+        {
+          onTextDelta(text) {
+            if (!options.stream) {
+              return
             }
-            process.stdout.write(formatReasoningDeltaPrefix(delta.kind))
-          }
-          process.stdout.write(delta.text)
-          activeReasoningKind = delta.text.endsWith('\n') ? null : delta.kind
-          outputEndsWithNewline = delta.text.endsWith('\n')
-        },
-        onAssistantMessage(message) {
-          if (!options.verbose) {
-            return
-          }
-          if (streamedReasoningIterations.has(message.iteration)) {
-            return
-          }
+            if (activeReasoningKind) {
+              process.stdout.write('\n')
+              activeReasoningKind = null
+              outputEndsWithNewline = true
+            }
+            process.stdout.write(text)
+            if (text.length > 0) {
+              outputEndsWithNewline = text.endsWith('\n')
+            }
+          },
+          onReasoningDelta(delta) {
+            if (!options.verbose || delta.text.length === 0) {
+              return
+            }
 
-          writeVerboseTextLines(
-            formatVerboseMessageLines(message, {
-              includeToolCalls: false,
-              includeReasoning: true,
-              includeContent: false,
-            }),
-          )
-        },
-        onToolUse(toolUse) {
-          if (!options.verbose) {
-            return
-          }
+            streamedReasoningIterations.add(delta.iteration)
+            if (activeReasoningKind !== delta.kind) {
+              if (!outputEndsWithNewline) {
+                process.stdout.write('\n')
+              }
+              process.stdout.write(formatReasoningDeltaPrefix(delta.kind))
+            }
+            process.stdout.write(delta.text)
+            activeReasoningKind = delta.text.endsWith('\n') ? null : delta.kind
+            outputEndsWithNewline = delta.text.endsWith('\n')
+          },
+          onAssistantMessage(message) {
+            if (options.verbose) {
+              if (streamedReasoningIterations.has(message.iteration)) {
+                return
+              }
 
-          writeVerboseTextLines([formatToolUseLine(toolUse)])
-        },
-        onLlmError(error) {
-          if (!options.verbose) {
-            return
-          }
+              writeEventTextLines(
+                formatVerboseMessageLines(message, {
+                  includeToolCalls: false,
+                  includeReasoning: true,
+                  includeContent: false,
+                }),
+              )
+              return
+            }
 
-          writeVerboseTextLines([formatLlmErrorLine(error)])
-        },
-        onCompactDryRun(event) {
-          if (!options.verbose) {
-            return
-          }
+            writeEventTextLines(formatProgressReasoningLines(message))
+          },
+          onToolUse(toolUse) {
+            activeToolUses.set(toolUse.id, toolUse.name)
 
-          writeVerboseTextLines([formatCompactDryRunLine(event)])
+            if (options.verbose) {
+              writeEventTextLines([formatToolUseLine(toolUse)])
+              return
+            }
+
+            writeEventTextLines([formatProgressToolUseLine(toolUse)])
+          },
+          onToolResult(toolResult) {
+            if (options.verbose) {
+              return
+            }
+
+            writeEventTextLines([
+              formatProgressToolResultLine(
+                activeToolUses.get(toolResult.toolUseId),
+                toolResult.output,
+              ),
+              formatProgressThinkingLine(),
+            ])
+          },
+          onLlmError(error) {
+            if (!options.verbose) {
+              return
+            }
+
+            writeEventTextLines([formatLlmErrorLine(error)])
+          },
+          onCompactDryRun(event) {
+            if (!options.verbose) {
+              return
+            }
+
+            writeEventTextLines([formatCompactDryRunLine(event)])
+          },
+          onAutoCompact(event) {
+            writeEventTextLines([formatAutoCompactLine(event)])
+          },
         },
-        onAutoCompact(event) {
-          writeVerboseTextLines([formatAutoCompactLine(event)])
-        },
-      },
-    )
+      )
+    } catch (error) {
+      await persistPartialTurnIfNeeded()
+      throw error
+    }
 
     const activeSessionId = options.engine.getSessionId() ?? options.sessionId
     await appendSessionMessages(
@@ -132,12 +184,15 @@ export async function runInteractiveSessionPrompt(
       result.appendedMessages,
       options.env,
     )
-    if (options.verbose) {
+    if (options.stream) {
       if (!outputEndsWithNewline) {
         process.stdout.write('\n')
       }
-    } else if (!result.outputText.endsWith('\n')) {
-      process.stdout.write('\n')
+    } else if (result.outputText.length > 0) {
+      process.stdout.write(result.outputText)
+      if (!result.outputText.endsWith('\n')) {
+        process.stdout.write('\n')
+      }
     }
     return {
       sessionId: activeSessionId,
@@ -145,7 +200,13 @@ export async function runInteractiveSessionPrompt(
     }
   }
 
-  const result = await options.engine.submitUserPrompt(options.prompt)
+  let result
+  try {
+    result = await options.engine.submitUserPrompt(options.prompt)
+  } catch (error) {
+    await persistPartialTurnIfNeeded()
+    throw error
+  }
   const activeSessionId = options.engine.getSessionId() ?? options.sessionId
   await appendSessionMessages(
     activeSessionId,

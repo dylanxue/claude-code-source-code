@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Terminal-first general agent scaffold aligned to Claude Code core capabilities.",
+  "bin": {
+    "dclaw": "./bin/dclaw.js"
+  },
   "scripts": {
     "dev": "tsx src/cli/main.ts",
     "start": "tsx src/cli/main.ts",
@@ -14,10 +17,12 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "dependencies": {
+    "eventsource-parser": "^3.0.6",
+    "tsx": "^4.20.0"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "eventsource-parser": "^3.0.6",
-    "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }
 }

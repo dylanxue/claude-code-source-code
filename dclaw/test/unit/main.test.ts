@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const dclawRoot = resolve(here, '../..')
 const mainEntrypoint = resolve(dclawRoot, 'src/cli/main.ts')
+const binEntrypoint = resolve(dclawRoot, 'bin/dclaw.js')
 const tsxLoader = resolve(dclawRoot, 'node_modules/tsx/dist/loader.mjs')
 
 async function runCli(args: string[], cwd: string): Promise<{
@@ -32,6 +33,46 @@ async function runCli(args: string[], cwd: string): Promise<{
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     )
+
+    let stdout = ''
+    let stderr = ''
+
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => {
+      stdout += chunk
+    })
+    child.stderr.on('data', chunk => {
+      stderr += chunk
+    })
+    child.on('error', reject)
+    child.on('close', code => {
+      resolvePromise({
+        stdout,
+        stderr,
+        exitCode: code,
+      })
+    })
+  })
+}
+
+async function runBin(args: string[], cwd: string): Promise<{
+  stdout: string
+  stderr: string
+  exitCode: number | null
+}> {
+  return await new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [binEntrypoint, ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        OPENAI_API_KEY: '',
+        DCLAW_OPENAI_API_KEY: '',
+        ANTHROPIC_API_KEY: '',
+        DCLAW_ANTHROPIC_API_KEY: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
 
     let stdout = ''
     let stderr = ''
@@ -106,6 +147,20 @@ test('main emits stderr for non-sse provider failures', async () => {
       result.stderr,
       /^CLI failed: Anthropic API key is required\. Set ANTHROPIC_API_KEY or DCLAW_ANTHROPIC_API_KEY, or configure ANTHROPIC_API_KEY in \.dclaw\/config\.json\.\nContext: phase=before_response iteration=1\n$/,
     )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('bin wrapper launches dclaw from outside the repo', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-bin-'))
+
+  try {
+    const result = await runBin(['--version'], dir)
+
+    assert.equal(result.exitCode, 0)
+    assert.equal(result.stderr, '')
+    assert.match(result.stdout, /^0\.1\.0\n$/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

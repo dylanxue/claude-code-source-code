@@ -3,7 +3,7 @@
 ## 当前状态
 
 - 项目名称：`dclaw`
-- 当前阶段：`v0.2` 启动阶段，主线切换到阶段 8-10
+- 当前阶段：`v0.2` 推进阶段，阶段 8 已收口，主线聚焦阶段 9-10
 - 当前版本目标：`v0.2`
 - 总体状态：`in progress`
 
@@ -18,9 +18,9 @@
 | 5 | Tool 协议与基础工具 | in progress | `v0.1` 范围已基本可用，剩余收口项转入 backlog |
 | 6 | 权限模式与 Hooks | in progress | 已接入最小 permission evaluator；hooks 与细粒度规则下调到 `v0.3` |
 | 7 | Session、历史与恢复 | in progress | `v0.1` 范围已基本可用，剩余体验打磨转入 backlog |
-| 8 | 上下文管理与自动压缩 | in progress | 已完成 manual compact、消息级 boundary、共享 context stats、模型生成 compact summary、dry-run recommendation、最小 autocompact 触发/回退链路，以及首轮 post-compact 文件/plan/task 恢复；当前主缺口已收敛到 partial/reactive compact 与更深层压缩策略 |
-| 9 | Plan / Task | in progress | 已落地 task board、`/plan`、plan file 与 `Task*`；重新评估后已移除 `/todo` 与 `TodoWrite`，主线收敛到 `plan file + Task*` |
-| 10 | Memory | not started | 已完成方案设计，未编码 |
+| 8 | 上下文管理与自动压缩 | completed | 已完成 manual compact、消息级 boundary、共享 context stats、模型生成 compact summary、dry-run recommendation、最小 autocompact 触发/回退链路，以及首轮 post-compact 文件/plan/task 恢复；当前范围按 `full compact + autocompact + post-compact 恢复` 收口。`partial compact / reactive compact` 已作为非主线路径主动舍弃 |
+| 9 | Plan / Task | in progress | 已落地 task board、`/plan`、plan file、`Task*`、`EnterPlanMode / ExitPlanMode`、plan-mode reminders、prompt runtime planning context，以及 `resume/history/transcript` planning 观察面；阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复 / planning 生命周期规则均已收口，当前主缺口转到阶段 10-2 |
+| 10 | Memory | in progress | 已完成 `10-1` memory 文件系统骨架；`10-2` 的 query-time recall 与 prompt 注入待接入 |
 | 11 | 多代理、Worktree 与协作执行 | not started | 已完成方案设计，未编码 |
 | 12 | MCP、Skills、Plugins 与 Remote Bridge | not started | 已完成方案设计，未编码 |
 | 13 | Coding 场景增强 | not started | 明确后置 |
@@ -179,11 +179,15 @@
 - 当前已完成 Query Engine 最小链路和基础 prompt/`CLAUDE.md` 注入，已进入基础多轮 tool loop
 - 当前 tool loop 已有基础多轮 assistant->tool->assistant 闭环，并已补上最小 permission evaluator；更细粒度规则与 hooks 已下调到 `v0.3`
 - 当前 `permission mode` 已不再只是 CLI 临时参数，也支持用户级与 workspace 级默认配置
-- 当前阶段 9 已不再是纯文档设计：task board、最小 REPL 入口、plan file、prompt runtime 摘要、`Task*` tool、Claude Code 风格的 task tool prompt，以及最小 runtime task reminder / `TaskUpdate` 完成态引导都已接通；其中 task reminder 已从 system prompt 拼接收敛为临时 `<system-reminder>` user meta message，plan mode 也已补上 `plan_mode / plan_mode_exit / plan_mode_reentry` 的最小 attachment-style 提醒，并覆盖了 compact 后第一轮的强制 full reminder。compact summary 级别的最小 plan-mode carry-over 也已具备；但与 Claude Code 对齐的更完整结构化 plan attachment / runtime 语义，以及 swarm / teammate 等扩展仍属于后续待实现内容
+- 当前阶段 9 已不再是纯文档设计：task board、最小 REPL 入口、plan file、`EnterPlanMode / ExitPlanMode`、prompt runtime 摘要、`Task*` tool、Claude Code 风格的 task tool prompt，以及最小 runtime task reminder / `TaskUpdate` 完成态引导都已接通；其中 task reminder 已从 system prompt 拼接收敛为临时 `<system-reminder>` user meta message，plan mode 也已补上 `plan_mode / plan_mode_exit / plan_mode_reentry` 的最小 attachment-style 提醒，并覆盖了 compact 后第一轮的强制 full reminder。当前 `resume / history / transcript` 已具备统一的 planning 观察面；其中 transcript 收敛为记录 `EnterPlanMode / ExitPlanMode` 工具事件与 plan 真值，不再额外持久化这些 runtime reminder。阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复 / `/clear` `/resume` 生命周期规则均已完成；swarm / teammate 仍属后续扩展
 - 当前阶段 9 已接通 `Task*` 主路径的最小版本，但 swarm / teammate 相关 hook、mailbox、owner 自动派发等 Claude Code 扩展仍未实现
 - 当前已确认 Claude Code 源码里有两层不同能力：V1 `TodoWrite` 与 V2 `TaskCreate / TaskList / TaskGet / TaskUpdate`；`dclaw` 已明确收敛到 V2 主路径，不再保留 V1 对外能力
-- 当前还缺 Claude Code 阶段 9 里很关键的 plan file 主线：进入 planning 后的计划正文真值、退出审批展示、compact/resume 后的持续指令
+- 当前已具备 Claude Code 阶段 9 的最小 plan file 主线：进入 planning 后会创建/绑定 plan file，plan file 已作为当前 planning 真值，并接入 prompt runtime context、compact 后首轮恢复，以及 `resume / history / transcript / /session` 的观察面；其中阶段 9-2 的退出审批正文展示与阶段 9-3 的 plan 真值恢复路径 / planning 生命周期规则都已补齐
 - 当前 `dclaw` 已不再保留 `/todo` 与 `TodoWrite`；`TaskBoard` 也已去除内部 `todos` 字段，主路径统一收敛到 `plan file + Task*`
+- 当前阶段 10 已完成 `10-1` 的 memory 文件系统骨架：
+  - 已新增 `src/memory/paths.ts / frontmatter.ts / store.ts / manifest.ts / recall.ts`
+  - 已按 `~/.dclaw/projects/<sanitized-workspace>/memory/` 风格落地路径、`MEMORY.md` 入口、独立 memory markdown 文件，以及最小 frontmatter/manifest
+  - 首版 `recall.ts` 当前仍是 deterministic helper，尚未接入 query-time prompt 注入主路径
 - 当前 `config.json` 已不再只承载 `permissionMode`，也可承载 provider / api key / query trace / model 等运行时配置，并在 `doctor` 中显示来源
 - 当前工具层已经不只是“名字和最小链路对齐”，而是完成了第一轮协议收口：`buildTool`、显式 `input/output schema`、内部/模型结果分层、运行时 output 校验都已接入
 - 当前 `Read / Edit / Write` 已完成第一轮语义收紧，具备更明确的 partial read、warning、stale read 拦截、`noop` 与 patch/diff 输出；剩余差距当前转入 backlog
@@ -211,9 +215,13 @@
 - 当前 `OpenAI` provider 已支持 `responses / chat-completions`，并已补齐 `verbosity`、两批关键 Responses request 参数，以及关键流式事件兼容；当前已覆盖 `response.output_text.*`、`response.output_text.annotation.added`、`response.content_part.*`、`response.refusal.*`、`response.reasoning_summary_text.*`、`response.function_call_arguments.*`、`response.output_item.*` 与 `response.done/completed`，其余更多参数、更多 output 类型与更广事件面已下调到 `v0.2+ / 低优先级`
 - 当前 model limits 已有基础配置层，并补上 `MiniMax / Kimi / GLM` 内置 defaults；其中 `tool result budget` 已开始消费这些 limits，更广的上下文预算、自动压缩阈值和真实请求调度已下调到 `v0.3`
 - 当前阶段 8 已不再只有 tool result budget；manual compact、boundary 持久化、共享 context stats、dry-run recommendation 与最小 autocompact 触发/回退都已接通
-- 当前阶段 8 的核心差距已经收敛为两条主线：
-  - compact 后的上下文恢复已开始从 summary 文本 carry-over 升级到结构化 runtime attachment，但 plan mode / task-runtime 等 attachment 还不完整
-  - partial compact / reactive compact 仍未接通
+- 最近一次对 `compact` 模块的代码/文档核对结论：阶段 8 主路径实现与文档描述基本一致，未发现“文档已标完成但代码未落地”的重大偏差；当前文档漂移主要集中在少数“下一步”描述还停留在 post-compact attachment 恢复之前
+- 当前阶段 8 已按当前产品范围收口：
+  - compact 后的上下文恢复已完成首版结构化 runtime attachment：最近文件、plan file、plan mode、current task / current step 与 first-turn task reminder 均可恢复；当前 transcript 已按 Claude Code 外部主线收敛为工具事件与 plan 真值持久化
+- `partial compact / reactive compact` 已按当前产品取舍主动舍弃：
+  - `partial compact` 不会和 auto compact 联动，也没有 Claude Code 风格的 message selector / rewind 用户入口
+  - `reactive compact` 在当前 Claude Code 外部源码里只有调用点与 feature gate，没有可直接对齐的实现本体，且明确是 ant-only
+  - 这两项都与 `TodoWrite` 类似，属于当前明确主动不做，而不是延后排期
 - `microcompact / session memory compact / context collapse` 等更深层调度当前不进入最近主线，避免阶段 8 过早发散
 - 当前自动化测试已覆盖 `Read / Edit / Write / Bash / Glob / Grep / WebFetch / AskUserQuestion`、权限执行链路、provider 重试/错误分类，以及 CLI 失败路径，但整体覆盖面仍然有限
 - 文档约束已经较明确，后续开发需尽量遵守，不要边写边扩大范围
@@ -227,17 +235,14 @@
 
 下一步进入：
 
-- `v0.2` 启动阶段：聚焦推进阶段 8、9、10 的主链路
+- `v0.2` 推进阶段：聚焦推进阶段 9、10 的主链路
 
 第一批目标：
 
-- 阶段 8 继续从“最小 autocompact 可用”推进到“更完整的上下文调度与压缩策略”
-- 阶段 8 的最近实现顺序明确为：
-  - 先补 post-compact attachment 恢复
-  - 再推进 partial compact 与 reactive compact
-- 阶段 9 已进入首版实现，下一步聚焦把 plan mode 的 prompt/runtime 行为、plan file、恢复展示与 transcript 语义补齐
+- 阶段 8 已按当前范围结束，不再作为近期推进项
+- 阶段 9 主路径已完成当前范围收口，下一步转向阶段 10-2 的 recall 与 query-time prompt 注入
 - 阶段 9 已明确不再保留 `TodoWrite` 与 `/todo`，后续继续围绕 Claude Code 当前主路径的 `Task*`
-- 推进阶段 10 的 memory file format、recall 与 query-time 注入
+- 在已落地 `10-1` memory 文件系统骨架的基础上，继续推进 `10-2` 的 recall 与 query-time 注入
 - `WebFetch / AskUserQuestion` 的后续深化已下调到 `v0.2+ / 低优先级`
 - `v0.1` 剩余的工具 / session / provider 收尾项统一转入 backlog，除非阻塞 `v0.2` 主线否则暂不继续展开
 - 以下深化项已明确下调到 `v0.3`，本阶段暂不继续处理：

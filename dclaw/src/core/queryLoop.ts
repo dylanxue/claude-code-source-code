@@ -36,6 +36,11 @@ export type QueryLoopRequest = {
   modelLimits?: ModelLimits
   systemPrompt?: string
   messages: Message[]
+  resolveIterationRequest?: (messages: Message[]) => Promise<{
+    systemPrompt?: string
+    messages?: Message[]
+    usedPostCompactAttachments?: boolean
+  }>
   toolRegistry: ToolRegistry
   toolContext: ToolContext
   maxIterations?: number
@@ -102,9 +107,43 @@ export type QueryLoopResult = {
   addedMessages: Message[]
   outputText: string
   iterations: number
+  usedPostCompactAttachments: boolean
 }
 
 export const DEFAULT_QUERY_MAX_ITERATIONS = 128
+
+async function resolveIterationState(
+  request: QueryLoopRequest,
+  workingMessages: Message[],
+): Promise<{
+  systemPrompt?: string
+  messages: Message[]
+  toolDefinitions: Array<{
+    name: string
+    description: string
+    inputSchema: Record<string, unknown>
+  }>
+  usedPostCompactAttachments: boolean
+}> {
+  const resolved = request.resolveIterationRequest
+    ? await request.resolveIterationRequest(workingMessages)
+    : undefined
+  const messages = resolved?.messages ?? workingMessages
+  const availableTools = getAvailableTools(
+    request.toolRegistry,
+    request.toolContext,
+  )
+  const toolDefinitions = await Promise.all(
+    availableTools.map(tool => toToolDefinition(tool, request.toolContext)),
+  )
+
+  return {
+    systemPrompt: resolved?.systemPrompt ?? request.systemPrompt,
+    messages,
+    toolDefinitions,
+    usedPostCompactAttachments: resolved?.usedPostCompactAttachments === true,
+  }
+}
 
 function stringifyOutput(value: unknown): string {
   return stringifyJson(value)
@@ -283,17 +322,15 @@ export async function executeSingleTurn(
   const maxIterations = request.maxIterations ?? DEFAULT_QUERY_MAX_ITERATIONS
   const workingMessages = [...request.messages]
   const addedMessages: Message[] = []
-  const availableTools = getAvailableTools(
-    request.toolRegistry,
-    request.toolContext,
-  )
-  const toolDefinitions = await Promise.all(
-    availableTools.map(tool => toToolDefinition(tool, request.toolContext)),
-  )
-
   let lastAssistantMessage: Message | undefined
   let lastToolResultMessages: Message[] = []
   let outputText = ''
+  let usedPostCompactAttachments = false
+  const initialIterationState = await resolveIterationState(
+    request,
+    workingMessages,
+  )
+  usedPostCompactAttachments ||= initialIterationState.usedPostCompactAttachments
   recordTrace(request.queryTraceSink, 'turn.start', {
     model: request.model ?? 'default',
     modelLimits: request.modelLimits,
@@ -306,13 +343,16 @@ export async function executeSingleTurn(
           previewChars: request.toolResultBudgetOptions.previewChars,
         }
       : undefined,
-    messageCount: workingMessages.length,
-    contextStats: getContextStatsForTrace(request, workingMessages),
+    messageCount: initialIterationState.messages.length,
+    contextStats: getContextStatsForTrace(
+      request,
+      initialIterationState.messages,
+    ),
     compactRecommendation: getCompactRecommendationForTrace(
       request,
-      workingMessages,
+      initialIterationState.messages,
     ),
-    availableTools: toolDefinitions.map(tool => tool.name),
+    availableTools: initialIterationState.toolDefinitions.map(tool => tool.name),
     permissionMode: request.toolContext.permissionMode,
     cwd: request.toolContext.cwd,
     lastMessage:
@@ -323,20 +363,35 @@ export async function executeSingleTurn(
 
   try {
     for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      const iterationState =
+        iteration === 1
+          ? initialIterationState
+          : await resolveIterationState(request, workingMessages)
+      if (iteration > 1) {
+        usedPostCompactAttachments ||= iterationState.usedPostCompactAttachments
+      }
       recordTrace(
         request.queryTraceSink,
         'iteration.start',
         {
-          messageCount: workingMessages.length,
-          contextStats: getContextStatsForTrace(request, workingMessages),
+          messageCount: iterationState.messages.length,
+          contextStats: getContextStatsForTrace(
+            request,
+            iterationState.messages,
+          ),
           compactRecommendation: getCompactRecommendationForTrace(
             request,
-            workingMessages,
+            iterationState.messages,
           ),
         },
         iteration,
       )
-      emitCompactDryRun(request, iteration, 'iteration_start', workingMessages)
+      emitCompactDryRun(
+        request,
+        iteration,
+        'iteration_start',
+        iterationState.messages,
+      )
 
       const useStreaming = Boolean(
         request.streamHandlers && request.client.createMessageStream,
@@ -356,10 +411,10 @@ export async function executeSingleTurn(
         {
           model: request.model ?? 'default',
           streaming: useStreaming,
-          systemPrompt: request.systemPrompt,
-          messageCount: workingMessages.length,
-          messages: workingMessages,
-          toolNames: toolDefinitions.map(tool => tool.name),
+          systemPrompt: iterationState.systemPrompt,
+          messageCount: iterationState.messages.length,
+          messages: iterationState.messages,
+          toolNames: iterationState.toolDefinitions.map(tool => tool.name),
         },
         iteration,
       )
@@ -372,9 +427,9 @@ export async function executeSingleTurn(
                 request.client,
                 {
                   model: request.model,
-                  systemPrompt: request.systemPrompt,
-                  messages: workingMessages,
-                  tools: toolDefinitions,
+                  systemPrompt: iterationState.systemPrompt,
+                  messages: iterationState.messages,
+                  tools: iterationState.toolDefinitions,
                 },
                 {
                   onTextDelta: text => {
@@ -410,9 +465,9 @@ export async function executeSingleTurn(
               )
             : await request.client.createMessage({
                 model: request.model,
-                systemPrompt: request.systemPrompt,
-                messages: workingMessages,
-                tools: toolDefinitions,
+                systemPrompt: iterationState.systemPrompt,
+                messages: iterationState.messages,
+                tools: iterationState.toolDefinitions,
               })
       } catch (error) {
         const errorMessage =
@@ -449,7 +504,10 @@ export async function executeSingleTurn(
           iteration,
         )
         request.streamHandlers?.onLlmError?.(llmError)
-        throw new QueryLoopLlmError(error, llmError)
+        throw new QueryLoopLlmError(error, llmError, {
+          addedMessages,
+          usedPostCompactAttachments,
+        })
       }
       const assistantMessage = streamedResponse.message
       lastAssistantMessage = assistantMessage
@@ -513,6 +571,7 @@ export async function executeSingleTurn(
           addedMessages,
           outputText,
           iterations: iteration,
+          usedPostCompactAttachments,
         }
       }
 
@@ -827,6 +886,7 @@ export async function executeSingleTurn(
       addedMessages,
       outputText: maxIterationsMessageText,
       iterations: maxIterations,
+      usedPostCompactAttachments,
     }
   } finally {
     await request.queryTraceSink?.flush().catch(() => undefined)

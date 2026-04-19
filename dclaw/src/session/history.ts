@@ -6,6 +6,12 @@ import {
 import { formatCompactBoundaryLabel } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { getTextContent, type Message } from '../types/message.js'
+import {
+  describePlanModeToolUse,
+  describeSystemReminderText,
+  getTaskBoardObservationLines,
+} from '../tasks/observability.js'
+import { loadTaskBoard } from '../tasks/store.js'
 import { getSessionsDir } from './paths.js'
 import {
   loadSessionMessages,
@@ -24,6 +30,7 @@ export type SessionHistoryEntry = {
   lastPersistedToolResultPath?: string
   compactBoundaryCount: number
   lastCompactBoundaryLabel?: string
+  planningSummary: string[]
 }
 
 function truncate(value: string, maxLength: number = 120): string {
@@ -35,11 +42,17 @@ function truncate(value: string, maxLength: number = 120): string {
 function summarizeMessage(message: Message): string | undefined {
   const text = getTextContent(message).trim()
   if (text.length > 0) {
-    return truncate(text.replace(/\s+/g, ' '))
+    return truncate(
+      (describeSystemReminderText(text) ?? text).replace(/\s+/g, ' '),
+    )
   }
 
   for (const block of message.content) {
     if (block.type === 'tool_use') {
+      const planModeSummary = describePlanModeToolUse(block.name, block.input)
+      if (planModeSummary) {
+        return planModeSummary
+      }
       return `[tool use] ${block.name}`
     }
     if (block.type === 'reasoning' && block.summary.length > 0) {
@@ -60,6 +73,10 @@ function hasTextContent(message: Message): boolean {
   return message.content.some(
     block => block.type === 'text' && block.text.trim().length > 0,
   )
+}
+
+function isVisibleConversationMessage(message: Message): boolean {
+  return message.transcriptOnly !== true
 }
 
 function extractSandboxModeFromToolResult(output: unknown): string | undefined {
@@ -171,12 +188,22 @@ export async function listSessionHistory(
       const persistedToolResultInfo =
         getPersistedToolResultInfoFromMeta(meta.persistedToolResults) ??
         getPersistedToolResultInfo(messages)
+      const board =
+        meta.taskBoardId ? await loadTaskBoard(meta.taskBoardId, env) : null
       const lastUserMessage = [...messages]
         .reverse()
-        .find(message => message.role === 'user' && hasTextContent(message))
+        .find(
+          message =>
+            message.role === 'user' &&
+            isVisibleConversationMessage(message) &&
+            hasTextContent(message),
+        )
       const lastAssistantMessage = [...messages]
         .reverse()
-        .find(message => message.role === 'assistant')
+        .find(
+          message =>
+            message.role === 'assistant' && isVisibleConversationMessage(message),
+        )
 
       return {
         meta,
@@ -194,6 +221,7 @@ export async function listSessionHistory(
         lastCompactBoundaryLabel: lastCompactBoundary
           ? formatCompactBoundaryLabel(lastCompactBoundary)
           : undefined,
+        planningSummary: board ? getTaskBoardObservationLines(board) : [],
       }
     }),
   )

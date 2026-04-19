@@ -4,9 +4,11 @@ import {
   getOrCreateTaskBoardForSession,
   updateTaskBoard,
 } from '../../tasks/store.js'
+import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import type { PlanModeRequest } from '../../tasks/types.js'
 import type { PermissionMode, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
+import { DESCRIPTION, PROMPT } from './enterPlanModePrompt.js'
 
 export type EnterPlanModeInput = {
   note?: string
@@ -35,8 +37,10 @@ export const enterPlanModeTool: Tool<
   EnterPlanModeOutput
 > = buildTool({
   name: 'EnterPlanMode',
-  description:
-    'Request to enter plan mode for non-trivial work. Use this before implementation when you need to explore, refine a plan, or ask for approval.',
+  description: DESCRIPTION,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -194,6 +198,11 @@ export const enterPlanModeTool: Tool<
 
     context.setPermissionMode?.('plan')
     context.setPlanFilePath?.(updated.planFilePath)
+    await appendPlanSnapshotForFile(
+      context.sessionId,
+      updated.planFilePath,
+      'enter-plan-mode',
+    )
 
     return {
       ok: true,
