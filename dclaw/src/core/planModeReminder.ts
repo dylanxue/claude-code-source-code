@@ -38,6 +38,7 @@ function buildPlanModeReminderText(
       ...taskContextLines,
       'Do not start implementation yet.',
       'Only read-only tools and edits to the plan file are allowed.',
+      'Explore the codebase, interview the user when needed, and keep refining the plan file.',
       'When the plan is ready, call ExitPlanMode.',
     ].join('\n')
   }

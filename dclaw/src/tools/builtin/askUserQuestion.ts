@@ -1,17 +1,13 @@
 import type {
   AskUserQuestion,
+  AskUserQuestionAnnotations,
+  AskUserQuestionHostAction,
+  AskUserQuestionHostResult,
   AskUserQuestionOption,
   ToolResult,
 } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
-
-export type AskUserQuestionAnnotations = Record<
-  string,
-  {
-    preview?: string
-    notes?: string
-  }
->
+import { DESCRIPTION, PROMPT } from './askUserQuestionPrompt.js'
 
 export type AskUserQuestionInput = {
   questions: AskUserQuestion[]
@@ -23,6 +19,8 @@ export type AskUserQuestionOutput = {
   questions: AskUserQuestionInput['questions']
   answers: Record<string, string>
   annotations?: AskUserQuestionAnnotations
+  action?: AskUserQuestionHostAction
+  message?: string
 }
 
 function getQuestionAnswerKey(question: AskUserQuestion): string {
@@ -54,12 +52,104 @@ function normalizeAnswers(
   return normalized
 }
 
+function normalizeAnnotations(
+  questions: AskUserQuestion[],
+  annotations?: AskUserQuestionAnnotations,
+): AskUserQuestionAnnotations | undefined {
+  if (!annotations) {
+    return undefined
+  }
+
+  const normalized: AskUserQuestionAnnotations = {}
+
+  for (const question of questions) {
+    const key = getQuestionAnswerKey(question)
+    const candidate = annotations[key] ?? annotations[question.question]
+    if (!candidate) {
+      continue
+    }
+
+    const preview = candidate.preview?.trim()
+    const notes = candidate.notes?.trim()
+
+    if (!preview && !notes) {
+      continue
+    }
+
+    normalized[key] = {
+      ...(preview ? { preview } : {}),
+      ...(notes ? { notes } : {}),
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined
+}
+
+function isStructuredHostResult(
+  value: Record<string, string> | AskUserQuestionHostResult,
+): value is AskUserQuestionHostResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'answers' in value &&
+    typeof value.answers === 'object' &&
+    value.answers !== null
+  )
+}
+
+function formatQuestionsWithAnswers(
+  questions: AskUserQuestion[],
+  answers: Record<string, string>,
+): string {
+  return questions
+    .map(question => {
+      const answer = answers[getQuestionAnswerKey(question)]
+      if (answer) {
+        return `- "${question.question}"\n  Answer: ${answer}`
+      }
+
+      return `- "${question.question}"\n  (No answer provided)`
+    })
+    .join('\n')
+}
+
+function buildActionMessage(
+  action: AskUserQuestionHostAction | undefined,
+  questions: AskUserQuestion[],
+  answers: Record<string, string>,
+): string | undefined {
+  if (!action || action === 'submit_answers') {
+    return undefined
+  }
+
+  const questionsWithAnswers = formatQuestionsWithAnswers(questions, answers)
+
+  if (action === 'respond_to_agent') {
+    return `The user wants to clarify these questions.
+This means they may have additional information, context or questions for you.
+Take their response into account and then reformulate the questions if appropriate.
+Start by asking them what they would like to clarify.
+
+Questions asked:
+${questionsWithAnswers}`
+  }
+
+  return `The user has indicated they have provided enough answers for the plan interview.
+Stop asking clarifying questions and proceed to finish the plan with the information you have.
+
+Questions asked and answers provided:
+${questionsWithAnswers}`
+}
+
 export const askUserQuestionTool: Tool<
   AskUserQuestionInput,
   AskUserQuestionOutput
 > = buildTool({
   name: 'AskUserQuestion',
-  description: 'Ask the user one or more multiple-choice questions.',
+  description: DESCRIPTION,
+  prompt() {
+    return PROMPT
+  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -99,7 +189,7 @@ export const askUserQuestionTool: Tool<
                   },
                   preview: {
                     type: 'string',
-                    description: 'Optional preview content for richer UIs. The terminal host currently ignores this field.',
+                    description: 'Optional preview content shown by hosts that support reviewing richer context inline.',
                   },
                 },
                 required: ['label', 'description'],
@@ -184,6 +274,13 @@ export const askUserQuestionTool: Tool<
           },
           additionalProperties: false,
         },
+      },
+      action: {
+        type: 'string',
+        enum: ['submit_answers', 'respond_to_agent', 'finish_plan_interview'],
+      },
+      message: {
+        type: 'string',
       },
     },
     required: ['questions', 'answers'],
@@ -273,19 +370,59 @@ export const askUserQuestionTool: Tool<
   isEnabled(context) {
     return Boolean(context.askUserQuestions)
   },
+  mapToolResult(result) {
+    const output = result.output
+
+    if (!output.action || output.action === 'submit_answers') {
+      return output
+    }
+
+    return {
+      action: output.action,
+      message: output.message,
+      answers: output.answers,
+      ...(output.annotations ? { annotations: output.annotations } : {}),
+    }
+  },
   async call(input, context): Promise<ToolResult<AskUserQuestionOutput>> {
-    const rawAnswers =
-      input.answers ?? (await context.askUserQuestions?.(input.questions)) ?? {}
+    const hostResult =
+      input.answers
+        ? { answers: input.answers, annotations: input.annotations }
+        : (await context.askUserQuestions?.(input.questions, {
+            permissionMode: context.permissionMode,
+          })) ?? {}
+
+    const rawAnswers = isStructuredHostResult(hostResult)
+      ? hostResult.answers
+      : hostResult
     const answers = normalizeAnswers(input.questions, rawAnswers)
+    const annotations = normalizeAnnotations(
+      input.questions,
+      isStructuredHostResult(hostResult)
+        ? hostResult.annotations ?? input.annotations
+        : input.annotations,
+    )
+    const action =
+      isStructuredHostResult(hostResult)
+        ? hostResult.action ?? 'submit_answers'
+        : 'submit_answers'
+    const message = buildActionMessage(action, input.questions, answers)
 
     return {
       ok: true,
       output: {
         questions: input.questions,
         answers,
-        ...(input.annotations ? { annotations: input.annotations } : {}),
+        ...(annotations ? { annotations } : {}),
+        ...(action ? { action } : {}),
+        ...(message ? { message } : {}),
       },
-      summary: `Collected ${Object.keys(answers).length} answer(s)`,
+      summary:
+        action === 'respond_to_agent'
+          ? 'User wants to discuss the questions before answering.'
+          : action === 'finish_plan_interview'
+            ? 'User wants to stop the plan interview and finish the plan.'
+            : `Collected ${Object.keys(answers).length} answer(s)`,
     }
   },
 })

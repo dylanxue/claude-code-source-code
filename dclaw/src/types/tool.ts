@@ -20,6 +20,27 @@ export type AskUserQuestionOption = {
   preview?: string
 }
 
+export type AskUserQuestionAnnotation = {
+  preview?: string
+  notes?: string
+}
+
+export type AskUserQuestionAnnotations = Record<
+  string,
+  AskUserQuestionAnnotation
+>
+
+export type AskUserQuestionHostAction =
+  | 'submit_answers'
+  | 'respond_to_agent'
+  | 'finish_plan_interview'
+
+export type AskUserQuestionHostResult = {
+  answers: Record<string, string>
+  annotations?: AskUserQuestionAnnotations
+  action?: AskUserQuestionHostAction
+}
+
 export type AskUserQuestion = {
   id?: string
   question: string
@@ -47,5 +68,8 @@ export type ToolContext = {
   setPlanFilePath?: (planFilePath: string | undefined) => void
   askUserQuestions?: (
     questions: AskUserQuestion[],
-  ) => Promise<Record<string, string>>
+    options?: {
+      permissionMode?: PermissionMode
+    },
+  ) => Promise<Record<string, string> | AskUserQuestionHostResult>
 }

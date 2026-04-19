@@ -202,6 +202,70 @@ test('AskUserQuestion uses host answers when available', async () => {
   assert.deepEqual(result.output.answers, { choice: 'A' })
 })
 
+test('AskUserQuestion maps preview exit actions into Claude Code style feedback', async () => {
+  const result = await askUserQuestionTool.call(
+    {
+      questions: [
+        {
+          id: 'plan_choice',
+          header: 'Plan',
+          question: 'Which plan should we follow?',
+          options: [
+            {
+              label: 'Option A',
+              description: 'Keep the current approach.',
+              preview: '# Plan A\n\n- Keep interview flow\n- Add notes',
+            },
+            {
+              label: 'Option B',
+              description: 'Refactor the interaction model.',
+            },
+          ],
+        },
+      ],
+    },
+    createToolContext({
+      permissionMode: 'plan',
+      askUserQuestions: async () => ({
+        answers: { plan_choice: 'Option A' },
+        annotations: {
+          plan_choice: {
+            preview: '# Plan A\n\n- Keep interview flow\n- Add notes',
+            notes: 'This is enough context for now.',
+          },
+        },
+        action: 'finish_plan_interview',
+      }),
+    }),
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(result.output.action, 'finish_plan_interview')
+  assert.match(
+    result.output.message ?? '',
+    /Stop asking clarifying questions and proceed to finish the plan/,
+  )
+  assert.deepEqual(result.output.annotations, {
+    plan_choice: {
+      preview: '# Plan A\n\n- Keep interview flow\n- Add notes',
+      notes: 'This is enough context for now.',
+    },
+  })
+
+  const mapped = askUserQuestionTool.mapToolResult(result)
+  assert.deepEqual(mapped, {
+    action: 'finish_plan_interview',
+    message: result.output.message,
+    answers: { plan_choice: 'Option A' },
+    annotations: {
+      plan_choice: {
+        preview: '# Plan A\n\n- Keep interview flow\n- Add notes',
+        notes: 'This is enough context for now.',
+      },
+    },
+  })
+})
+
 test('AskUserQuestion normalizes prefilled answers to question ids', async () => {
   const result = await askUserQuestionTool.call(
     {
