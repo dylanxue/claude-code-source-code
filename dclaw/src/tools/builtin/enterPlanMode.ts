@@ -1,11 +1,9 @@
-import { randomUUID } from 'node:crypto'
 import {
   ensureTaskBoardPlanFile,
   getOrCreateTaskBoardForSession,
   updateTaskBoard,
 } from '../../tasks/store.js'
 import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
-import type { PlanModeRequest } from '../../tasks/types.js'
 import type { PermissionMode, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './enterPlanModePrompt.js'
@@ -15,21 +13,10 @@ export type EnterPlanModeInput = {
 }
 
 export type EnterPlanModeOutput = {
-  status: 'approved' | 'rejected' | 'already_active'
+  status: 'approved' | 'already_active'
   boardId: string
   planFilePath?: string
   resumedPermissionMode?: PermissionMode
-}
-
-function createRequest(note?: string): PlanModeRequest {
-  return {
-    requestId: `plan_enter_${randomUUID()}`,
-    requestedBy: 'model',
-    createdAt: new Date().toISOString(),
-    ...(typeof note === 'string' && note.trim().length > 0
-      ? { note: note.trim() }
-      : {}),
-  }
 }
 
 export const enterPlanModeTool: Tool<
@@ -57,7 +44,7 @@ export const enterPlanModeTool: Tool<
     properties: {
       status: {
         type: 'string',
-        enum: ['approved', 'rejected', 'already_active'],
+        enum: ['approved', 'already_active'],
       },
       boardId: {
         type: 'string',
@@ -77,7 +64,7 @@ export const enterPlanModeTool: Tool<
     return true
   },
   isEnabled(context) {
-    return Boolean(context.askUserQuestions)
+    return Boolean(context.sessionId)
   },
   validate(_input, context) {
     if (!context.sessionId) {
@@ -87,18 +74,11 @@ export const enterPlanModeTool: Tool<
       }
     }
 
-    if (!context.askUserQuestions) {
-      return {
-        ok: false,
-        error: 'EnterPlanMode requires interactive user approval support',
-      }
-    }
-
     return { ok: true }
   },
   async call(input, context): Promise<ToolResult<EnterPlanModeOutput>> {
-    if (!context.sessionId || !context.askUserQuestions) {
-      throw new Error('EnterPlanMode requires an interactive session context')
+    if (!context.sessionId) {
+      throw new Error('EnterPlanMode requires an active session context')
     }
 
     const board = await ensureTaskBoardPlanFile(
@@ -119,63 +99,6 @@ export const enterPlanModeTool: Tool<
             : {}),
         },
         summary: `Plan mode is already active. Continue planning in ${board.planFilePath ?? 'the bound plan file'}.`,
-      }
-    }
-
-    const request = createRequest(input.note)
-    await updateTaskBoard(board.boardId, current => ({
-      ...current,
-      mode: 'enter_requested',
-      enterRequest: request,
-      latestSessionId: context.sessionId!,
-      planFilePath: board.planFilePath,
-      updatedAt: request.createdAt,
-    }))
-
-    const answers = await context.askUserQuestions([
-      {
-        id: 'decision',
-        header: 'Plan Mode',
-        question:
-          typeof input.note === 'string' && input.note.trim().length > 0
-            ? `The model wants to enter plan mode: ${input.note.trim()}`
-            : 'The model wants to enter plan mode before implementation.',
-        options: [
-          {
-            label: 'Approve',
-            description: 'Enter plan mode and keep implementation blocked.',
-            preview: board.planFilePath,
-          },
-          {
-            label: 'Reject',
-            description: 'Stay in the current execution mode.',
-          },
-        ],
-      },
-    ])
-
-    const approved = answers.decision === 'Approve'
-    if (!approved) {
-      const reverted =
-        (await updateTaskBoard(board.boardId, current => ({
-          ...current,
-          mode: 'inactive',
-          enterRequest: undefined,
-          latestSessionId: context.sessionId!,
-          updatedAt: new Date().toISOString(),
-        }))) ?? board
-
-      return {
-        ok: true,
-        output: {
-          status: 'rejected',
-          boardId: reverted.boardId,
-          ...(reverted.planFilePath ? { planFilePath: reverted.planFilePath } : {}),
-          ...(reverted.resumePermissionMode
-            ? { resumedPermissionMode: reverted.resumePermissionMode }
-            : {}),
-        },
-        summary: 'Plan mode entry request was rejected by the user.',
       }
     }
 
@@ -212,7 +135,7 @@ export const enterPlanModeTool: Tool<
         ...(updated.planFilePath ? { planFilePath: updated.planFilePath } : {}),
         resumedPermissionMode,
       },
-      summary: `Plan mode entered with approval. Use ${updated.planFilePath ?? 'the plan file'} as the source of truth and continue planning instead of implementation.`,
+      summary: `Plan mode entered. Use ${updated.planFilePath ?? 'the plan file'} as the source of truth and continue planning instead of implementation.`,
     }
   },
 })

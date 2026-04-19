@@ -1,7 +1,7 @@
 export const DESCRIPTION =
-  'Request to enter plan mode proactively for non-trivial implementation work when user sign-off on the approach before coding would improve alignment.'
+  'Enter plan mode proactively for non-trivial implementation work so you can explore the codebase and design an approach before coding.'
 
-export const PROMPT = `Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. This tool enters plan mode so you can explore the codebase and design an implementation approach for user approval.
+export const PROMPT = `Use this tool proactively when you're about to start a non-trivial implementation task. This tool enters plan mode so you can explore the codebase and design an implementation approach before coding.
 
 ## When to Use This Tool
 
@@ -56,8 +56,8 @@ In plan mode, you should:
 1. Explore the codebase with read-only tools
 2. Understand existing patterns and architecture
 3. Design an implementation approach
-4. Present your plan to the user for approval
-5. Exit plan mode with ExitPlanMode when ready to implement
+4. Write and refine the plan in the plan file
+5. Exit plan mode with ExitPlanMode when ready to request approval
 
 ## Examples
 
@@ -86,7 +86,7 @@ User: "What files handle routing?"
 
 ## Important Notes
 
-- This tool requires explicit user approval
 - If unsure whether to use it, err on the side of planning
+- EnterPlanMode starts planning immediately; ExitPlanMode is the approval request step
 - Use plan mode to reduce rework when approach alignment matters more than immediate execution
 `

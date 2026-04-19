@@ -58,8 +58,8 @@ export function describePlanModeToolUse(
 
   if (toolName === 'EnterPlanMode') {
     return note
-      ? `[plan mode] entry requested: ${note}`
-      : '[plan mode] entry requested'
+      ? `[plan mode] enter: ${note}`
+      : '[plan mode] enter'
   }
 
   if (toolName === 'ExitPlanMode') {
@@ -97,8 +97,8 @@ export function describePlanModeToolResult(
   if (toolName === 'EnterPlanMode') {
     if (status === 'approved') {
       return planFilePath
-        ? `[plan mode] entered with approval: ${planFilePath}`
-        : '[plan mode] entered with approval'
+        ? `[plan mode] entered: ${planFilePath}`
+        : '[plan mode] entered'
     }
     if (status === 'rejected') {
       return '[plan mode] entry rejected'

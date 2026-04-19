@@ -50,6 +50,25 @@
 
 - [ ] 验证标准：不同 query 能召回不同 memory，且注入规模受控
 
+- [x] `P0 / bugfix`：收口 `plan mode` 审批重复请求问题，继续向 Claude Code 当前源码靠拢
+
+- [x] 先按 Claude Code 当前主路径重新校正 `EnterPlanMode / ExitPlanMode` 语义：
+  - `EnterPlanMode` 不再要求用户批准进入；进入 planning 本身不是 approval step
+  - `ExitPlanMode` 才是计划审批点；用户拒绝时应继续留在 `plan mode`
+
+- [x] 修正 `ExitPlanMode` 被拒绝后的模型反馈语义：
+  - 不再只返回弱语义的 `status: rejected`
+  - 当前已对齐到 Claude Code 的 plan rejection 基础语义，把“计划被拒绝、继续留在 plan mode、附带被拒绝 plan 正文”明确传回模型
+
+- [ ] 不额外引入本地 cooldown / plan hash 去重 / “必须先改文件才能再次批准” 之类策略
+  - 在没有 Claude Code 对应实现证据前，不自行加这类 heuristic
+  - 当前已先落地源码对齐路径；若仍有重复请求，再继续回到 Claude Code 源码找证据，不先补本地规则
+
+- [ ] 验证标准：
+  - 用户拒绝 plan 后，模型不会在未获得新反馈或未先继续 planning 的情况下，立刻原样再次请求批准
+  - `EnterPlanMode` 不再出现额外批准弹窗
+  - 相关文档口径需同步从“进入 plan mode 需要用户确认”收敛到 Claude Code 当前源码语义
+
 - [ ] `P1 / 阶段 10-3`：明确 memory 写回策略与边界，避免与 `CLAUDE.md` / transcript / todo 混淆
 
 - [ ] 明确首版 memory 写入触发点：
@@ -333,7 +352,7 @@
   - 已完成阶段 9 主线调整：移除 `TodoWrite` 与 `/todo`，对外主线统一收敛到 `Task*` 与 plan file
   - 已移除 `/todo` 相关命令与 `TodoWrite` tool，避免继续保留偏离 Claude Code 当前主路径的 checklist 入口
   - 已接入模型侧 `EnterPlanMode / ExitPlanMode`
-  - 模型发起进入或退出时，真正切换当前 session 到 `plan mode` 仍需用户确认
+  - 当前已按 Claude Code 当前源码收口：`EnterPlanMode` 直接进入 planning，`ExitPlanMode` 仍是唯一 plan approval step
   - 用户显式输入 `/plan` 可直接进入 plan mode
   - 已为常规 interactive turn 接入 `plan_mode / plan_mode_exit / plan_mode_reentry` reminder
   - 已为 post-compact 第一轮补齐强制 full `plan_mode` reminder

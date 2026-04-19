@@ -167,7 +167,7 @@
 - 建立共享 `contextStats` 与 Claude Code 风格的 compact threshold / percent-left recommendation
 - 将 compact dry-run recommendation 接到 REPL `/session / info / doctor`、verbose 与 query trace
 - 将最小 autocompact 接到 `QueryEngine` 提交链路，并补上 same-session boundary 追加、trace 记录与失败回退
-- 明确阶段 9 的产品规则：`plan mode` 由模型可建议/发起、用户确认切换，并在切换后改变 LLM 的工作节奏而不只是限制工具
+- 明确阶段 9 的产品规则：`plan mode` 由模型可建议/发起，`EnterPlanMode` 负责直接进入 planning，`ExitPlanMode` 负责请求计划批准，并在切换后改变 LLM 的工作节奏而不只是限制工具
 - 为阶段 9 建立最小 `task board` 内核，并通过 session meta 挂接 `taskBoardId`
 - 为阶段 9 接通首批 REPL 入口：`/plan`、`/plan start`、`/plan exit`
 - 重新评估 Claude Code 源码后，明确阶段 9 主线应对齐 `plan mode + plan file + Task*`
@@ -184,6 +184,13 @@
 - 当前已确认 Claude Code 源码里有两层不同能力：V1 `TodoWrite` 与 V2 `TaskCreate / TaskList / TaskGet / TaskUpdate`；`dclaw` 已明确收敛到 V2 主路径，不再保留 V1 对外能力
 - 当前已具备 Claude Code 阶段 9 的最小 plan file 主线：进入 planning 后会创建/绑定 plan file，plan file 已作为当前 planning 真值，并接入 prompt runtime context、compact 后首轮恢复，以及 `resume / history / transcript / /session` 的观察面；其中阶段 9-2 的退出审批正文展示与阶段 9-3 的 plan 真值恢复路径 / planning 生命周期规则都已补齐
 - 当前 `dclaw` 已不再保留 `/todo` 与 `TodoWrite`；`TaskBoard` 也已去除内部 `todos` 字段，主路径统一收敛到 `plan file + Task*`
+- 当前已修复一个阶段 9 的关键对齐缺口：
+  - `EnterPlanMode` 已不再要求用户批准进入，而是直接切换到 planning
+  - `ExitPlanMode` 仍是唯一的 plan approval step
+  - 用户拒绝 plan 时，模型现在会收到更接近 Claude Code 的 rejection 语义，而不只是弱语义 `status: rejected`
+- 当前这条 bugfix 仍保持严格边界：
+  - 没有额外引入本地 cooldown / plan hash 去重 / “必须先改 plan 才能再次批准” 之类 heuristic
+  - 若后续仍发现重复请求问题，应继续回到 Claude Code 源码找主线路径，而不是先补本地规则
 - 当前阶段 10 已完成 `10-1` 的 memory 文件系统骨架：
   - 已新增 `src/memory/paths.ts / frontmatter.ts / store.ts / manifest.ts / recall.ts`
   - 已按 `~/.dclaw/projects/<sanitized-workspace>/memory/` 风格落地路径、`MEMORY.md` 入口、独立 memory markdown 文件，以及最小 frontmatter/manifest

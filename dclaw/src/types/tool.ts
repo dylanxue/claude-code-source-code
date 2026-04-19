@@ -70,6 +70,7 @@ export type ToolContext = {
     questions: AskUserQuestion[],
     options?: {
       permissionMode?: PermissionMode
+      allowPreviewActions?: boolean
     },
   ) => Promise<Record<string, string> | AskUserQuestionHostResult>
 }

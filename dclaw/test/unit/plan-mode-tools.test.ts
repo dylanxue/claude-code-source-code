@@ -15,7 +15,7 @@ import { enterPlanModeTool } from '../../src/tools/builtin/enterPlanMode.js'
 import { exitPlanModeTool } from '../../src/tools/builtin/exitPlanMode.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
-test('EnterPlanMode requests approval and activates planning state', async () => {
+test('EnterPlanMode activates planning state without asking for approval', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-enter-plan-tool-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -31,11 +31,15 @@ test('EnterPlanMode requests approval and activates planning state', async () =>
       env,
     })
 
+    let askUserQuestionsCalled = false
     const context = createToolContext({
       cwd: '/tmp/project',
       sessionId: session.sessionId,
       permissionMode: 'accept-edits',
-      askUserQuestions: async () => ({ decision: 'Approve' }),
+      askUserQuestions: async () => {
+        askUserQuestionsCalled = true
+        return { decision: 'Approve' }
+      },
     })
 
     const result = await enterPlanModeTool.call(
@@ -46,6 +50,7 @@ test('EnterPlanMode requests approval and activates planning state', async () =>
     )
 
     assert.equal(result.output.status, 'approved')
+    assert.equal(askUserQuestionsCalled, false)
     assert.equal(context.permissionMode, 'plan')
     assert.ok(context.planFilePath)
     assert.equal(existsSync(context.planFilePath), true)
@@ -57,8 +62,78 @@ test('EnterPlanMode requests approval and activates planning state', async () =>
     assert.equal(board.planFilePath, context.planFilePath)
     assert.match(
       result.summary ?? '',
-      /Plan mode entered with approval/,
+      /Plan mode entered\./,
     )
+  } finally {
+    process.env = originalEnv
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('ExitPlanMode returns Claude Code style rejection feedback when the user keeps planning', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-exit-plan-reject-tool-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+
+  try {
+    process.env = env
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-exit-plan-reject',
+      env,
+    })
+    const board = await ensureTaskBoardPlanFile(
+      await getOrCreateTaskBoardForSession(session.sessionId, '/tmp/project', env),
+      env,
+    )
+    await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        mode: 'active',
+        resumePermissionMode: 'accept-edits',
+        updatedAt: new Date().toISOString(),
+      }),
+      env,
+    )
+    await writeFile(
+      board.planFilePath!,
+      ['# Implementation Plan', '', '- Update the approval flow'].join('\n'),
+      'utf8',
+    )
+
+    const context = createToolContext({
+      cwd: '/tmp/project',
+      sessionId: session.sessionId,
+      permissionMode: 'plan',
+      planFilePath: board.planFilePath,
+      askUserQuestions: async () => ({ decision: 'Keep Planning' }),
+    })
+
+    const result = await exitPlanModeTool.call(
+      {
+        note: 'The plan file is ready for implementation.',
+      },
+      context,
+    )
+
+    assert.equal(result.output.status, 'rejected')
+    assert.equal(context.permissionMode, 'plan')
+    assert.equal(context.planFilePath, board.planFilePath)
+    assert.match(
+      result.output.message ?? '',
+      /The agent proposed a plan that was rejected by the user\./,
+    )
+    assert.match(result.output.message ?? '', /Rejected plan:/)
+    assert.match(result.output.message ?? '', /- Update the approval flow/)
+    assert.equal(result.output.plan, '# Implementation Plan\n\n- Update the approval flow')
+
+    const updatedBoard = await loadTaskBoardForSession(session.sessionId, env)
+    assert.ok(updatedBoard)
+    assert.equal(updatedBoard.mode, 'active')
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })
@@ -113,7 +188,8 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
       sessionId: session.sessionId,
       permissionMode: 'plan',
       planFilePath: board.planFilePath,
-      askUserQuestions: async questions => {
+      askUserQuestions: async (questions, options) => {
+        assert.equal(options?.allowPreviewActions, undefined)
         capturedPreview = questions[0]?.options[0]?.preview
         return { decision: 'Approve' }
       },

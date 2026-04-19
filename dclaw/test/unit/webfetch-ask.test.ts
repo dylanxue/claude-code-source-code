@@ -203,6 +203,7 @@ test('AskUserQuestion uses host answers when available', async () => {
 })
 
 test('AskUserQuestion maps preview exit actions into Claude Code style feedback', async () => {
+  let receivedAllowPreviewActions: boolean | undefined
   const result = await askUserQuestionTool.call(
     {
       questions: [
@@ -226,7 +227,9 @@ test('AskUserQuestion maps preview exit actions into Claude Code style feedback'
     },
     createToolContext({
       permissionMode: 'plan',
-      askUserQuestions: async () => ({
+      askUserQuestions: async (_questions, options) => {
+        receivedAllowPreviewActions = options?.allowPreviewActions
+        return {
         answers: { plan_choice: 'Option A' },
         annotations: {
           plan_choice: {
@@ -235,11 +238,13 @@ test('AskUserQuestion maps preview exit actions into Claude Code style feedback'
           },
         },
         action: 'finish_plan_interview',
-      }),
+        }
+      },
     }),
   )
 
   assert.equal(result.ok, true)
+  assert.equal(receivedAllowPreviewActions, true)
   assert.equal(result.output.action, 'finish_plan_interview')
   assert.match(
     result.output.message ?? '',

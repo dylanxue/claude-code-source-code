@@ -23,7 +23,7 @@ test('formatTranscript surfaces plan-mode tool result summaries', () => {
         planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
       },
       summary:
-        'Plan mode entered with approval. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
+        'Plan mode entered. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
     },
   )
 
@@ -34,7 +34,7 @@ test('formatTranscript surfaces plan-mode tool result summaries', () => {
   assert.equal(lines.length, 1)
   assert.match(
     lines[0] ?? '',
-    /Plan mode entered with approval\./,
+    /Plan mode entered\./,
   )
 })
 
@@ -67,7 +67,7 @@ test('formatTranscript renders plan-mode tool use and result summaries clearly',
             planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
           },
           summary:
-            'Plan mode entered with approval. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
+            'Plan mode entered. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
         },
       ),
     ],
@@ -76,6 +76,6 @@ test('formatTranscript renders plan-mode tool use and result summaries clearly',
     },
   )
 
-  assert.ok(lines.some(line => /\[plan mode\] entry requested:/.test(line)))
-  assert.ok(lines.some(line => /\[plan mode\] entered with approval:/.test(line)))
+  assert.ok(lines.some(line => /\[plan mode\] enter:/.test(line)))
+  assert.ok(lines.some(line => /\[plan mode\] entered:/.test(line)))
 })

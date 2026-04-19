@@ -1,4 +1,8 @@
-import type { ToolContext, ToolValidationResult } from '../types/tool.js'
+import type {
+  AskUserQuestionHostResult,
+  ToolContext,
+  ToolValidationResult,
+} from '../types/tool.js'
 import type { Tool } from '../tools/types.js'
 import { getBashManualApprovalReason } from '../tools/builtin/bash.js'
 import { resolve } from 'node:path'
@@ -43,7 +47,7 @@ async function maybeAskForPermission(
     ? `${reason} Allow dclaw to ${describeToolAction(toolName, input)}?`
     : `Allow dclaw to ${describeToolAction(toolName, input)}?`
 
-  const answers = await context.askUserQuestions([
+  const rawAnswers = await context.askUserQuestions([
     {
       header: 'Permission',
       question,
@@ -59,6 +63,14 @@ async function maybeAskForPermission(
       ],
     },
   ])
+  const answers =
+    rawAnswers &&
+    typeof rawAnswers === 'object' &&
+    'answers' in rawAnswers &&
+    typeof rawAnswers.answers === 'object' &&
+    rawAnswers.answers !== null
+      ? (rawAnswers as AskUserQuestionHostResult).answers
+      : rawAnswers
 
   return Object.values(answers)[0] === 'Allow'
 }

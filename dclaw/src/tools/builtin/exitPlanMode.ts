@@ -7,7 +7,11 @@ import {
 } from '../../tasks/store.js'
 import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import type { PlanModeRequest } from '../../tasks/types.js'
-import type { PermissionMode, ToolResult } from '../../types/tool.js'
+import type {
+  AskUserQuestionHostResult,
+  PermissionMode,
+  ToolResult,
+} from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './exitPlanModePrompt.js'
 
@@ -21,6 +25,8 @@ export type ExitPlanModeOutput = {
   planFilePath?: string
   resumedPermissionMode?: PermissionMode
   planPreview?: string
+  plan?: string
+  message?: string
 }
 
 function createRequest(note?: string): PlanModeRequest {
@@ -43,6 +49,23 @@ function extractPlanPreview(content: string | null): string | undefined {
     .split('\n')
     .map(line => line.trim())
     .find(line => line.length > 0 && !line.startsWith('#'))
+}
+
+function extractAnswers(
+  value: Record<string, string> | AskUserQuestionHostResult,
+): Record<string, string> {
+  return 'answers' in value ? value.answers : value
+}
+
+function buildPlanRejectionMessage(planContent: string | null): string {
+  const prefix =
+    'The agent proposed a plan that was rejected by the user. The user chose to stay in plan mode rather than proceed with implementation.'
+
+  if (!planContent || planContent.trim().length === 0) {
+    return prefix
+  }
+
+  return `${prefix}\n\nRejected plan:\n${planContent}`
 }
 
 export const exitPlanModeTool: Tool<
@@ -85,6 +108,12 @@ export const exitPlanModeTool: Tool<
       planPreview: {
         type: 'string',
       },
+      plan: {
+        type: 'string',
+      },
+      message: {
+        type: 'string',
+      },
     },
     required: ['status', 'boardId'],
     additionalProperties: false,
@@ -94,6 +123,20 @@ export const exitPlanModeTool: Tool<
   },
   isEnabled(context) {
     return Boolean(context.askUserQuestions)
+  },
+  mapToolResult(result) {
+    const output = result.output
+
+    if (output.status === 'rejected' && output.message) {
+      return {
+        status: output.status,
+        message: output.message,
+        ...(output.plan ? { plan: output.plan } : {}),
+        ...(output.planFilePath ? { planFilePath: output.planFilePath } : {}),
+      }
+    }
+
+    return output
   },
   validate(_input, context) {
     if (!context.sessionId) {
@@ -153,7 +196,7 @@ export const exitPlanModeTool: Tool<
       updatedAt: request.createdAt,
     }))
 
-    const answers = await context.askUserQuestions([
+    const rawAnswers = await context.askUserQuestions([
       {
         id: 'decision',
         header: 'Plan Ready',
@@ -174,6 +217,7 @@ export const exitPlanModeTool: Tool<
         ],
       },
     ])
+    const answers = extractAnswers(rawAnswers)
 
     if (answers.decision !== 'Approve') {
       const restored =
@@ -198,6 +242,8 @@ export const exitPlanModeTool: Tool<
             ? { resumedPermissionMode: restored.resumePermissionMode }
             : {}),
           ...(planPreview ? { planPreview } : {}),
+          ...(planContent ? { plan: planContent } : {}),
+          message: buildPlanRejectionMessage(planContent),
         },
         summary: 'Plan mode exit request was rejected. Continue planning.',
       }
@@ -234,6 +280,7 @@ export const exitPlanModeTool: Tool<
         ...(updated.planFilePath ? { planFilePath: updated.planFilePath } : {}),
         resumedPermissionMode,
         ...(planPreview ? { planPreview } : {}),
+        ...(planContent ? { plan: planContent } : {}),
       },
       summary: `Plan mode exited with approval. Resume implementation in ${resumedPermissionMode} mode.`,
     }

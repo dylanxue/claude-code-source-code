@@ -63,12 +63,6 @@ test('askUserQuestionsInteractively prints option previews inline', async () => 
   const unregister = registerInteractiveQuestionHost({
     async question(prompt: string) {
       prompts.push(prompt)
-      if (prompt === '选择一个编号: ') {
-        return '1'
-      }
-      if (prompt === '可选备注，直接回车跳过: ') {
-        return ''
-      }
       return '1'
     },
   })
@@ -102,23 +96,15 @@ test('askUserQuestionsInteractively prints option previews inline', async () => 
       },
     ])
 
-    assert.deepEqual(result, {
-      answers: { decision: 'Approve' },
-      annotations: {
-        decision: {
-          preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
-        },
-      },
-      action: 'submit_answers',
-    })
+    assert.deepEqual(result, { decision: 'Approve' })
     const text = output.join('')
     assert.match(text, /\[Plan Ready\] Exit plan mode\?/)
     assert.match(text, /1\. Approve - Leave plan mode and implement the approved plan\./)
     assert.doesNotMatch(text, /3\. Other - Provide a custom answer in your own words\./)
-    assert.match(text, /2\. Chat about this - 回到对话继续说明/)
+    assert.doesNotMatch(text, /Chat about this/)
     assert.match(text, /# Plan/)
     assert.match(text, /- Update approval UI/)
-    assert.deepEqual(prompts, ['选择一个编号: ', '可选备注，直接回车跳过: ', '选择一个编号 (1-2): '])
+    assert.deepEqual(prompts, ['选择一个编号: '])
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
     unregister()
@@ -159,7 +145,10 @@ test('askUserQuestionsInteractively can return the preview question chat exit', 
           ],
         },
       ],
-      { permissionMode: 'plan' },
+      {
+        permissionMode: 'plan',
+        allowPreviewActions: true,
+      },
     )
 
     assert.deepEqual(result, {
@@ -171,6 +160,66 @@ test('askUserQuestionsInteractively can return the preview question chat exit', 
         },
       },
       action: 'respond_to_agent',
+    })
+    assert.deepEqual(prompts, [
+      '选择一个编号: ',
+      '可选备注，直接回车跳过: ',
+      '选择一个编号 (1-3): ',
+    ])
+  } finally {
+    unregister()
+    restoreStdin()
+    restoreStdout()
+  }
+})
+
+test('askUserQuestionsInteractively only enables preview exits when requested', async () => {
+  const restoreStdin = setTtyFlag(process.stdin, true)
+  const restoreStdout = setTtyFlag(process.stdout, true)
+  const prompts: string[] = []
+  const replies = ['1', 'Keep the current structure', '3']
+  const unregister = registerInteractiveQuestionHost({
+    async question(prompt: string) {
+      prompts.push(prompt)
+      return replies.shift() ?? ''
+    },
+  })
+
+  try {
+    const result = await askUserQuestionsInteractively(
+      [
+        {
+          id: 'decision',
+          header: 'Plan Ready',
+          question: 'Exit plan mode?',
+          options: [
+            {
+              label: 'Approve',
+              description: 'Leave plan mode and implement the approved plan.',
+              preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+            },
+            {
+              label: 'Keep Planning',
+              description: 'Stay in plan mode and keep refining the plan.',
+            },
+          ],
+        },
+      ],
+      {
+        permissionMode: 'plan',
+        allowPreviewActions: true,
+      },
+    )
+
+    assert.deepEqual(result, {
+      answers: { decision: 'Approve' },
+      annotations: {
+        decision: {
+          preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+          notes: 'Keep the current structure',
+        },
+      },
+      action: 'finish_plan_interview',
     })
     assert.deepEqual(prompts, [
       '选择一个编号: ',

@@ -196,6 +196,7 @@ export async function askUserQuestionsInteractively(
   questions: AskUserQuestion[],
   options: {
     permissionMode?: PermissionMode
+    allowPreviewActions?: boolean
   } = {},
 ): Promise<Record<string, string> | AskUserQuestionHostResult> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -266,7 +267,7 @@ export async function askUserQuestionsInteractively(
       const answer = answerParts.join(', ')
       answers[getQuestionAnswerKey(question)] = answer
 
-      if (!isPreviewQuestion(question)) {
+      if (!isPreviewQuestion(question) || options.allowPreviewActions !== true) {
         continue
       }
 

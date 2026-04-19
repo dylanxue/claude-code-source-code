@@ -390,6 +390,7 @@ export const askUserQuestionTool: Tool<
         ? { answers: input.answers, annotations: input.annotations }
         : (await context.askUserQuestions?.(input.questions, {
             permissionMode: context.permissionMode,
+            allowPreviewActions: true,
           })) ?? {}
 
     const rawAnswers = isStructuredHostResult(hostResult)
