@@ -1,4 +1,5 @@
 import { readdir } from 'node:fs/promises'
+import { formatToolUseLine } from '../cli/verboseEvents.js'
 import {
   getCompactBoundaryMessages,
   getLastCompactBoundary,
@@ -53,16 +54,19 @@ function summarizeMessage(message: Message): string | undefined {
       if (planModeSummary) {
         return planModeSummary
       }
-      return `[tool use] ${block.name}`
+      return formatToolUseLine({
+        name: block.name,
+        input: block.input,
+      })
     }
     if (block.type === 'reasoning' && block.summary.length > 0) {
-      return `[reasoning] ${truncate(block.summary.join(' '))}`
+      return truncate(block.summary.join(' '))
     }
     if (block.type === 'thinking') {
-      return '[thinking]'
+      return 'Thinking in progress'
     }
     if (block.type === 'redacted_thinking') {
-      return '[redacted thinking]'
+      return 'Thinking hidden'
     }
   }
 

@@ -80,7 +80,7 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
     assert.equal(sessions.length, 2)
     assert.equal(sessions[0]?.meta.sessionId, 'session-two')
     assert.equal(sessions[0]?.lastUserText, 'second')
-    assert.equal(sessions[0]?.lastAssistantText, '[tool use] Read')
+    assert.equal(sessions[0]?.lastAssistantText, 'Read /tmp/two.txt')
     assert.equal(sessions[0]?.lastBashSandboxMode, 'restricted')
     assert.equal(sessions[0]?.persistedToolResultCount, 1)
     assert.equal(
@@ -175,7 +175,7 @@ test('runHistory prints recent sessions', async () => {
   assert.match(text, /dclaw history/)
   assert.match(text, /session-history/)
   assert.match(text, /last user: Inspect the file/)
-  assert.match(text, /last assistant: \[reasoning\] Inspect before using Read\./)
+  assert.match(text, /last assistant: Inspect before using Read\./)
   assert.match(text, /last bash sandbox: danger-full-access/)
   assert.match(text, /persisted tool results: 1/)
   assert.match(

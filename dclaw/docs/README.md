@@ -45,6 +45,7 @@
 - [tool-spec.md](./tool-spec.md)
 - [plan-task-spec.md](./plan-task-spec.md)
 - [memory-spec.md](./memory-spec.md)
+- [multimodal-input-todo.md](./multimodal-input-todo.md)
 - [agent-spec.md](./agent-spec.md)
 - [skill-spec.md](./skill-spec.md)
 - [mcp-plugin-spec.md](./mcp-plugin-spec.md)

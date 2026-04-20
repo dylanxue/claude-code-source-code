@@ -1,5 +1,9 @@
 import type { Message } from '../types/message.js'
 import {
+  formatToolUseLine,
+  formatVerboseToolResultLine,
+} from '../cli/verboseEvents.js'
+import {
   formatCompactBoundaryLabel,
 } from '../compact/types.js'
 import { isCompactBoundaryMessage } from '../compact/boundaryMessage.js'
@@ -11,7 +15,6 @@ import {
 import { describePlanSnapshotText } from '../tasks/planSnapshots.js'
 import {
   isPersistedToolResultOutput,
-  type PersistedToolResultOutput,
 } from '../core/toolResultBudget.js'
 
 export type FormatTranscriptOptions = {
@@ -23,46 +26,6 @@ function truncate(value: string, maxLength: number = 240): string {
   return value.length <= maxLength
     ? value
     : `${value.slice(0, maxLength)}...`
-}
-
-function stringifyValue(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return '[unserializable]'
-  }
-}
-
-function summarizeToolResult(output: unknown): string {
-  if (typeof output === 'object' && output !== null) {
-    const candidate = output as {
-      summary?: unknown
-      error?: unknown
-      filepath?: unknown
-      output?: {
-        sandboxMode?: unknown
-      }
-    }
-    if (isPersistedToolResultOutput(output)) {
-      return `persisted large tool result -> ${output.filepath}`
-    }
-    const sandboxSuffix =
-      typeof candidate.output?.sandboxMode === 'string'
-        ? ` [sandbox: ${candidate.output.sandboxMode}]`
-        : ''
-    if (typeof candidate.error === 'string') {
-      return candidate.error + sandboxSuffix
-    }
-    if (typeof candidate.summary === 'string') {
-      return candidate.summary + sandboxSuffix
-    }
-  }
-
-  return truncate(stringifyValue(output))
 }
 
 type TranscriptFormatState = {
@@ -114,11 +77,11 @@ function formatMessage(
         lines.push(planModeSummary)
         continue
       }
-      const persistedSuffix = isPersistedToolResultOutput(block.output)
-        ? ` [model output persisted to ${(block.output as PersistedToolResultOutput).filepath}]`
-        : ''
+      const displayOutput = isPersistedToolResultOutput(block.output)
+        ? block.output
+        : block.rawOutput ?? block.output
       lines.push(
-        `tool result (${block.toolUseId}): ${summarizeToolResult(block.rawOutput ?? block.output)}${persistedSuffix}`,
+        formatVerboseToolResultLine(toolUse, displayOutput),
       )
     }
 
@@ -144,7 +107,7 @@ function formatMessage(
       switch (block.type) {
         case 'reasoning':
           lines.push(
-            `[reasoning] ${
+            `Reasoning: ${
               block.summary.length > 0
                 ? truncate(block.summary.join(' '))
                 : `status=${block.status ?? 'unknown'}`
@@ -153,13 +116,13 @@ function formatMessage(
           break
         case 'thinking':
           if (includeThinking) {
-            lines.push(`[thinking] ${truncate(block.thinking)}`)
+            lines.push(`Thinking: ${truncate(block.thinking)}`)
           }
           break
         case 'redacted_thinking':
           if (includeThinking) {
             lines.push(
-              `[redacted thinking] hidden (${block.data.length} chars)`,
+              `Thinking: [hidden (${block.data.length} chars)]`,
             )
           }
           break
@@ -174,7 +137,10 @@ function formatMessage(
             break
           }
           lines.push(
-            `[tool use] ${block.name} ${truncate(stringifyValue(block.input))}`,
+            formatToolUseLine({
+              name: block.name,
+              input: block.input,
+            }),
           )
           break
         case 'text':

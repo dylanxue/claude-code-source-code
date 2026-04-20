@@ -108,11 +108,11 @@ test('runResume prints restored transcript when no prompt is provided', async ()
   assert.match(text, /restored transcript:/)
   assert.match(text, /user: Inspect the file/)
   assert.match(text, /assistant: Need to inspect first\./)
-  assert.match(text, /\[reasoning\] Inspect before using Read\./)
-  assert.match(text, /\[tool use\] Read /)
+  assert.match(text, /Reasoning: Inspect before using Read\./)
+  assert.match(text, /Read \/tmp\/example\.txt/)
   assert.match(
     text,
-    /tool result \(tool_1\): Read \/tmp\/example\.txt \[model output persisted to \/tmp\/dclaw\/tool-results\/read\.txt\]/,
+    /Read \/tmp\/example\.txt \(saved to \/tmp\/dclaw\/tool-results\/read\.txt; preview\)/,
   )
   assert.match(
     text,

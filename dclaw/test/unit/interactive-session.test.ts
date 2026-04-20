@@ -131,11 +131,189 @@ test('runInteractiveSessionPrompt shows coarse progress in default mode', async 
   const text = output.join('')
   assert.equal(submitUserPromptCalled, false)
   assert.equal(submitUserPromptWithHandlersCalled, true)
-  assert.match(text, /\[thinking\] Working on it\.\.\./)
-  assert.match(text, /\[thinking\] Inspect the file before editing it\./)
-  assert.match(text, /\[tool\] Read/)
-  assert.match(text, /\[tool\] Read \/tmp\/example\.txt/)
-  assert.match(text, /\[thinking\] Working on it\.\.\./)
+  assert.doesNotMatch(text, /Inspect the file before editing it\./)
+  assert.match(
+    text,
+    /Read \/tmp\/example\.txt \(example\)/,
+  )
+  assert.match(text, /Final answer\n$/)
+})
+
+test('runInteractiveSessionPrompt falls back to generic thinking only when no concrete progress appears quickly', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-generic-'))
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    model: 'stub-model',
+    env,
+  })
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  const engine = {
+    messages: [] as ReturnType<typeof createTextMessage>[],
+    async submitUserPrompt() {
+      throw new Error('submitUserPrompt should not be used in default mode')
+    },
+    async submitUserPromptWithHandlers(
+      _prompt: string,
+      handlers?: {
+        onToolResult?: (toolResult: {
+          iteration: number
+          toolUseId: string
+          output: unknown
+        }) => void
+      },
+    ) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      handlers?.onToolResult?.({
+        iteration: 1,
+        toolUseId: 'tool_read_1',
+        output: {
+          ok: true,
+          summary: 'Read /tmp/example.txt',
+          output: { content: 'example' },
+        },
+      })
+
+      return {
+        appendedMessages: [
+          createTextMessage('user', 'inspect the file'),
+          createTextMessage('assistant', 'Final answer'),
+        ],
+        outputText: 'Final answer',
+      }
+    },
+    getSessionId() {
+      return session.sessionId
+    },
+    getMessages() {
+      return this.messages
+    },
+  }
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    await runInteractiveSessionPrompt({
+      engine: engine as never,
+      sessionId: session.sessionId,
+      prompt: 'inspect the file',
+      stream: false,
+      verbose: false,
+      env,
+    })
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /Working on it\.\.\./)
+  assert.match(text, /Read \/tmp\/example\.txt \(example\)/)
+})
+
+test('runInteractiveSessionPrompt shows reasoning progress when no tool result arrives', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-reasoning-'))
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    model: 'stub-model',
+    env,
+  })
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  const engine = {
+    messages: [] as ReturnType<typeof createTextMessage>[],
+    async submitUserPrompt() {
+      throw new Error('submitUserPrompt should not be used in default mode')
+    },
+    async submitUserPromptWithHandlers(
+      _prompt: string,
+      handlers?: {
+        onAssistantMessage?: (message: {
+          iteration: number
+          id: string
+          role: 'assistant'
+          content: Array<
+            | {
+                type: 'reasoning'
+                summary: string[]
+                status?: string
+              }
+            | {
+                type: 'text'
+                text: string
+              }
+          >
+        }) => void
+      },
+    ) {
+      handlers?.onAssistantMessage?.({
+        iteration: 1,
+        id: 'msg_reasoning',
+        role: 'assistant',
+        content: [
+          {
+            type: 'reasoning',
+            summary: ['Inspecting the current implementation before answering.'],
+            status: 'completed',
+          },
+        ],
+      })
+
+      return {
+        appendedMessages: [
+          createTextMessage('user', 'inspect the file'),
+          createTextMessage('assistant', 'Final answer'),
+        ],
+        outputText: 'Final answer',
+      }
+    },
+    getSessionId() {
+      return session.sessionId
+    },
+    getMessages() {
+      return this.messages
+    },
+  }
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    await runInteractiveSessionPrompt({
+      engine: engine as never,
+      sessionId: session.sessionId,
+      prompt: 'inspect the file',
+      stream: false,
+      verbose: false,
+      env,
+    })
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(
+    text,
+    /Inspecting the current implementation before answering\./,
+  )
   assert.match(text, /Final answer\n$/)
 })
 

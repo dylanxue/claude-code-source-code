@@ -7,8 +7,8 @@ import {
   formatProgressReasoningLines,
   formatProgressThinkingLine,
   formatProgressToolResultLine,
-  formatProgressToolUseLine,
   formatToolUseLine,
+  formatVerboseToolResultLine,
   formatVerboseLines,
   formatVerboseMessageLines,
   formatReasoningDeltaPrefix,
@@ -57,7 +57,11 @@ export async function runInteractiveSessionPrompt(
     let outputEndsWithNewline = true
     let activeReasoningKind: 'reasoning' | 'thinking' | null = null
     const streamedReasoningIterations = new Set<number>()
-    const activeToolUses = new Map<string, string>()
+    const activeToolUses = new Map<
+      string,
+      { name: string; input: Record<string, unknown> }
+    >()
+    let pendingReasoningLines: string[] = []
     const writeEventTextLines = (lines: string[]): void => {
       if (lines.length === 0) {
         return
@@ -74,8 +78,70 @@ export async function runInteractiveSessionPrompt(
       process.stdout.write(lines.join('\n') + '\n')
       outputEndsWithNewline = true
     }
+    let genericThinkingTimer: ReturnType<typeof setTimeout> | undefined
+    let pendingReasoningTimer: ReturnType<typeof setTimeout> | undefined
+    let hasConcreteProgress = false
+    const clearGenericThinkingTimer = (): void => {
+      if (!genericThinkingTimer) {
+        return
+      }
+
+      clearTimeout(genericThinkingTimer)
+      genericThinkingTimer = undefined
+    }
+    const clearPendingReasoningTimer = (): void => {
+      if (!pendingReasoningTimer) {
+        return
+      }
+
+      clearTimeout(pendingReasoningTimer)
+      pendingReasoningTimer = undefined
+    }
+    const markConcreteProgress = (): void => {
+      hasConcreteProgress = true
+      clearGenericThinkingTimer()
+      clearPendingReasoningTimer()
+      pendingReasoningLines = []
+    }
+    const flushPendingReasoning = (): void => {
+      if (pendingReasoningLines.length === 0) {
+        return
+      }
+
+      writeEventTextLines(pendingReasoningLines)
+      pendingReasoningLines = []
+      pendingReasoningTimer = undefined
+      hasConcreteProgress = true
+    }
+    const schedulePendingReasoning = (lines: string[]): void => {
+      if (lines.length === 0) {
+        return
+      }
+
+      pendingReasoningLines = lines
+      clearGenericThinkingTimer()
+      clearPendingReasoningTimer()
+      pendingReasoningTimer = setTimeout(() => {
+        flushPendingReasoning()
+      }, 200)
+      pendingReasoningTimer.unref?.()
+    }
+    const scheduleGenericThinking = (): void => {
+      if (options.verbose || hasConcreteProgress || genericThinkingTimer) {
+        return
+      }
+
+      genericThinkingTimer = setTimeout(() => {
+        genericThinkingTimer = undefined
+        if (!hasConcreteProgress) {
+          writeEventTextLines([formatProgressThinkingLine()])
+        }
+      }, 250)
+      genericThinkingTimer.unref?.()
+    }
+
     if (!options.verbose) {
-      writeEventTextLines([formatProgressThinkingLine()])
+      scheduleGenericThinking()
     }
 
     let result
@@ -119,6 +185,7 @@ export async function runInteractiveSessionPrompt(
                 return
               }
 
+              markConcreteProgress()
               writeEventTextLines(
                 formatVerboseMessageLines(message, {
                   includeToolCalls: false,
@@ -129,29 +196,43 @@ export async function runInteractiveSessionPrompt(
               return
             }
 
-            writeEventTextLines(formatProgressReasoningLines(message))
+            const progressLines = formatProgressReasoningLines(message)
+            if (progressLines.length > 0) {
+              schedulePendingReasoning(progressLines)
+            }
           },
           onToolUse(toolUse) {
-            activeToolUses.set(toolUse.id, toolUse.name)
+            activeToolUses.set(toolUse.id, {
+              name: toolUse.name,
+              input: toolUse.input,
+            })
 
             if (options.verbose) {
               writeEventTextLines([formatToolUseLine(toolUse)])
               return
             }
-
-            writeEventTextLines([formatProgressToolUseLine(toolUse)])
           },
           onToolResult(toolResult) {
+            clearPendingReasoningTimer()
+            pendingReasoningLines = []
+
             if (options.verbose) {
+              markConcreteProgress()
+              writeEventTextLines([
+                formatVerboseToolResultLine(
+                  activeToolUses.get(toolResult.toolUseId),
+                  toolResult.output,
+                ),
+              ])
               return
             }
 
+            markConcreteProgress()
             writeEventTextLines([
               formatProgressToolResultLine(
                 activeToolUses.get(toolResult.toolUseId),
                 toolResult.output,
               ),
-              formatProgressThinkingLine(),
             ])
           },
           onLlmError(error) {
@@ -174,8 +255,15 @@ export async function runInteractiveSessionPrompt(
         },
       )
     } catch (error) {
+      clearGenericThinkingTimer()
+      clearPendingReasoningTimer()
       await persistPartialTurnIfNeeded()
       throw error
+    }
+    clearGenericThinkingTimer()
+    clearPendingReasoningTimer()
+    if (!options.verbose) {
+      flushPendingReasoning()
     }
 
     const activeSessionId = options.engine.getSessionId() ?? options.sessionId

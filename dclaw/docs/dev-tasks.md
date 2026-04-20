@@ -3,7 +3,7 @@
 ## 当前迭代
 
 目标：结束 `v0.1` 收尾并切换到 `v0.2` 主线；阶段 8 已按当前范围收口，当前优先推进阶段 9、10，把 Plan / Task 与 Memory 做成新的核心主线。
-心智：原则上你的设计要严格对齐 Claude Code 的通用能力（源码在本项目下，跟dclaw目录平级的目录就是claude code的源码)，不额外“加戏”
+记住我们的原则：无限靠拢Claude Code源码的实现，不额外加戏。
 
 最近核对结论：
 - `compact` 主路径实现与当前文档描述基本一致；manual compact、消息级 boundary/runtime slicing、共享 `contextStats`、dry-run recommendation、最小 autocompact，以及首版 post-compact attachment 恢复均已真实落地

@@ -5,7 +5,9 @@ import {
   formatAutoCompactLine,
   formatCompactDryRunLine,
   formatLlmErrorLine,
+  formatProgressToolResultLine,
   formatToolUseLine,
+  formatVerboseToolResultLine,
   formatVerboseContextLines,
   formatVerboseLines,
   formatVerboseMessageLines,
@@ -64,6 +66,10 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
   let outputEndsWithNewline = true
   let activeReasoningKind: 'reasoning' | 'thinking' | null = null
   const streamedReasoningIterations = new Set<number>()
+  const activeToolUses = new Map<
+    string,
+    { name: string; input: Record<string, unknown> }
+  >()
   const writeVerboseTextLines = (lines: string[]): void => {
     if (lines.length === 0) {
       return
@@ -199,6 +205,10 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
           )
         },
         onToolUse(toolUse) {
+          activeToolUses.set(toolUse.id, {
+            name: toolUse.name,
+            input: toolUse.input,
+          })
           if (command.options.outputFormat === 'sse') {
             writeSseEvent('tool.use', toolUse)
             return
@@ -209,6 +219,32 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
           }
         },
         onToolResult(toolResult) {
+          if (
+            command.options.outputFormat !== 'sse' &&
+            command.options.verbose
+          ) {
+            writeVerboseTextLines([
+              formatVerboseToolResultLine(
+                activeToolUses.get(toolResult.toolUseId),
+                toolResult.output,
+              ),
+            ])
+            return
+          }
+
+          if (
+            command.options.outputFormat !== 'sse' &&
+            !command.options.verbose
+          ) {
+            writeVerboseTextLines([
+              formatProgressToolResultLine(
+                activeToolUses.get(toolResult.toolUseId),
+                toolResult.output,
+              ),
+            ])
+            return
+          }
+
           if (
             command.options.outputFormat === 'sse' &&
             !command.options.verbose
