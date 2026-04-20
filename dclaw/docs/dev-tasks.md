@@ -7,7 +7,7 @@
 
 最近核对结论：
 - `compact` 主路径实现与当前文档描述基本一致；manual compact、消息级 boundary/runtime slicing、共享 `contextStats`、dry-run recommendation、最小 autocompact，以及首版 post-compact attachment 恢复均已真实落地
-- 当前没有发现“文档已标完成但代码未落地”的重大偏差；阶段 8 已按当前产品范围收口，`partial compact / reactive compact` 都已像 `TodoWrite` 一样明确主动舍弃；阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复 / planning 生命周期规则也都已收口，当前主线转到阶段 10-2 的 recall 与 prompt 注入，而不是继续把 task board 全量 transcript 化
+- 当前没有发现“文档已标完成但代码未落地”的重大偏差；阶段 8 已按当前产品范围收口，`partial compact / reactive compact` 都已像 `TodoWrite` 一样明确主动舍弃；阶段 9-2 的 `ExitPlanMode` 审批正文展示、approved-plan -> 初始 task list materialize，以及“已完成 task board 5 秒后自动 retire，避免后续新请求继续拼接旧任务板”的生命周期规则都已收口；阶段 10-2 已从 deterministic 过渡实现收口到更接近 Claude Code 的 `MEMORY.md` 常驻 + side-query 相关 memory 选择，阶段 10 当前剩余更多属于后续体验与策略打磨
 
 ## Todo
 
@@ -35,20 +35,35 @@
 
 - [x] 验证标准：给定一个 workspace，能稳定创建 / 读取 / 枚举 memory 文件与索引
 
-- [ ] `P0 / 阶段 10-2`：实现 query-time recall 与 prompt 注入
+- [x] `P0 / 阶段 10-2`：实现 query-time recall 与 prompt 注入
 
-- [ ] 在 prompt 装配层增加 memory section，入口统一收敛到 `src/prompt/systemPrompt.ts`
+- [x] 在 prompt 装配层增加 memory section，入口统一收敛到 `src/prompt/systemPrompt.ts`
 
-- [ ] 实现首版 recall：
+- [x] 实现首版 recall：
   - 扫描 manifest
   - 基于 query 文本和 description 做轻量筛选
   - 单次最多注入少量 memory
 
-- [ ] 先以 deterministic 规则实现 recall，不依赖额外模型调用
+- [x] 先以 deterministic 规则实现 recall，不依赖额外模型调用
 
-- [ ] 为 injected memory 增加可观察来源，便于 verbose / trace / doctor 排查
+- [x] 为 injected memory 增加可观察来源，便于 verbose / trace / doctor 排查
 
-- [ ] 验证标准：不同 query 能召回不同 memory，且注入规模受控
+- [x] 验证标准：不同 query 能召回不同 memory，且注入规模受控
+
+- [x] 将 `10-2` 的 recall 从 deterministic 过渡实现收口到 Claude Code 主线：
+  - `MEMORY.md` 继续常驻 system prompt
+  - query-time 相关 memory 改为“扫描 manifest + side-query 语义选择”，不再只靠本地 token overlap
+  - 保持单次最多 surfacing 少量 memory，并保留来源可观察性
+
+- [x] 明确当前 memory selector 的模型边界：
+  - 当前 side-query recall 永远复用主对话的 `client/model`
+  - 不再单独引入 selector model / 独立 routing
+  - 这项工作不再单列阶段，作为当前 memory 主线的明确产品决策保留
+
+- [x] `P1 / 阶段 10-5`：将 turn-end memory extraction 改为不阻塞主 turn
+  - 当前 automatic extraction 已改为后台执行 / fire-and-forget 风格，不再在主响应返回前等待完成
+  - interactive / resume 主路径不再被 memory 写回阻塞
+  - headless 与 REPL 退出路径会做软 drain，给后台写回一个有限收尾窗口，同时保留可观察性
 
 - [x] `P0 / bugfix`：收口 `plan mode` 审批重复请求问题，继续向 Claude Code 当前源码靠拢
 
@@ -71,25 +86,31 @@
 
 - [ ] `P1 / 阶段 10-3`：明确 memory 写回策略与边界，避免与 `CLAUDE.md` / transcript / todo 混淆
 
-- [ ] 明确首版 memory 写入触发点：
-  - 只允许手动写入
-  - 还是允许基于规则自动候选
+- [x] 明确首版 memory 写入触发点：
+  - 当前已接入 turn-end automatic extraction
+  - 由独立 memory extraction 子流程在 query 完成后按规则自动尝试写回，不把写回混进主对话 prompt
 
-- [ ] 设计去重 / 升级规则，至少覆盖“同名 memory 更新”和“描述相似但文件不同”的处理
+- [x] 设计去重 / 升级规则，至少覆盖“同名 memory 更新”和“描述相似但文件不同”的处理
+  - 当前已按 Claude Code 的保守边界收口：不引入额外 merge 引擎，只在 extraction 写入校验时基于 manifest 拦截重复新建
+  - 已覆盖同 type 下的同名升级，以及“唯一相似描述”命中时优先升级已有文件；多候选歧义保持不强行合并
 
-- [ ] 明确哪些信息禁止写入 memory：
+- [x] 明确哪些信息禁止写入 memory：
   - 当前会话短期步骤
   - 已稳定存在于 `CLAUDE.md` 的规则
   - 可从仓库直接读取的代码事实
+  - 当前已按 Claude Code `WHAT_NOT_TO_SAVE_SECTION` 收口到 extraction prompt：额外覆盖 `git history / who-changed-what / debugging recipes / transcript-like recap / activity summary / PR list`
 
-- [ ] 验证标准：memory 不会退化成 transcript 备份，也不会与 todo store 重叠
+- [x] 验证标准：memory 不会退化成 transcript 备份，也不会与 todo store 重叠
+  - 当前先以 Claude Code 对齐方式落在 extraction prompt 与单测护栏，不额外引入本地语义分类器
 
 - [ ] `P0 / 文档与测试`：补齐 `v0.2` 文档口径与核心回归用例
 
 - [ ] 为阶段 10 增加单测：
   - [x] memory frontmatter 解析
   - [x] recall 筛选
-  - [ ] prompt 注入上限
+  - [x] prompt 注入上限
+  - [x] extraction 写回去重 / 升级护栏
+  - [x] side-query recall 选择 / fallback / 可观察性
 
 - [ ] 验证标准：`compact / plan / memory` 三条主线均有最小单测护栏
 
@@ -115,6 +136,13 @@
 - [ ] `v0.2+ / 低优先级`：将 provider / Responses 的 annotation、specialized output types 与更广事件覆盖继续接到 transcript / verbose / headless 展示层
 
 ## Done
+- [x] `P0 / bugfix`：对齐 Claude Code 的 completed task list 生命周期，避免同一 session 继续向旧 board 追加新任务
+
+- [x] 收口规则：
+  - 当 `task board.mode === inactive` 且可见 task 全部 `completed` 超过 `5s` 时，当前 session 再次读取该 board 会自动 retire / 脱挂
+  - 后续同一 session 若再创建 task，会起一个新的 board，而不是继续往旧 board 尾部追加
+  - 保持边界克制：不冻结 `TaskCreate`，也不额外引入“新顶层请求识别器”之类本地 heuristic
+
 - [x] `P1 / 阶段 9-3`：收口 plan 真值恢复与 planning 生命周期规则
 
 - [x] 按 Claude Code 外部主线收窄实现边界：
@@ -353,11 +381,13 @@
   - 已移除 `/todo` 相关命令与 `TodoWrite` tool，避免继续保留偏离 Claude Code 当前主路径的 checklist 入口
   - 已接入模型侧 `EnterPlanMode / ExitPlanMode`
   - 当前已按 Claude Code 当前源码收口：`EnterPlanMode` 直接进入 planning，`ExitPlanMode` 仍是唯一 plan approval step
+  - `ExitPlanMode` 获批后，若当前 task board 仍为空，会立即按 approved plan materialize 首版 task list，而不是等进入执行态后再边做边建 task
   - 用户显式输入 `/plan` 可直接进入 plan mode
   - 已为常规 interactive turn 接入 `plan_mode / plan_mode_exit / plan_mode_reentry` reminder
   - 已为 post-compact 第一轮补齐强制 full `plan_mode` reminder
   - 已为 plan mode 注入最小 runtime 语义：优先探索 / 澄清 / 写 plan file，避免直接进入实施口径
   - 已在 prompt runtime context 中注入当前 plan mode / plan file / task / current step 摘要，让模型知道“正在计划”还是“正在执行”
+  - `TaskCreate / TaskList / TaskUpdate` 的执行态提示已收紧到“优先消费 approved plan 的既有 task list”；若发现重大新增工作，应在当前轮收尾向用户说明，而不是静默扩张当前 task plan
   - 已让 `resume / history / /session / transcript` 具备首版统一的 planning 观察面：
     - `resume / history / /session` 均可看到 `plan mode state / plan file / current task / current step`
     - transcript 已可读方式呈现 `EnterPlanMode / ExitPlanMode` 的 request / approval / rejection 语义

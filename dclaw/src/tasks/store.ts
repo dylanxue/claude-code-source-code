@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { getTaskBoardPath, getTaskBoardsDir } from '../session/paths.js'
 import { loadSessionMeta, updateSessionMeta } from '../session/store.js'
@@ -13,6 +14,8 @@ export type CreateTaskBoardInput = {
   boardId?: string
   env?: NodeJS.ProcessEnv
 }
+
+const COMPLETED_TASK_BOARD_RETIRE_DELAY_MS = 5_000
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -172,6 +175,19 @@ export async function loadTaskBoard(
   }
 
   const board = normalizeTaskBoard(rawBoard as TaskBoard)
+  if (
+    board.mode !== 'active' &&
+    board.planFilePath &&
+    !existsSync(board.planFilePath)
+  ) {
+    const rewrittenBoard = {
+      ...board,
+      planFilePath: undefined,
+    }
+    await writeTaskBoard(rewrittenBoard, env)
+    return rewrittenBoard
+  }
+
   if (needsTaskBoardMigration(rawBoard)) {
     const migratedBoard = board
     await writeTaskBoard(migratedBoard, env)
@@ -221,7 +237,17 @@ export async function loadTaskBoardForSession(
     return null
   }
 
-  return loadTaskBoard(meta.taskBoardId, env)
+  const board = await loadTaskBoard(meta.taskBoardId, env)
+  if (!board) {
+    return null
+  }
+
+  if (isRetiredCompletedTaskBoard(board)) {
+    await detachRetiredTaskBoardFromSession(sessionId, board.boardId, env)
+    return null
+  }
+
+  return board
 }
 
 export async function updateTaskBoardLatestSession(
@@ -305,6 +331,51 @@ function getCurrentStepFromBoard(board: TaskBoard): string | undefined {
   return inProgressTask ? getTaskActiveText(inProgressTask) : undefined
 }
 
+function getVisibleTasks(board: TaskBoard): TaskRecord[] {
+  return board.tasks.filter(task => !task.metadata?._internal)
+}
+
+function isRetiredCompletedTaskBoard(
+  board: TaskBoard,
+  now = Date.now(),
+): boolean {
+  if (board.mode !== 'inactive') {
+    return false
+  }
+
+  const visibleTasks = getVisibleTasks(board)
+  if (visibleTasks.length === 0) {
+    return false
+  }
+
+  if (visibleTasks.some(task => task.status !== 'completed')) {
+    return false
+  }
+
+  const updatedAt = Date.parse(board.updatedAt)
+  if (Number.isNaN(updatedAt)) {
+    return false
+  }
+
+  return now - updatedAt >= COMPLETED_TASK_BOARD_RETIRE_DELAY_MS
+}
+
+async function detachRetiredTaskBoardFromSession(
+  sessionId: string,
+  boardId: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  await updateSessionMeta(
+    sessionId,
+    meta => ({
+      ...meta,
+      taskBoardId: meta.taskBoardId === boardId ? undefined : meta.taskBoardId,
+      updatedAt: nowIso(),
+    }),
+    env,
+  )
+}
+
 export async function createSessionTask(
   sessionId: string,
   workspaceId: string,
@@ -346,6 +417,62 @@ export async function createSessionTask(
   }
 }
 
+export async function createSessionTasks(
+  sessionId: string,
+  workspaceId: string,
+  inputs: Array<{
+    subject: string
+    description: string
+    activeForm?: string
+    metadata?: Record<string, unknown>
+  }>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{
+  board: TaskBoard
+  tasks: TaskRecord[]
+}> {
+  const board = await getOrCreateTaskBoardForSession(sessionId, workspaceId, env)
+  if (inputs.length === 0) {
+    return {
+      board,
+      tasks: [],
+    }
+  }
+
+  const now = nowIso()
+  let nextId = board.tasks.reduce((max, task) => {
+    const value = Number.parseInt(task.id, 10)
+    return Number.isInteger(value) && value > max ? value : max
+  }, 0)
+
+  const tasks = inputs.map(input => {
+    nextId += 1
+    return createTaskRecord(input.subject, now, {
+      id: String(nextId),
+      description: input.description,
+      activeForm: input.activeForm,
+      metadata: input.metadata,
+    })
+  })
+
+  const updated =
+    (await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        latestSessionId: sessionId,
+        tasks: [...current.tasks, ...tasks],
+        updatedAt: now,
+      }),
+      env,
+    )) ?? board
+
+  return {
+    board: updated,
+    tasks,
+  }
+}
+
 export async function listSessionTasks(
   sessionId: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -361,7 +488,7 @@ export async function listSessionTasks(
     }
   }
 
-  const visibleTasks = board.tasks.filter(task => !task.metadata?._internal)
+  const visibleTasks = getVisibleTasks(board)
   const completedIds = new Set(
     visibleTasks.filter(task => task.status === 'completed').map(task => task.id),
   )

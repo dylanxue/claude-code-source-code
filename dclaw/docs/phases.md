@@ -199,10 +199,13 @@
   - `TaskGet`
   - `TaskUpdate`
 - 当前 `Task*` 已按源码接入核心字段和按 id 更新语义；`TaskBoard` 也已收敛为 `plan mode + plan file + task/current step` 主路径，不再保留 `todos` 字段
+- 当前 `ExitPlanMode` 获批后，若 task board 仍为空，会立刻按 approved plan materialize 首版 task list，避免把“拆 task”拖到实施阶段临时进行
+- 当前已补齐 Claude Code 风格的 completed task list 生命周期：当执行板 `inactive` 且可见 task 全部 `completed` 超过 `5s`，当前 session 会自动 retire 该 board，避免后续新请求继续追加到旧列表
 - 当前 `Task*` 也已按 Claude Code 方式接入 tool prompt：
   - `Tool` 支持 `prompt()`
   - `queryLoop` 向模型发送长版 task tool prompt
   - `TaskCreate / TaskList / TaskGet / TaskUpdate` 已有独立 prompt 文件
+  - 执行态提示已额外收紧到“优先消费 approved plan 的既有 task list”；若发现重大新增工作，应在当前轮结束时回到用户对齐，而不是静默扩张当前计划
 - 当前也已接入最小 runtime task reminder：
   - 当 task board 已存在且最近几轮未使用 `TaskCreate / TaskUpdate` 时
   - 当前轮会临时注入 Claude Code 风格的 task-tool reminder

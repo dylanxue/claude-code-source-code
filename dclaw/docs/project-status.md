@@ -19,8 +19,8 @@
 | 6 | 权限模式与 Hooks | in progress | 已接入最小 permission evaluator；hooks 与细粒度规则下调到 `v0.3` |
 | 7 | Session、历史与恢复 | in progress | `v0.1` 范围已基本可用，剩余体验打磨转入 backlog |
 | 8 | 上下文管理与自动压缩 | completed | 已完成 manual compact、消息级 boundary、共享 context stats、模型生成 compact summary、dry-run recommendation、最小 autocompact 触发/回退链路，以及首轮 post-compact 文件/plan/task 恢复；当前范围按 `full compact + autocompact + post-compact 恢复` 收口。`partial compact / reactive compact` 已作为非主线路径主动舍弃 |
-| 9 | Plan / Task | in progress | 已落地 task board、`/plan`、plan file、`Task*`、`EnterPlanMode / ExitPlanMode`、plan-mode reminders、prompt runtime planning context，以及 `resume/history/transcript` planning 观察面；阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复 / planning 生命周期规则均已收口，当前主缺口转到阶段 10-2 |
-| 10 | Memory | in progress | 已完成 `10-1` memory 文件系统骨架；`10-2` 的 query-time recall 与 prompt 注入待接入 |
+| 9 | Plan / Task | in progress | 已落地 task board、`/plan`、plan file、`Task*`、`EnterPlanMode / ExitPlanMode`、plan-mode reminders、prompt runtime planning context，以及 `resume/history/transcript` planning 观察面；阶段 9-2 的 `ExitPlanMode` 审批正文展示、approved-plan -> 初始 task list materialize，与阶段 9-3 的 plan 真值恢复 / planning 生命周期规则均已收口；当前还补齐了 Claude Code 风格的“completed task board 5 秒后自动 retire/reset”，避免新请求继续拼接旧任务板，主缺口已转到阶段 10-3 |
+| 10 | Memory | in progress | 已完成 `10-1` memory 文件系统骨架、`10-2` 的 `MEMORY.md` 常驻注入 / side-query recall / 来源可观察性，以及 `10-3` 的首版 turn-end automatic extraction、最小去重 / 升级护栏与 Claude Code 风格的 `what not to save` 写回边界；当前已明确 selector 永远复用主对话 `client/model`，并已完成 `10-5` 的非阻塞 memory 写回，剩余更多属于后续体验与策略打磨 |
 | 11 | 多代理、Worktree 与协作执行 | not started | 已完成方案设计，未编码 |
 | 12 | MCP、Skills、Plugins 与 Remote Bridge | not started | 已完成方案设计，未编码 |
 | 13 | Coding 场景增强 | not started | 明确后置 |
@@ -183,6 +183,9 @@
 - 当前阶段 9 已接通 `Task*` 主路径的最小版本，但 swarm / teammate 相关 hook、mailbox、owner 自动派发等 Claude Code 扩展仍未实现
 - 当前已确认 Claude Code 源码里有两层不同能力：V1 `TodoWrite` 与 V2 `TaskCreate / TaskList / TaskGet / TaskUpdate`；`dclaw` 已明确收敛到 V2 主路径，不再保留 V1 对外能力
 - 当前已具备 Claude Code 阶段 9 的最小 plan file 主线：进入 planning 后会创建/绑定 plan file，plan file 已作为当前 planning 真值，并接入 prompt runtime context、compact 后首轮恢复，以及 `resume / history / transcript / /session` 的观察面；其中阶段 9-2 的退出审批正文展示与阶段 9-3 的 plan 真值恢复路径 / planning 生命周期规则都已补齐
+- 当前阶段 9 也已补齐一个关键执行态体验缺口：`ExitPlanMode` 获批后，如果 task board 仍为空，会立即从 approved plan materialize 首版 task list，避免进入实施后再边做边创建主任务
+- 当前 `TaskCreate / TaskList / TaskUpdate` 的提示语义已收紧：执行阶段默认应继续消费已批准的 task list；若发现重大新增工作，应在当前轮结束时向用户说明，而不是静默扩张当前计划
+- 当前阶段 9 又补齐了一个与 Claude Code 对齐的生命周期规则：当执行板处于 `inactive` 且可见 task 全部 `completed` 超过 `5s`，当前 session 会自动 retire 这块旧 board；后续新任务会起 fresh board，而不是继续把新工作拼在旧列表后面
 - 当前 `dclaw` 已不再保留 `/todo` 与 `TodoWrite`；`TaskBoard` 也已去除内部 `todos` 字段，主路径统一收敛到 `plan file + Task*`
 - 当前已修复一个阶段 9 的关键对齐缺口：
   - `EnterPlanMode` 已不再要求用户批准进入，而是直接切换到 planning
@@ -191,10 +194,15 @@
 - 当前这条 bugfix 仍保持严格边界：
   - 没有额外引入本地 cooldown / plan hash 去重 / “必须先改 plan 才能再次批准” 之类 heuristic
   - 若后续仍发现重复请求问题，应继续回到 Claude Code 源码找主线路径，而不是先补本地规则
-- 当前阶段 10 已完成 `10-1` 的 memory 文件系统骨架：
+- 当前阶段 10 已完成 `10-1` 的 memory 文件系统骨架，并已接通 `10-2` 的 query-time recall / prompt 注入，以及 `10-3` 的首版 automatic extraction：
   - 已新增 `src/memory/paths.ts / frontmatter.ts / store.ts / manifest.ts / recall.ts`
   - 已按 `~/.dclaw/projects/<sanitized-workspace>/memory/` 风格落地路径、`MEMORY.md` 入口、独立 memory markdown 文件，以及最小 frontmatter/manifest
-  - 首版 `recall.ts` 当前仍是 deterministic helper，尚未接入 query-time prompt 注入主路径
+  - 当前已将 `MEMORY.md` 常驻接入 `src/prompt/systemPrompt.ts` 主链路，并按当前 query 注入少量 recalled memory
+  - 当前已将具体 memory recall 收口到“扫描 manifest + side-query 选择相关 memory”的主路径，不再只靠 deterministic token overlap
+  - 当前已明确 memory selector 永远复用主对话的 `client/model`，不再单独引入 selector model / routing
+  - 当前已为 injected memory 补上来源可观察性：prompt 中保留源路径，query trace 记录 recall 结果，doctor 可显示当前 workspace 的 memory 路径/入口
+  - 当前已新增独立的 turn-end memory extraction 子流程：query 完成后会用受限的 `Read / Edit / Write` memory-only 子工具链，按当前 turn 内容自动尝试写回 memory，并把成功写入记录为 transcript-only system note
+  - 当前 automatic extraction 已收口到更接近 Claude Code 的后台 / 非阻塞执行：主 turn 不再等待 extraction，interactive/resume 不再被写回阻塞，headless 与退出路径会做软 drain
 - 当前 `config.json` 已不再只承载 `permissionMode`，也可承载 provider / api key / query trace / model 等运行时配置，并在 `doctor` 中显示来源
 - 当前工具层已经不只是“名字和最小链路对齐”，而是完成了第一轮协议收口：`buildTool`、显式 `input/output schema`、内部/模型结果分层、运行时 output 校验都已接入
 - 当前 `Read / Edit / Write` 已完成第一轮语义收紧，具备更明确的 partial read、warning、stale read 拦截、`noop` 与 patch/diff 输出；剩余差距当前转入 backlog

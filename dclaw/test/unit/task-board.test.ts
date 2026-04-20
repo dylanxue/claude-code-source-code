@@ -10,7 +10,13 @@ import {
   getDefaultPlanFilePath,
   readPlanFile,
 } from '../../src/tasks/planFiles.js'
-import { createTaskBoard, loadTaskBoard, loadTaskBoardForSession } from '../../src/tasks/store.js'
+import {
+  createSessionTask,
+  createTaskBoard,
+  loadTaskBoard,
+  loadTaskBoardForSession,
+  updateTaskBoard,
+} from '../../src/tasks/store.js'
 import { createSession, loadSessionMeta } from '../../src/session/store.js'
 import { createTextMessage } from '../../src/types/message.js'
 
@@ -217,6 +223,119 @@ test('loadTaskBoard rewrites legacy boards that still contain todos', async () =
     assert.equal(board?.boardId, boardId)
     assert.equal('todos' in board!, false)
     assert.doesNotMatch(rewritten, /"todos"/)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('loadTaskBoardForSession retires inactive completed task boards after 5 seconds', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-retire-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-retire-board',
+      env,
+    })
+    const created = await createSessionTask(
+      session.sessionId,
+      '/tmp/project',
+      {
+        subject: 'Ship the current plan',
+        description: 'Finish the approved implementation work.',
+      },
+      env,
+    )
+    const retiredAt = new Date(Date.now() - 6_000).toISOString()
+    await updateTaskBoard(
+      created.board.boardId,
+      current => ({
+        ...current,
+        mode: 'inactive',
+        updatedAt: retiredAt,
+        currentTaskId: undefined,
+        currentStep: undefined,
+        tasks: current.tasks.map(task => ({
+          ...task,
+          status: 'completed',
+          updatedAt: retiredAt,
+        })),
+      }),
+      env,
+    )
+
+    const board = await loadTaskBoardForSession(session.sessionId, env)
+    const meta = await loadSessionMeta(session.sessionId, env)
+
+    assert.equal(board, null)
+    assert.equal(meta?.taskBoardId, undefined)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('createSessionTask creates a fresh board after the previous completed board retires', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-refresh-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-refresh-board',
+      env,
+    })
+    const first = await createSessionTask(
+      session.sessionId,
+      '/tmp/project',
+      {
+        subject: 'Finish the current workstream',
+        description: 'Close the existing approved task list.',
+      },
+      env,
+    )
+    const retiredAt = new Date(Date.now() - 6_000).toISOString()
+    await updateTaskBoard(
+      first.board.boardId,
+      current => ({
+        ...current,
+        mode: 'inactive',
+        updatedAt: retiredAt,
+        currentTaskId: undefined,
+        currentStep: undefined,
+        tasks: current.tasks.map(task => ({
+          ...task,
+          status: 'completed',
+          updatedAt: retiredAt,
+        })),
+      }),
+      env,
+    )
+
+    const second = await createSessionTask(
+      session.sessionId,
+      '/tmp/project',
+      {
+        subject: 'Start a new top-level request',
+        description: 'Handle the next user request without appending to the old board.',
+      },
+      env,
+    )
+    const meta = await loadSessionMeta(session.sessionId, env)
+    const retiredBoard = await loadTaskBoard(first.board.boardId, env)
+
+    assert.notEqual(second.board.boardId, first.board.boardId)
+    assert.equal(second.task.id, '1')
+    assert.equal(meta?.taskBoardId, second.board.boardId)
+    assert.ok(retiredBoard)
+    assert.equal(retiredBoard?.tasks.length, 1)
+    assert.equal(retiredBoard?.tasks[0]?.status, 'completed')
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }
