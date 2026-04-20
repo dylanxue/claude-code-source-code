@@ -44,3 +44,71 @@ test('buildSystemPrompt nudges complex work toward task tracking without globall
   assert.doesNotMatch(prompt, /EnterPlanMode/)
   assert.doesNotMatch(prompt, /Prefer direct execution for simple requests/)
 })
+
+test('buildSystemPrompt includes recalled memory content with observable source paths', () => {
+  const prompt = buildSystemPrompt(
+    assemblePromptContext({
+      cwd: '/tmp/project',
+      provider: 'stub',
+      model: 'stub-model',
+      mode: 'interactive',
+      permissionMode: 'accept-edits',
+      memory: {
+        memoryDir: '/tmp/.dclaw/projects/tmp-project/memory',
+        entrypointPath: '/tmp/.dclaw/projects/tmp-project/memory/MEMORY.md',
+        entrypointContent:
+          '# Memory\n\n- [Migration Policy](project/migration-policy.md) - Validate PostgreSQL migrations.',
+        entrypointWasTruncated: false,
+        manifestCount: 3,
+        recalledEntries: [
+          {
+            name: 'Migration Policy',
+            description:
+              'Validate PostgreSQL migrations against a real staging database.',
+            type: 'project',
+            updatedAt: '2026-04-20T10:00:00.000Z',
+            path: '/tmp/.dclaw/projects/tmp-project/memory/project/migration-policy.md',
+            relativePath: 'project/migration-policy.md',
+            mtimeMs: 1,
+            content: 'Avoid mock-only validation for migrations.',
+            wasTruncated: false,
+          },
+        ],
+      },
+    }),
+  )
+
+  assert.match(prompt, /# Memory/)
+  assert.match(prompt, /memory dir: \/tmp\/.dclaw\/projects\/tmp-project\/memory/)
+  assert.match(prompt, /## MEMORY\.md/)
+  assert.match(prompt, /path: \/tmp\/.dclaw\/projects\/tmp-project\/memory\/MEMORY\.md/)
+  assert.match(prompt, /\[Migration Policy\]\(project\/migration-policy\.md\)/)
+  assert.match(prompt, /recalled memories for this query: 1\/3/)
+  assert.match(prompt, /path: \/tmp\/.dclaw\/projects\/tmp-project\/memory\/project\/migration-policy\.md/)
+  assert.match(prompt, /Avoid mock-only validation for migrations\./)
+})
+
+test('buildSystemPrompt keeps MEMORY.md loaded even when no specific memories were recalled', () => {
+  const prompt = buildSystemPrompt(
+    assemblePromptContext({
+      cwd: '/tmp/project',
+      provider: 'stub',
+      model: 'stub-model',
+      mode: 'interactive',
+      permissionMode: 'accept-edits',
+      memory: {
+        memoryDir: '/tmp/.dclaw/projects/tmp-project/memory',
+        entrypointPath: '/tmp/.dclaw/projects/tmp-project/memory/MEMORY.md',
+        entrypointContent:
+          '# Memory\n\n- [User Roleplay Names](user-roleplay-names.md) - The user wants to be called 大壮 (Dazhuang).',
+        entrypointWasTruncated: false,
+        manifestCount: 1,
+        recalledEntries: [],
+      },
+    }),
+  )
+
+  assert.match(prompt, /## MEMORY\.md/)
+  assert.match(prompt, /User Roleplay Names/)
+  assert.match(prompt, /recalled memories for this query: 0\/1/)
+})

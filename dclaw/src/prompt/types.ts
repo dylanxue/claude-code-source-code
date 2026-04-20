@@ -1,6 +1,7 @@
 import type { ClaudeMdEntry } from './claudeMd.js'
 import type { PermissionMode } from '../types/tool.js'
 import type { PlanModeStatus } from '../tasks/types.js'
+import type { PromptMemoryContext } from '../memory/prompt.js'
 
 export type PromptMode = 'interactive' | 'print'
 
@@ -20,6 +21,7 @@ export type PromptContext = {
   mode: PromptMode
   permissionMode?: PermissionMode
   plan?: PlanPromptContext
+  memory?: PromptMemoryContext
   userSystemPrompt?: string
   claudeMdEntries: ClaudeMdEntry[]
 }

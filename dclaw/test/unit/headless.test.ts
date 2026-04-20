@@ -125,7 +125,7 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
   }
 
   const events = parseSseEvents(output.join(''))
-  assert.equal(requestCount, 2)
+  assert.equal(requestCount, 3)
   assert.deepEqual(
     events.map(event => event.event),
     [
@@ -265,7 +265,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
   }
 
   const events = parseSseEvents(output.join(''))
-  assert.equal(requestCount, 2)
+  assert.equal(requestCount, 3)
   assert.deepEqual(
     events.map(event => event.event),
     [
@@ -292,6 +292,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
     stream: true,
     outputFormat: 'sse',
     sessionId: (events[0]?.data as { sessionId: string }).sessionId,
+    queryTracePath: (events[0]?.data as { queryTracePath: string }).queryTracePath,
   })
 
   assert.deepEqual(events[2]?.data, {
@@ -414,7 +415,7 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
     await rm(dir, { recursive: true, force: true })
   }
 
-  assert.equal(requestCount, 1)
+  assert.equal(requestCount, 2)
   assert.match(output.join(''), /\[meta\] mode=print/)
   assert.match(output.join(''), new RegExp(`\\[meta\\] cwd=${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
   assert.match(output.join(''), /\[meta\] provider=anthropic/)

@@ -72,6 +72,53 @@ export function getPlanModeSection(context: PromptContext): string | null {
   return lines.join('\n')
 }
 
+export function getMemorySection(context: PromptContext): string | null {
+  const memory = context.memory
+  if (!memory) {
+    return null
+  }
+
+  const lines = [
+    '# Memory',
+    `- memory dir: ${memory.memoryDir}`,
+    '- memory stores durable context that may be useful in future conversations',
+    '- do not use memory for the current conversation plan, step tracking, or transient execution state',
+    '- use plans and tasks for current execution state; use memory for durable user, project, and reference knowledge',
+  ]
+
+  const entrypointBlock = [
+    '## MEMORY.md',
+    `path: ${memory.entrypointPath}`,
+    memory.entrypointContent,
+  ].join('\n')
+
+  if (memory.recalledEntries.length === 0) {
+    lines.push(`- recalled memories for this query: 0/${memory.manifestCount}`)
+    return [
+      lines.join('\n'),
+      entrypointBlock,
+    ].join('\n\n')
+  }
+
+  const blocks = memory.recalledEntries.map(entry =>
+    [
+      `## [${entry.type}] ${entry.name}`,
+      `path: ${entry.path}`,
+      `updated_at: ${entry.updatedAt}`,
+      `description: ${entry.description}`,
+      '',
+      entry.content,
+    ].join('\n'),
+  )
+
+  return [
+    lines.join('\n'),
+    entrypointBlock,
+    `## Recalled Memories\n- recalled memories for this query: ${memory.recalledEntries.length}/${memory.manifestCount}`,
+    ...blocks,
+  ].join('\n\n')
+}
+
 export function getClaudeMdSection(context: PromptContext): string | null {
   if (context.claudeMdEntries.length === 0) {
     return null

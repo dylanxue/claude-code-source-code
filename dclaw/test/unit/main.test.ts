@@ -17,6 +17,8 @@ async function runCli(args: string[], cwd: string): Promise<{
   stderr: string
   exitCode: number | null
 }> {
+  const dclawHome = join(cwd, '.dclaw-home-test')
+
   return await new Promise((resolvePromise, reject) => {
     const child = spawn(
       process.execPath,
@@ -25,6 +27,7 @@ async function runCli(args: string[], cwd: string): Promise<{
         cwd,
         env: {
           ...process.env,
+          DCLAW_HOME: dclawHome,
           OPENAI_API_KEY: '',
           DCLAW_OPENAI_API_KEY: '',
           ANTHROPIC_API_KEY: '',
@@ -61,11 +64,14 @@ async function runBin(args: string[], cwd: string): Promise<{
   stderr: string
   exitCode: number | null
 }> {
+  const dclawHome = join(cwd, '.dclaw-home-test')
+
   return await new Promise((resolvePromise, reject) => {
     const child = spawn(process.execPath, [binEntrypoint, ...args], {
       cwd,
       env: {
         ...process.env,
+        DCLAW_HOME: dclawHome,
         OPENAI_API_KEY: '',
         DCLAW_OPENAI_API_KEY: '',
         ANTHROPIC_API_KEY: '',

@@ -22,6 +22,13 @@ type ModelLimitRule = {
   limits: ModelLimits
 }
 
+function buildAliasRules(
+  matches: string[],
+  limits: ModelLimits,
+): ModelLimitRule[] {
+  return matches.map((match) => ({ match, limits }))
+}
+
 const DEFAULT_ANTHROPIC_LIMITS: ModelLimits = {
   contextWindow: 200_000,
   maxOutputTokens: 32_000,
@@ -34,7 +41,65 @@ const DEFAULT_OPENAI_LIMITS: ModelLimits = {
   maxOutputTokensUpperLimit: 128_000,
 }
 
+const DOUBAO_SEED_CODE_LIMITS: ModelLimits = {
+  contextWindow: 256_000,
+  maxOutputTokens: 32_000,
+  maxOutputTokensUpperLimit: 32_000,
+}
+
+const DOUBAO_SEED_1_6_LIMITS: ModelLimits = {
+  contextWindow: 256_000,
+  maxOutputTokens: 32_000,
+  maxOutputTokensUpperLimit: 32_000,
+}
+
+const DOUBAO_SEED_1_8_LIMITS: ModelLimits = {
+  contextWindow: 256_000,
+  maxOutputTokens: 64_000,
+  maxOutputTokensUpperLimit: 64_000,
+}
+
+const DOUBAO_SEED_2_0_LIMITS: ModelLimits = {
+  contextWindow: 256_000,
+  maxOutputTokens: 32_000,
+  maxOutputTokensUpperLimit: 128_000,
+}
+
 const COMPAT_MODEL_LIMIT_RULES: ModelLimitRule[] = [
+  ...buildAliasRules(
+    ['bytedance-seed-code', 'doubao-seed-code'],
+    DOUBAO_SEED_CODE_LIMITS,
+  ),
+  ...buildAliasRules(['doubao-seed-2.0-code'], DOUBAO_SEED_2_0_LIMITS),
+  ...buildAliasRules(
+    ['seed-1.6', 'seed-1-6', 'doubao-seed-1.6'],
+    DOUBAO_SEED_1_6_LIMITS,
+  ),
+  ...buildAliasRules(
+    ['seed-1.6-flash', 'seed-1-6-flash', 'doubao-seed-1.6-flash'],
+    DOUBAO_SEED_1_6_LIMITS,
+  ),
+  ...buildAliasRules(
+    ['seed-1.8', 'seed-1-8', 'doubao-seed-1.8'],
+    DOUBAO_SEED_1_8_LIMITS,
+  ),
+  ...buildAliasRules(
+    ['dola-seed-2.0-pro', 'seed-2.0-pro', 'seed-2-0-pro', 'doubao-seed-2.0-pro'],
+    DOUBAO_SEED_2_0_LIMITS,
+  ),
+  ...buildAliasRules(
+    [
+      'dola-seed-2.0-lite',
+      'seed-2.0-lite',
+      'seed-2-0-lite',
+      'doubao-seed-2.0-lite',
+    ],
+    DOUBAO_SEED_2_0_LIMITS,
+  ),
+  ...buildAliasRules(
+    ['seed-2.0-mini', 'seed-2-0-mini', 'doubao-seed-2.0-mini'],
+    DOUBAO_SEED_2_0_LIMITS,
+  ),
   {
     match: 'deepseek-chat',
     limits: {

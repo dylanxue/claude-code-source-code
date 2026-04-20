@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
+import { getMemoryDir, getMemoryEntrypointPath } from '../memory/paths.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import {
   appendModelLimitLines,
@@ -47,6 +48,15 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     statusLine(
       'system prompt',
       command.options.systemPrompt ? 'provided' : 'none',
+    ),
+    statusLine('memory dir', getMemoryDir(cwd, configured.env)),
+    statusLine(
+      'memory entrypoint',
+      getMemoryEntrypointPath(cwd, configured.env),
+    ),
+    statusLine(
+      'memory entrypoint exists',
+      existsSync(getMemoryEntrypointPath(cwd, configured.env)) ? 'yes' : 'no',
     ),
   ]
 

@@ -8,6 +8,7 @@ import { createSession } from '../../src/session/store.js'
 import {
   ensureTaskBoardPlanFile,
   getOrCreateTaskBoardForSession,
+  listSessionTasks,
   loadTaskBoardForSession,
   updateTaskBoard,
 } from '../../src/tasks/store.js'
@@ -174,9 +175,9 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
       [
         '# Implementation Plan',
         '',
-        '## Scope',
-        '- Inspect the current approval flow',
-        '- Show the full plan body before approval',
+        '## Implementation Steps',
+        '1. Inspect the current approval flow',
+        '2. Show the full plan body before approval',
       ].join('\n'),
       'utf8',
     )
@@ -208,14 +209,14 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
       [
         '# Implementation Plan',
         '',
-        '## Scope',
-        '- Inspect the current approval flow',
-        '- Show the full plan body before approval',
+        '## Implementation Steps',
+        '1. Inspect the current approval flow',
+        '2. Show the full plan body before approval',
       ].join('\n'),
     )
     assert.equal(
       result.output.planPreview,
-      '- Inspect the current approval flow',
+      '1. Inspect the current approval flow',
     )
     assert.equal(context.permissionMode, 'accept-edits')
     assert.equal(context.planFilePath, undefined)
@@ -224,9 +225,29 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
     assert.ok(updatedBoard)
     assert.equal(updatedBoard.mode, 'inactive')
     assert.equal(updatedBoard.resumePermissionMode, undefined)
+    const listed = await listSessionTasks(session.sessionId, env)
+    assert.deepEqual(
+      listed.tasks.map(task => ({
+        id: task.id,
+        subject: task.subject,
+        description: task.description,
+      })),
+      [
+        {
+          id: '1',
+          subject: 'Inspect the current approval flow',
+          description: 'Inspect the current approval flow',
+        },
+        {
+          id: '2',
+          subject: 'Show the full plan body before approval',
+          description: 'Show the full plan body before approval',
+        },
+      ],
+    )
     assert.match(
       result.summary ?? '',
-      /Plan mode exited with approval/,
+      /Created 2 initial task\(s\) from the approved plan/,
     )
   } finally {
     process.env = originalEnv

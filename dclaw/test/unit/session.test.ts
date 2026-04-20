@@ -27,7 +27,7 @@ import {
 } from '../../src/tasks/store.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
 import { buildTool } from '../../src/tools/types.js'
-import { createMessage, createTextMessage } from '../../src/types/message.js'
+import { createMessage, createTextMessage, getTextContent } from '../../src/types/message.js'
 import { createToolContext } from '../helpers/toolContext.js'
 import type {
   CreateMessageRequest,
@@ -114,7 +114,7 @@ test('QueryEngine resolves the system prompt from current runtime state', async 
     toolRegistry: new ToolRegistry(),
     toolContext: createToolContext(),
     systemPromptResolver: async state =>
-      `permission=${state.permissionMode}; session=${state.sessionId ?? 'none'}; model=${state.model ?? 'default'}`,
+      `permission=${state.permissionMode}; session=${state.sessionId ?? 'none'}; model=${state.model ?? 'default'}; prompt=${state.userPrompt}`,
   })
 
   engine.setSessionId('session-plan')
@@ -125,8 +125,31 @@ test('QueryEngine resolves the system prompt from current runtime state', async 
 
   assert.equal(
     client.requests[0]?.systemPrompt,
-    'permission=plan; session=session-plan; model=stub-model',
+    'permission=plan; session=session-plan; model=stub-model; prompt=follow up prompt',
   )
+})
+
+test('QueryEngine appends messages returned by the turnCompleteHook', async () => {
+  const client = new CapturingLlmClient()
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    turnCompleteHook: async state => [
+      createTextMessage(
+        'system',
+        `memory hook ran for: ${state.userPrompt}`,
+      ),
+    ],
+  })
+
+  const result = await engine.submitUserPrompt('remember this preference')
+  const lastMessage = result.messages.at(-1)
+
+  assert.ok(lastMessage)
+  assert.equal(lastMessage?.role, 'system')
+  assert.match(getTextContent(lastMessage!), /memory hook ran/)
+  assert.equal(result.appendedMessages.at(-1)?.role, 'system')
 })
 
 test('QueryEngine preserves completed turn messages when a later iteration fails', async () => {

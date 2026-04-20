@@ -2,6 +2,7 @@ import { QueryEngine } from '../core/queryEngine.js'
 import {
   createFileQueryTraceSink,
   createQueryTraceFilePath,
+  type QueryTraceSink,
   shouldEnableQueryTrace,
 } from '../core/queryTrace.js'
 import { createLlmClient } from '../llm/client.js'
@@ -10,6 +11,8 @@ import {
   formatClaudeMdLoadOrder,
   loadClaudeMdEntries,
 } from '../prompt/claudeMd.js'
+import { loadPromptMemoryContext } from '../memory/prompt.js'
+import { createAutomaticMemoryExtractor } from '../memory/extract.js'
 import { assemblePromptContext } from '../prompt/contextAssembler.js'
 import { buildSystemPrompt } from '../prompt/systemPrompt.js'
 import type { PromptMode } from '../prompt/types.js'
@@ -19,6 +22,7 @@ import { getCurrentTask } from '../tasks/taskState.js'
 import { createDefaultToolRegistry } from '../tools/index.js'
 import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/tool.js'
+import { appendSessionMessages } from '../session/store.js'
 import { askUserQuestionsInteractively } from './askUserQuestions.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import {
@@ -38,6 +42,7 @@ export type PreparedCliRuntime = {
   toolRegistry: ReturnType<typeof createDefaultToolRegistry>
   engine: QueryEngine
   rotateQueryTrace: (sessionId?: string) => Promise<string | undefined>
+  drainBackgroundWork: (timeoutMs?: number) => Promise<void>
 }
 
 export async function prepareCliRuntime(
@@ -61,37 +66,115 @@ export async function prepareCliRuntime(
 
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
-  const engine = new QueryEngine({
-    client: createLlmClient(runtime.provider, configured.env),
+  const client = createLlmClient(runtime.provider, configured.env)
+
+  const resolveSystemPromptForUserPrompt = async (state: {
+    sessionId?: string
+    permissionMode: PermissionMode
+    model?: string
+    userPrompt: string
+    queryTraceSink?: QueryTraceSink
+  }): Promise<string> => {
+    const board =
+      state.sessionId
+        ? await loadTaskBoardForSession(state.sessionId, configured.env)
+        : null
+    const currentTask = board ? getCurrentTask(board) : undefined
+    const memory = await loadPromptMemoryContext(
+      options.cwd,
+      state.userPrompt,
+      configured.env,
+      {
+        client,
+        model: state.model ?? runtime.model,
+        queryTraceSink: state.queryTraceSink,
+      },
+    )
+    state.queryTraceSink?.record({
+      event: 'memory.recall',
+      data: {
+        selectionMode: 'side_query',
+        memoryDir: memory.memoryDir,
+        manifestCount: memory.manifestCount,
+        recalledCount: memory.recalledEntries.length,
+        recalledPaths: memory.recalledEntries.map(entry => entry.path),
+      },
+    })
+    const promptContext = assemblePromptContext({
+      cwd: options.cwd,
+      provider: runtime.provider,
+      model: state.model ?? runtime.model,
+      mode,
+      permissionMode: state.permissionMode,
+      plan: board
+        ? {
+            boardId: board.boardId,
+            status: board.mode,
+            planFilePath: board.planFilePath,
+            currentTaskTitle: currentTask?.subject,
+            currentStep: board.currentStep,
+            taskSummary: summarizePendingTasks(board),
+          }
+        : undefined,
+      memory,
+      userSystemPrompt: options.systemPrompt,
+      claudeMdEntries,
+    })
+    return buildSystemPrompt(promptContext)
+  }
+
+  const memoryExtractor = createAutomaticMemoryExtractor({
+    client,
+    model: runtime.model,
+    workspaceRoot: options.cwd,
+    env: configured.env,
+  })
+  let engine!: QueryEngine
+  const appendBackgroundMessages = async (
+    sessionId: string | undefined,
+    messages: Message[],
+  ): Promise<void> => {
+    if (messages.length === 0) {
+      return
+    }
+
+    engine.appendMessages(messages)
+    if (!sessionId) {
+      return
+    }
+
+    await appendSessionMessages(
+      sessionId,
+      messages,
+      configured.env,
+    ).catch(() => undefined)
+  }
+
+  engine = new QueryEngine({
+    client,
     provider: runtime.provider,
     modelLimitsEnv: configured.env,
     model: runtime.model,
-    systemPromptResolver: async state => {
-      const board =
-        state.sessionId
-          ? await loadTaskBoardForSession(state.sessionId, configured.env)
-          : null
-      const currentTask = board ? getCurrentTask(board) : undefined
-      const promptContext = assemblePromptContext({
-        cwd: options.cwd,
-        provider: runtime.provider,
-        model: state.model ?? runtime.model,
-        mode,
-        permissionMode: state.permissionMode,
-        plan: board
-          ? {
-              boardId: board.boardId,
-              status: board.mode,
-              planFilePath: board.planFilePath,
-              currentTaskTitle: currentTask?.subject,
-              currentStep: board.currentStep,
-              taskSummary: summarizePendingTasks(board),
-            }
-          : undefined,
-        userSystemPrompt: options.systemPrompt,
-        claudeMdEntries,
+    systemPromptResolver: resolveSystemPromptForUserPrompt,
+    turnCompleteHook: async state => {
+      memoryExtractor.scheduleExtractTurn({
+        state: {
+          userPrompt: state.userPrompt,
+          messages: state.messages,
+          queryTraceSink: state.queryTraceSink,
+          resolveSystemPrompt: () =>
+            resolveSystemPromptForUserPrompt({
+              sessionId: state.sessionId,
+              permissionMode: state.permissionMode,
+              model: state.model,
+              userPrompt: state.userPrompt,
+              queryTraceSink: state.queryTraceSink,
+            }),
+        },
+        onMessages: async messages =>
+          appendBackgroundMessages(state.sessionId, messages),
       })
-      return buildSystemPrompt(promptContext)
+      return []
     },
     toolRegistry,
     toolContext: {
@@ -126,6 +209,9 @@ export async function prepareCliRuntime(
       )
       engine.setQueryTraceSink(queryTraceSink)
       return queryTraceSink.filePath
+    },
+    drainBackgroundWork: async (timeoutMs?: number) => {
+      await memoryExtractor.drainPendingExtraction(timeoutMs)
     },
   }
 }

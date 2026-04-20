@@ -9,6 +9,7 @@ export const PROMPT = `Use this tool to list all tasks in the current session ta
 - To find tasks that are blocked and need dependencies resolved
 - After completing a task, to check for newly unblocked work
 - When multiple tasks are available, prefer working on tasks in ID order
+- After leaving plan mode, use this tool before creating new tasks so execution follows the approved task list
 
 ## Output
 

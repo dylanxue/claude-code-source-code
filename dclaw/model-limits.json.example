@@ -66,6 +66,66 @@
         "maxOutputTokens": 4096,
         "maxOutputTokensUpperLimit": 4096
       },
+      "bytedance-seed-code": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 32000
+      },
+      "doubao-seed-2.0-code": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "doubao-seed-2.0-pro": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "doubao-seed-2.0-lite": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "dola-seed-2.0-pro": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "dola-seed-2.0-lite": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-2.0-pro": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-2.0-lite": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-2.0-mini": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-1.8": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "seed-1.6": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 32000
+      },
+      "seed-1.6-flash": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 32000
+      },
       "kimi-k2.5": {
         "contextWindow": 256000,
         "maxOutputTokens": 32768,
@@ -252,6 +312,66 @@
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
         "maxOutputTokensUpperLimit": 128000
+      },
+      "bytedance-seed-code": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 32000
+      },
+      "doubao-seed-2.0-code": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "doubao-seed-2.0-pro": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "doubao-seed-2.0-lite": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "dola-seed-2.0-pro": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "dola-seed-2.0-lite": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-2.0-pro": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-2.0-lite": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-2.0-mini": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "seed-1.8": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 64000,
+        "maxOutputTokensUpperLimit": 64000
+      },
+      "seed-1.6": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 32000
+      },
+      "seed-1.6-flash": {
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000,
+        "maxOutputTokensUpperLimit": 32000
       },
       "kimi-k2.5": {
         "contextWindow": 256000,

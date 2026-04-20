@@ -129,6 +129,67 @@ function parseToolDirective(prompt: string): {
   return { name: toolName, input }
 }
 
+function parseMemorySelectorQuery(prompt: string): string {
+  return prompt.match(/^Query:\s*([\s\S]*?)\n\nAvailable memories:/)?.[1]?.trim() ?? ''
+}
+
+function parseMemorySelectorManifest(
+  prompt: string,
+): Array<{ relativePath: string; haystack: string }> {
+  const manifestSection = prompt.split('Available memories:\n')[1]?.split('\n\nReturn JSON only.')[0]
+  if (!manifestSection) {
+    return []
+  }
+
+  return manifestSection
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('- '))
+    .map(line => {
+      const relativePath =
+        line.match(/^\-\s+\[[^\]]+\]\s+([^|]+)\s+\|/)?.[1]?.trim()
+      return relativePath
+        ? {
+            relativePath,
+            haystack: line.toLowerCase(),
+          }
+        : null
+    })
+    .filter(
+      (
+        value,
+      ): value is {
+        relativePath: string
+        haystack: string
+      } => value !== null,
+    )
+}
+
+function tokenizeMemorySelectorQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fff]+/)
+    .filter(token => token.length >= 1)
+}
+
+function buildMemorySelectorResponse(prompt: string): string {
+  const query = parseMemorySelectorQuery(prompt)
+  const manifest = parseMemorySelectorManifest(prompt)
+  const queryTokens = tokenizeMemorySelectorQuery(query)
+
+  const selected = manifest
+    .map(entry => ({
+      ...entry,
+      score: queryTokens.filter(token => entry.haystack.includes(token)).length,
+    }))
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map(entry => entry.relativePath)
+
+  return JSON.stringify({ selected_memories: selected })
+}
+
 export class StubLlmClient implements LlmClient {
   readonly providerName = 'stub'
 
@@ -156,6 +217,21 @@ export class StubLlmClient implements LlmClient {
             transcriptPreview,
             '</summary>',
           ].join('\n'),
+        ),
+      }
+    }
+
+    if (
+      request.systemPrompt?.includes(
+        'You are selecting memories that will be useful to dclaw as it processes a user query.',
+      )
+    ) {
+      const lastUserMessage = findLastUserMessage(request.messages)
+      const prompt = lastUserMessage ? getTextContent(lastUserMessage) : ''
+      return {
+        message: createTextMessage(
+          'assistant',
+          buildMemorySelectorResponse(prompt),
         ),
       }
     }

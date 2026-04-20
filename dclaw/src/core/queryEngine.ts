@@ -55,7 +55,19 @@ export type QueryEngineOptions = {
     sessionId?: string
     permissionMode: PermissionMode
     model?: string
+    userPrompt: string
+    queryTraceSink?: QueryTraceSink
   }) => Promise<string | undefined>
+  turnCompleteHook?: (state: {
+    sessionId?: string
+    permissionMode: PermissionMode
+    model?: string
+    userPrompt: string
+    assistantMessage: Message
+    outputText: string
+    messages: Message[]
+    queryTraceSink?: QueryTraceSink
+  }) => Promise<Message[] | void>
   toolRegistry: ToolRegistry
   toolContext: ToolContext
   maxIterations?: number
@@ -88,6 +100,7 @@ export class QueryEngine {
   private model?: string
   private systemPrompt?: string
   private readonly systemPromptResolver?: QueryEngineOptions['systemPromptResolver']
+  private readonly turnCompleteHook?: QueryEngineOptions['turnCompleteHook']
   private readonly toolRegistry: ToolRegistry
   private readonly toolContext: ToolContext
   private readonly maxIterations: number
@@ -106,6 +119,7 @@ export class QueryEngine {
     this.model = options.model
     this.systemPrompt = options.systemPrompt
     this.systemPromptResolver = options.systemPromptResolver
+    this.turnCompleteHook = options.turnCompleteHook
     this.toolRegistry = options.toolRegistry
     this.toolContext = options.toolContext
     this.toolContext.setPermissionMode ??= (
@@ -125,6 +139,13 @@ export class QueryEngine {
 
   getMessages(): Message[] {
     return [...this.messages]
+  }
+
+  appendMessages(messages: Message[]): void {
+    if (messages.length === 0) {
+      return
+    }
+    this.messages.push(...messages)
   }
 
   resetMessages(messages: Message[] = []): void {
@@ -182,7 +203,9 @@ export class QueryEngine {
     this.toolContext.readState.clear()
   }
 
-  private async getResolvedSystemPrompt(): Promise<string | undefined> {
+  private async getResolvedSystemPrompt(
+    userPrompt: string,
+  ): Promise<string | undefined> {
     if (!this.systemPromptResolver) {
       return this.systemPrompt
     }
@@ -191,6 +214,8 @@ export class QueryEngine {
       sessionId: this.toolContext.sessionId,
       permissionMode: this.toolContext.permissionMode,
       model: this.model,
+      userPrompt,
+      queryTraceSink: this.queryTraceSink,
     })
   }
 
@@ -399,7 +424,7 @@ export class QueryEngine {
         resolveIterationRequest: async workingMessages => {
           const currentTurnMessages = workingMessages.slice(baseTurnMessages.length)
           const [systemPrompt, transientContext] = await Promise.all([
-            this.getResolvedSystemPrompt(),
+            this.getResolvedSystemPrompt(prompt),
             this.getTransientContextMessages(
               currentTurnMessages.length === 0
                 ? persistedMessagesBeforeUser
@@ -436,12 +461,34 @@ export class QueryEngine {
     if (response.usedPostCompactAttachments) {
       this.postCompactReadState = undefined
     }
+    const hookMessages: Message[] = []
+    if (this.turnCompleteHook) {
+      try {
+        const produced =
+          await this.turnCompleteHook({
+            sessionId: this.toolContext.sessionId,
+            permissionMode: this.toolContext.permissionMode,
+            model: this.model,
+            userPrompt: prompt,
+            assistantMessage: response.assistantMessage,
+            outputText: response.outputText,
+            messages: this.getMessages(),
+            queryTraceSink: this.queryTraceSink,
+          }) ?? []
+        if (produced.length > 0) {
+          this.messages.push(...produced)
+          hookMessages.push(...produced)
+        }
+      } catch {
+        // Post-turn hooks are best-effort and should not fail the main turn.
+      }
+    }
 
     return {
       userMessage,
       assistantMessage: response.assistantMessage,
       messages: this.getMessages(),
-      appendedMessages: [userMessage, ...response.addedMessages],
+      appendedMessages: [userMessage, ...response.addedMessages, ...hookMessages],
       outputText: response.outputText,
       sessionId: this.getSessionId(),
       ...(autoCompact ? { autoCompact } : {}),

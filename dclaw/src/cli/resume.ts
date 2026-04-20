@@ -74,6 +74,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     toolRegistry,
     engine,
     rotateQueryTrace,
+    drainBackgroundWork,
     permissionMode,
     permissionModeSource,
   } = await prepareCliRuntime(command.options, 'interactive', resumed.messages)
@@ -231,4 +232,5 @@ export async function runResume(command: ResumeCommand): Promise<void> {
       process.stderr.write(output.text)
     },
   })
+  await drainBackgroundWork()
 }

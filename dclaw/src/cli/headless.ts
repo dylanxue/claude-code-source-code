@@ -31,6 +31,7 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
     runtime,
     engine,
     rotateQueryTrace,
+    drainBackgroundWork,
     permissionMode,
     permissionModeSource,
   } = await prepareCliRuntime(
@@ -263,6 +264,7 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
       iterations: result.appendedMessages.length,
       assistantMessage: result.assistantMessage,
     })
+    await drainBackgroundWork()
     return
   }
 
@@ -271,6 +273,7 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
       if (!outputEndsWithNewline) {
         process.stdout.write('\n')
       }
+      await drainBackgroundWork()
       return
     }
 
@@ -282,15 +285,18 @@ export async function runHeadless(command: PrintCommand): Promise<void> {
     process.stdout.write(
       (verboseLines.length > 0 ? verboseLines.join('\n') : result.outputText) + '\n',
     )
+    await drainBackgroundWork()
     return
   }
 
   if (!command.options.stream || streamedText.length === 0) {
     process.stdout.write(result.outputText + '\n')
+    await drainBackgroundWork()
     return
   }
 
   if (!streamedText.endsWith('\n')) {
     process.stdout.write('\n')
   }
+  await drainBackgroundWork()
 }

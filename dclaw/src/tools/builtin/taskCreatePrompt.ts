@@ -12,7 +12,7 @@ Use this tool proactively in these scenarios:
 - The user explicitly asks for a todo list or task tracking
 - The user provides multiple requests or a list of things to do
 - After receiving new instructions, when you should capture the new requirements as tasks
-- When you finish a task and discover follow-up work that should also be tracked
+- When existing tasks are insufficient and you discover a concrete follow-up task that must be tracked explicitly
 
 ## When NOT to Use This Tool
 
@@ -22,6 +22,8 @@ Skip using this tool when:
 - The work is trivial and tracking adds no value
 - The task can be completed in fewer than 3 trivial steps
 - The task is purely conversational or informational
+- You already have a relevant task list for the approved plan and can continue by using TaskList, TaskGet, and TaskUpdate
+- The work is a major new requirement or scope change that should first be surfaced to the user before you expand the plan
 
 ## Task Fields
 
@@ -34,8 +36,10 @@ All tasks are created with status \`pending\`.
 ## Tips
 
 - Check TaskList first to avoid creating duplicate tasks
+- After plan mode approval, prefer consuming the approved task list instead of creating a brand-new execution plan during implementation
 - After creating tasks, use TaskUpdate to add dependencies when needed
 - When you begin work on a task, mark it as \`in_progress\` before starting
 - When you finish the work completely, mark it as \`completed\`
-- When finishing a task reveals new work, create follow-up tasks instead of leaving that work implicit
+- When finishing a task reveals small follow-up work, create a focused follow-up task instead of leaving it implicit
+- When finishing a task reveals a substantial new workstream, do not silently expand scope. Finish the current turn, explain the newly discovered work to the user, and treat any new task list as follow-on work after user alignment
 `

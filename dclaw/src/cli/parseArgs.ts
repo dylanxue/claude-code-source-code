@@ -45,7 +45,7 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
     outputFormat: 'text' as 'text' | 'sse',
     permissionMode: undefined as PermissionMode | undefined,
     maxIterations: undefined as number | undefined,
-    stream: false,
+    stream: true,
     verbose: false,
     systemPrompt: undefined as string | undefined,
   }
@@ -67,6 +67,9 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
         break
       case '--stream':
         options.stream = true
+        break
+      case '--no-stream':
+        options.stream = false
         break
       case '--verbose':
       case '-d':
@@ -210,7 +213,8 @@ export function formatHelp(): string {
     '  --doctor                  Show environment diagnostics',
     `  --provider <name>         Select provider (${SUPPORTED_LLM_PROVIDERS.join(', ')})`,
     '  --model <name>            Override the model name',
-    '  --stream                  Stream assistant output as it arrives',
+    '  --stream                  Stream assistant output as it arrives (default)',
+    '  --no-stream               Disable streaming and wait for the final response',
     '  -d, --verbose             Show reasoning, content, and tool-call events',
     '  --output-format <format>  Output format for --print (text, sse)',
     '  --permission-mode <mode>  Select permission mode',

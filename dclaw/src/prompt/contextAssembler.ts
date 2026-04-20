@@ -8,6 +8,7 @@ export type PromptContextInput = {
   mode: PromptMode
   permissionMode?: PromptContext['permissionMode']
   plan?: PromptContext['plan']
+  memory?: PromptContext['memory']
   userSystemPrompt?: string
   claudeMdEntries?: ClaudeMdEntry[]
 }
@@ -22,6 +23,7 @@ export function assemblePromptContext(
     mode: input.mode,
     permissionMode: input.permissionMode,
     plan: input.plan,
+    memory: input.memory,
     userSystemPrompt: input.userSystemPrompt,
     claudeMdEntries: input.claudeMdEntries ?? [],
   }

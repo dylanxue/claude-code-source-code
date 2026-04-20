@@ -44,23 +44,26 @@ memory 使用本地文件持久化。
 
 在 query 时：
 
-1. 扫描 memory 文件头
-2. 生成 manifest
-3. 选择与当前 query 最相关的少量 memory
-4. 注入上下文
+1. `MEMORY.md` 入口索引常驻注入 system prompt
+2. 扫描 memory 文件头，生成 manifest
+3. 使用 side-query 基于 query + manifest 选择与当前 query 最相关的少量 memory
+4. 将选中的 memory 文件正文按上限注入上下文
 
 ### 2.5 当前实现状态
 
-当前已完成 `阶段 10-1`：
+当前已完成：
 
 - 已新增 `src/memory/paths.ts / frontmatter.ts / store.ts / manifest.ts / recall.ts`
 - 已落地 memory 目录路径、`MEMORY.md` 入口、独立 memory markdown 文件
 - 已落地最小 frontmatter 与 file-based manifest
-- 已提供 deterministic `recall` helper，供后续 `10-2` 接入 query-time recall / prompt 注入
+- 已接通 `MEMORY.md` 常驻 system prompt
+- 已接通 query-time recall / prompt 注入主链路
+- 已将 recall 收口到 side-query 选择主路径
+- 已明确 side-query selector 永远复用主对话的 `client/model`，不单独引入 selector model / routing
+- 已将 turn-end automatic extraction 收口到非阻塞 / 后台写回主路径
 
 当前尚未完成：
 
-- query-time prompt 注入
 - 自动/手动写回策略收口
 - team memory sync
 
@@ -90,10 +93,11 @@ memory 使用本地文件持久化。
 
 ## 5. recall 上限
 
-首版建议：
+当前约束：
 
 - 单次最多召回 5 条 memory
-- 优先使用 frontmatter + 描述筛选
+- `MEMORY.md` 单独常驻注入
+- 相关 memory 选择遵循“manifest + side-query”主线，不继续堆本地 heuristic
 
 ## 6. team memory
 

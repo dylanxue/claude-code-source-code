@@ -5,6 +5,7 @@ import {
   loadTaskBoardForSession,
   updateTaskBoard,
 } from '../../tasks/store.js'
+import { materializeInitialTasksFromApprovedPlan } from '../../tasks/materialize.js'
 import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import type { PlanModeRequest } from '../../tasks/types.js'
 import type {
@@ -54,7 +55,15 @@ function extractPlanPreview(content: string | null): string | undefined {
 function extractAnswers(
   value: Record<string, string> | AskUserQuestionHostResult,
 ): Record<string, string> {
-  return 'answers' in value ? value.answers : value
+  if (
+    'answers' in value &&
+    typeof value.answers === 'object' &&
+    value.answers !== null
+  ) {
+    return value.answers
+  }
+
+  return value as Record<string, string>
 }
 
 function buildPlanRejectionMessage(planContent: string | null): string {
@@ -266,6 +275,14 @@ export const exitPlanModeTool: Tool<
 
     context.setPermissionMode?.(resumedPermissionMode)
     context.setPlanFilePath?.(undefined)
+    const materializedTasks =
+      planContent && planContent.trim().length > 0
+        ? await materializeInitialTasksFromApprovedPlan(
+            context.sessionId,
+            context.cwd,
+            planContent,
+          )
+        : { createdCount: 0, skippedBecauseTasksExist: false }
     await appendPlanSnapshotForFile(
       context.sessionId,
       updated.planFilePath,
@@ -282,7 +299,10 @@ export const exitPlanModeTool: Tool<
         ...(planPreview ? { planPreview } : {}),
         ...(planContent ? { plan: planContent } : {}),
       },
-      summary: `Plan mode exited with approval. Resume implementation in ${resumedPermissionMode} mode.`,
+      summary:
+        materializedTasks.createdCount > 0
+          ? `Plan mode exited with approval. Created ${materializedTasks.createdCount} initial task(s) from the approved plan and resumed implementation in ${resumedPermissionMode} mode.`
+          : `Plan mode exited with approval. Resume implementation in ${resumedPermissionMode} mode.`,
     }
   },
 })

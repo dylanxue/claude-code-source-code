@@ -3,6 +3,7 @@ import {
   getContextSection,
   getDoingTasksSection,
   getIntroSection,
+  getMemorySection,
   getPlanModeSection,
   getUserOverrideSection,
 } from './sections.js'
@@ -14,6 +15,7 @@ export function buildSystemPrompt(context: PromptContext): string {
     getDoingTasksSection(),
     getContextSection(context),
     getPlanModeSection(context),
+    getMemorySection(context),
     getClaudeMdSection(context),
     getUserOverrideSection(context),
   ].filter((section): section is string => Boolean(section))

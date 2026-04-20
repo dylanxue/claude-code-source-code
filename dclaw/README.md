@@ -200,9 +200,10 @@ npm run start -- --doctor --provider openai
 
 ## Streaming 与 SSE
 
-`dclaw` 现在支持基础流式返回：
+`dclaw` 现在默认启用基础流式返回：
 
-- `--stream`：直接输出文本增量
+- 默认行为：直接输出文本增量
+- `--no-stream`：关闭流式输出，等待最终响应
 - `--output-format sse`：按 SSE 事件格式输出
 - 真实 provider 默认还会补几层稳定性保护：
   - 默认重试次数：`DCLAW_LLM_MAX_RETRIES=10`

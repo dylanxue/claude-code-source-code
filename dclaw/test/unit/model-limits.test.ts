@@ -45,6 +45,42 @@ test('built-in openai model limits support modern responses models', () => {
     maxOutputTokensUpperLimit: 32_768,
   })
 
+  assert.deepEqual(getBuiltInModelLimits('openai', 'bytedance-seed-code'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 32_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'dola-seed-2.0-pro'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'doubao-seed-2.0-code'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'doubao-seed-2.0-pro'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'doubao-seed-2.0-lite'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'seed-1-8-251228'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 64_000,
+    maxOutputTokensUpperLimit: 64_000,
+  })
+
   assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek-chat'), {
     contextWindow: 131_072,
     maxOutputTokens: 4_096,
@@ -113,6 +149,36 @@ test('built-in openai model limits support modern responses models', () => {
 })
 
 test('built-in anthropic model limits support compatibility models', () => {
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'bytedance-seed-code'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 32_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'seed-2-0-lite-260228'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'doubao-seed-2.0-code'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'doubao-seed-2.0-pro'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('anthropic', 'doubao-seed-2.0-lite'), {
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    maxOutputTokensUpperLimit: 128_000,
+  })
+
   assert.deepEqual(getBuiltInModelLimits('anthropic', 'kimi-k2.5'), {
     contextWindow: 256_000,
     maxOutputTokens: 32_768,

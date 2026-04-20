@@ -44,6 +44,20 @@ test('parseArgs enables verbose mode', () => {
   assert.equal(command.options.verbose, true)
 })
 
+test('parseArgs enables streaming by default', () => {
+  const command = parseArgs(['--print', 'hello'])
+
+  assert.equal(command.mode, 'print')
+  assert.equal(command.options.stream, true)
+})
+
+test('parseArgs accepts explicit no-stream overrides', () => {
+  const command = parseArgs(['--print', '--no-stream', 'hello'])
+
+  assert.equal(command.mode, 'print')
+  assert.equal(command.options.stream, false)
+})
+
 test('parseArgs leaves permission mode unset when not explicitly provided', () => {
   const command = parseArgs(['--print', 'hello'])
 

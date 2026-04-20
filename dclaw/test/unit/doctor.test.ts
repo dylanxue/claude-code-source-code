@@ -61,4 +61,7 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
   assert.match(text, /request timeout\s+12345ms \(env\)/)
   assert.match(text, /stream watchdog\s+disabled \(workspace_config\)/)
   assert.match(text, /stream idle timeout\s+45678ms \(env\)/)
+  assert.match(text, /memory dir\s+.*\/projects\/.*\/memory/)
+  assert.match(text, /memory entrypoint\s+.*\/MEMORY\.md/)
+  assert.match(text, /memory entrypoint exists\s+no/)
 })

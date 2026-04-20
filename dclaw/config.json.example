@@ -9,7 +9,7 @@
 
     "MODEL_PROVIDER": "openai",
     
-    "OPENAI_MODEL": "minimax-m2.5",
+    "OPENAI_MODEL": "glm-4.7",
     "OPENAI_API_STYLE": "chat-completions",
     "OPENAI_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
     "OPENAI_API_KEY": "f4b1bde0-e387-49ef-a732-e9e369770766",

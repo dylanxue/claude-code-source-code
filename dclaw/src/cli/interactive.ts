@@ -17,6 +17,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     toolRegistry,
     engine,
     rotateQueryTrace,
+    drainBackgroundWork,
     permissionMode,
     permissionModeSource,
   } = await prepareCliRuntime(command.options, 'interactive')
@@ -130,4 +131,5 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
       process.stderr.write(output.text)
     },
   })
+  await drainBackgroundWork()
 }
