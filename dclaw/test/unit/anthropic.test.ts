@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  createImageBlock,
   createMessage,
   createTextMessage,
   createToolResultMessage,
@@ -280,6 +281,161 @@ test('AnthropicLlmClient sends messages and tools to the Anthropic API', async (
   } finally {
     server.close()
     await once(server, 'close')
+  }
+})
+
+test('AnthropicLlmClient maps user image blocks to Anthropic image content', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'ok' }],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+    })
+
+    await client.createMessage({
+      model: 'claude-test',
+      messages: [
+        createMessage('user', [
+          { type: 'text', text: 'What is in this image?' },
+          createImageBlock('image/png', 'abc123'),
+        ]),
+      ],
+    })
+
+    assert.deepEqual(capturedBody, {
+      model: 'claude-test',
+      max_tokens: 32000,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is in this image?' },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: 'abc123',
+              },
+            },
+          ],
+        },
+      ],
+    })
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
+test('AnthropicLlmClient stringifies tool_result output even when structured image content exists', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'ok' }],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+    })
+
+    await client.createMessage({
+      model: 'claude-test',
+      messages: [
+        createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'tool_img_1',
+            name: 'WebFetch',
+            input: { url: 'https://example.com/cat.png', prompt: 'Describe it' },
+          },
+        ]),
+        createToolResultMessage(
+          'user',
+          'tool_img_1',
+          {
+            contentKind: 'image',
+            mediaType: 'image/png',
+            result: 'Downloaded image content for analysis.',
+          },
+          {
+            ok: true,
+            output: {
+              contentKind: 'image',
+              mediaType: 'image/png',
+              result: 'Downloaded image content for analysis.',
+            },
+          },
+          [
+            { type: 'text', text: 'Downloaded image content for analysis.' },
+            createImageBlock('image/png', 'abc123'),
+          ],
+        ),
+      ],
+    })
+
+    const toolResult = (
+      capturedBody as {
+        messages?: Array<{
+          content?: Array<{ type: string; content?: string }>
+        }>
+      }
+    ).messages?.[1]?.content?.[0]
+    assert.equal(toolResult?.type, 'tool_result')
+    assert.match(toolResult?.content ?? '', /contentKind/)
+    assert.doesNotMatch(toolResult?.content ?? '', /abc123/)
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
   }
 })
 

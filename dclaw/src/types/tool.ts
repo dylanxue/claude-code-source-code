@@ -1,13 +1,23 @@
+import type {
+  ImageContentBlock,
+  Message,
+  TextContentBlock,
+} from './message.js'
+
 export type PermissionMode =
   | 'default'
   | 'accept-edits'
   | 'bypass-permissions'
   | 'plan'
 
+export type ToolResultContent = TextContentBlock | ImageContentBlock
+
 export type ToolResult<T = unknown> = {
   ok: boolean
   output: T
   summary?: string
+  content?: ToolResultContent[]
+  newMessages?: Message[]
 }
 
 export type ToolValidationResult =

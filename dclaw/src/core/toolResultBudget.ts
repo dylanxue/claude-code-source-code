@@ -233,6 +233,7 @@ function collectCandidates(
     message.content.forEach((block, blockIndex) => {
       if (
         block.type !== 'tool_result' ||
+        (Array.isArray(block.content) && block.content.length > 0) ||
         isPersistedToolResultOutput(block.output)
       ) {
         return

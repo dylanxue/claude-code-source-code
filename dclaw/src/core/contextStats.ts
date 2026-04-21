@@ -51,6 +51,8 @@ function getBlockApproxChars(block: ContentBlock): number {
   switch (block.type) {
     case 'text':
       return block.text.length
+    case 'image':
+      return block.source.mediaType.length + block.source.data.length
     case 'thinking':
       return block.thinking.length
     case 'redacted_thinking':
@@ -62,7 +64,16 @@ function getBlockApproxChars(block: ContentBlock): number {
     case 'tool_use':
       return block.name.length + stringifyValue(block.input).length
     case 'tool_result':
-      return stringifyValue(block.output).length
+      return block.content && block.content.length > 0
+        ? block.content.reduce(
+            (total, item) =>
+              total +
+              (item.type === 'text'
+                ? item.text.length
+                : item.source.mediaType.length + item.source.data.length),
+            0,
+          )
+        : stringifyValue(block.output).length
   }
 }
 

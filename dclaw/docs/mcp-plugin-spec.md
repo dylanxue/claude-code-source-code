@@ -106,7 +106,7 @@ remote bridge 的目标：
 
 如果 `dclaw` 继续向 Claude Code 当前源码靠拢，这一层后续应优先补的是“能力如何被动态告知模型”，而不是把更多能力说明继续堆进总 prompt。
 
-除 `plan / task / todo` 外，Claude Code 当前源码里最值得对齐的 reminder 类型，主要是：
+除 `plan / task` 外，Claude Code 当前源码里最值得对齐的 reminder 类型，主要是：
 
 1. `Agent`
    - 动态 agent 类型列表走 reminder

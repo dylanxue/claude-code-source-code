@@ -27,7 +27,12 @@ import {
 } from '../../src/tasks/store.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
 import { buildTool } from '../../src/tools/types.js'
-import { createMessage, createTextMessage, getTextContent } from '../../src/types/message.js'
+import {
+  createImageBlock,
+  createMessage,
+  createTextMessage,
+  getTextContent,
+} from '../../src/types/message.js'
 import { createToolContext } from '../helpers/toolContext.js'
 import type {
   CreateMessageRequest,
@@ -83,6 +88,35 @@ class ToolThenFailingStreamClient implements LlmClient {
     }
 
     throw new TypeError('terminated')
+  }
+}
+
+class ToolThenAnswerClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+
+  constructor(private readonly toolName: string) {}
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    if (this.requests.length === 1) {
+      return {
+        message: createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'tool_img_1',
+            name: this.toolName,
+            input: {},
+          },
+        ]),
+      }
+    }
+
+    return {
+      message: createTextMessage('assistant', 'done'),
+    }
   }
 }
 
@@ -206,6 +240,395 @@ test('QueryEngine preserves completed turn messages when a later iteration fails
   assert.equal(messages[2]?.content[0]?.type, 'tool_result')
 })
 
+test('QueryEngine injects image tool results as transient user image messages', async () => {
+  const client = new ToolThenAnswerClient('RemoteImage')
+  const registry = new ToolRegistry()
+  registry.register(
+    buildTool({
+      name: 'RemoteImage',
+      description: 'Returns image content for follow-up model analysis.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          contentKind: { type: 'string' },
+          mediaType: { type: 'string' },
+          result: { type: 'string' },
+        },
+        required: ['contentKind', 'mediaType', 'result'],
+        additionalProperties: false,
+      },
+      isReadOnly() {
+        return true
+      },
+      async call() {
+        return {
+          ok: true,
+          output: {
+            contentKind: 'image',
+            mediaType: 'image/png',
+            result: 'Downloaded image content for analysis.',
+          },
+          content: [
+            { type: 'text', text: 'Downloaded image content for analysis.' },
+            createImageBlock('image/png', 'abc123'),
+          ],
+        }
+      },
+    }),
+  )
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: ['RemoteImage'],
+    }),
+  })
+
+  const result = await engine.submitUserPrompt('please inspect the remote image')
+
+  assert.equal(result.outputText, 'done')
+  assert.equal(client.requests.length, 2)
+
+  const followupMessages = client.requests[1]?.messages ?? []
+  const transientImageMessage = followupMessages.at(-1)
+  assert.ok(transientImageMessage)
+  assert.equal(transientImageMessage?.role, 'user')
+  assert.deepEqual(
+    transientImageMessage?.content.map(block => block.type),
+    ['text', 'image'],
+  )
+  const imageBlock = transientImageMessage?.content[1]
+  assert.ok(imageBlock && imageBlock.type === 'image')
+  assert.equal(imageBlock.source.mediaType, 'image/png')
+
+  const persistedMessages = engine.getMessages()
+  assert.equal(
+    persistedMessages.filter(
+      message =>
+        message.role === 'user' &&
+        message.content.some(block => block.type === 'image'),
+    ).length,
+    0,
+  )
+})
+
+test('QueryEngine restores image tool results across compact boundaries via transient messages', async () => {
+  const client = new CapturingLlmClient()
+  const toolResultMessage = createMessage('user', [
+    {
+      type: 'tool_result',
+      toolUseId: 'tool_img_1',
+      output: {
+        contentKind: 'image',
+        mediaType: 'image/png',
+        result: 'Downloaded image content for analysis.',
+      },
+      content: [
+        { type: 'text', text: 'Downloaded image content for analysis.' },
+        createImageBlock('image/png', 'abc123'),
+      ],
+    },
+  ])
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_image_restore',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 3,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    initialMessages: [
+      createTextMessage('user', 'inspect the remote image'),
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_img_1',
+          name: 'WebFetch',
+          input: { url: 'https://example.com/cat.png', prompt: 'Describe it' },
+        },
+      ]),
+      toolResultMessage,
+      boundaryMessage,
+      summaryMessage,
+    ],
+  })
+
+  await engine.submitUserPrompt('continue after compact')
+
+  const requestMessages = client.requests[0]?.messages ?? []
+  const transientImageMessage = requestMessages.at(-1)
+  assert.ok(transientImageMessage)
+  assert.equal(transientImageMessage?.role, 'user')
+  assert.deepEqual(
+    transientImageMessage?.content.map(block => block.type),
+    ['text', 'image'],
+  )
+})
+
+test('QueryEngine only restores pre-compact image tool results on the first turn after compact', async () => {
+  const client = new CapturingLlmClient()
+  const toolResultMessage = createMessage('user', [
+    {
+      type: 'tool_result',
+      toolUseId: 'tool_img_once',
+      output: {
+        contentKind: 'image',
+        mediaType: 'image/png',
+        result: 'Downloaded image content for analysis.',
+      },
+      content: [
+        { type: 'text', text: 'Downloaded image content for analysis.' },
+        createImageBlock('image/png', 'abc123'),
+      ],
+    },
+  ])
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_image_once',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 3,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    initialMessages: [
+      createTextMessage('user', 'inspect the remote image'),
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_img_once',
+          name: 'WebFetch',
+          input: { url: 'https://example.com/cat.png', prompt: 'Describe it' },
+        },
+      ]),
+      toolResultMessage,
+      boundaryMessage,
+      summaryMessage,
+    ],
+  })
+
+  await engine.submitUserPrompt('continue after compact')
+  await engine.submitUserPrompt('continue once more')
+
+  const firstRequestMessages = client.requests[0]?.messages ?? []
+  const firstTransientImageMessage = [...firstRequestMessages]
+    .reverse()
+    .find(
+      message =>
+      message.role === 'user' &&
+      message.content.some(block => block.type === 'image'),
+    )
+  assert.ok(firstTransientImageMessage)
+
+  const secondRequestMessages = client.requests[1]?.messages ?? []
+  const secondTransientImageMessage = [...secondRequestMessages]
+    .reverse()
+    .find(
+      message =>
+      message.role === 'user' &&
+      message.content.some(block => block.type === 'image'),
+  )
+  assert.equal(secondTransientImageMessage, undefined)
+})
+
+test('QueryEngine restores up to two recent pre-compact images on the first turn after compact', async () => {
+  const client = new CapturingLlmClient()
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_two_images',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 7,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    initialMessages: [
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_img_a',
+          name: 'WebFetch',
+          input: { url: 'https://example.com/a.png', prompt: 'Describe it' },
+        },
+      ]),
+      createMessage('user', [
+        {
+          type: 'tool_result',
+          toolUseId: 'tool_img_a',
+          output: { contentKind: 'image', mediaType: 'image/png', result: 'a' },
+          content: [{ type: 'text', text: 'a' }, createImageBlock('image/png', 'aaa')],
+        },
+      ]),
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_img_b',
+          name: 'Read',
+          input: { file_path: '/tmp/b.webp' },
+        },
+      ]),
+      createMessage('user', [
+        {
+          type: 'tool_result',
+          toolUseId: 'tool_img_b',
+          output: { contentKind: 'image', mediaType: 'image/webp', result: 'b' },
+          content: [{ type: 'text', text: 'b' }, createImageBlock('image/webp', 'bbb')],
+        },
+      ]),
+      boundaryMessage,
+      summaryMessage,
+    ],
+  })
+
+  await engine.submitUserPrompt('continue after compact')
+
+  const requestMessages = client.requests[0]?.messages ?? []
+  const restoredImageMessages = requestMessages.filter(
+    message =>
+      message.role === 'user' &&
+      message.content.some(block => block.type === 'image'),
+  )
+  assert.equal(restoredImageMessages.length, 2)
+  assert.deepEqual(
+    restoredImageMessages.map(message => {
+      const imageBlock = message.content.find(
+        block => block.type === 'image',
+      ) as { type: 'image'; source: { mediaType: string } }
+      return imageBlock.source.mediaType
+    }),
+    ['image/png', 'image/webp'],
+  )
+})
+
+test('QueryEngine skips oversized post-compact images and restores smaller recent ones within budget', async () => {
+  const client = new CapturingLlmClient()
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_image_budget',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 9,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    initialMessages: [
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_small_old',
+          name: 'WebFetch',
+          input: { url: 'https://example.com/old.png', prompt: 'Describe it' },
+        },
+      ]),
+      createMessage('user', [
+        {
+          type: 'tool_result',
+          toolUseId: 'tool_small_old',
+          output: { contentKind: 'image', mediaType: 'image/png', result: 'old' },
+          content: [
+            { type: 'text', text: 'old' },
+            createImageBlock('image/png', 'small-old'),
+          ],
+        },
+      ]),
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_small_new',
+          name: 'Read',
+          input: { file_path: '/tmp/new.gif' },
+        },
+      ]),
+      createMessage('user', [
+        {
+          type: 'tool_result',
+          toolUseId: 'tool_small_new',
+          output: { contentKind: 'image', mediaType: 'image/gif', result: 'new' },
+          content: [
+            { type: 'text', text: 'new' },
+            createImageBlock('image/gif', 'small-new'),
+          ],
+        },
+      ]),
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_large_skip',
+          name: 'WebFetch',
+          input: { url: 'https://example.com/large.jpg', prompt: 'Describe it' },
+        },
+      ]),
+      createMessage('user', [
+        {
+          type: 'tool_result',
+          toolUseId: 'tool_large_skip',
+          output: { contentKind: 'image', mediaType: 'image/jpeg', result: 'large' },
+          content: [
+            { type: 'text', text: 'large' },
+            createImageBlock('image/jpeg', 'x'.repeat(300_100)),
+          ],
+        },
+      ]),
+      boundaryMessage,
+      summaryMessage,
+    ],
+  })
+
+  await engine.submitUserPrompt('continue after compact')
+
+  const requestMessages = client.requests[0]?.messages ?? []
+  const restoredImageMessages = requestMessages.filter(
+    message =>
+      message.role === 'user' &&
+      message.content.some(block => block.type === 'image'),
+  )
+  assert.equal(restoredImageMessages.length, 2)
+  assert.deepEqual(
+    restoredImageMessages.map(message => {
+      const imageBlock = message.content.find(
+        block => block.type === 'image',
+      ) as { type: 'image'; source: { mediaType: string } }
+      return imageBlock.source.mediaType
+    }),
+    ['image/png', 'image/gif'],
+  )
+})
+
 test('session store persists transcript messages for resume', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-'))
   const env = { ...process.env, HOME: homeDir }
@@ -235,6 +658,80 @@ test('session store persists transcript messages for resume', async () => {
     assert.equal(resumed?.meta.cwd, '/tmp/project')
     assert.equal(resumed?.messages.length, 2)
     assert.equal(resumed?.messages[1]?.role, 'assistant')
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('resumed sessions preserve tool_result image content for transient reinjection', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-image-resume-'))
+  const env = { ...process.env, HOME: homeDir }
+  const client = new CapturingLlmClient()
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      env,
+    })
+    const messages = [
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'tool_img_1',
+          name: 'WebFetch',
+          input: { url: 'https://example.com/cat.png', prompt: 'Describe it' },
+        },
+      ]),
+      createMessage('user', [
+        {
+          type: 'tool_result',
+          toolUseId: 'tool_img_1',
+          output: {
+            contentKind: 'image',
+            mediaType: 'image/png',
+            result: 'Downloaded image content for analysis.',
+          },
+          content: [
+            { type: 'text', text: 'Downloaded image content for analysis.' },
+            createImageBlock('image/png', 'abc123'),
+          ],
+        },
+      ]),
+    ]
+
+    await appendSessionMessages(session.sessionId, messages, env)
+    const resumed = await loadSessionForResume(session.sessionId, env)
+
+    assert.ok(resumed)
+    const resumedToolResult = resumed?.messages[1]?.content[0]
+    assert.ok(resumedToolResult && resumedToolResult.type === 'tool_result')
+    assert.deepEqual(
+      resumedToolResult.content?.map(item => item.type),
+      ['text', 'image'],
+    )
+
+    const engine = new QueryEngine({
+      client,
+      toolRegistry: new ToolRegistry(),
+      toolContext: createToolContext({
+        sessionId: session.sessionId,
+      }),
+      initialMessages: resumed?.messages ?? [],
+    })
+
+    await engine.submitUserPrompt('continue after resume')
+
+    const requestMessages = client.requests[0]?.messages ?? []
+    const transientImageMessage = requestMessages.at(-1)
+    assert.ok(transientImageMessage)
+    assert.equal(transientImageMessage?.role, 'user')
+    assert.deepEqual(
+      transientImageMessage?.content.map(block => block.type),
+      ['text', 'image'],
+    )
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

@@ -1,11 +1,24 @@
 import type { ToolResult } from '../../types/tool.js'
+import { createImageBlock } from '../../types/message.js'
+import {
+  IMAGE_TARGET_RAW_SIZE,
+  optimizeImageForModel,
+} from '../../llm/imageProcessing.js'
 import { buildTool, type Tool } from '../types.js'
+import { getDefaultReadLimits } from './readLimits.js'
 import { DESCRIPTION, PROMPT } from './webFetchPrompt.js'
 
 const MAX_RESULT_CHARS = 16_000
 const MAX_METADATA_CHARS = 300
 const MAX_EXCERPTS = 6
 const MAX_SECTION_CHARS = 1_800
+const FETCH_TIMEOUT_MS = 20_000
+const SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+])
 const REDIRECT_STATUS_TEXT: Record<number, string> = {
   301: 'Moved Permanently',
   302: 'Found',
@@ -27,6 +40,8 @@ export type WebFetchToolOutput = {
   durationMs: number
   url: string
   contentType: string
+  contentKind: 'text' | 'image'
+  mediaType?: string
   title?: string
   description?: string
   wasTruncated: boolean
@@ -36,6 +51,11 @@ type RedirectResponse = {
   type: 'redirect'
   location: string
   response: Response
+}
+
+type FetchTimeout = {
+  signal: AbortSignal
+  dispose: () => void
 }
 
 function decodeHtmlEntities(input: string): string {
@@ -78,6 +98,10 @@ function truncateText(
   }
 }
 
+function parseMediaType(contentType: string): string {
+  return contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+}
+
 function normalizeUrl(rawUrl: string): string {
   const parsed = new URL(rawUrl)
   const isLocalhost =
@@ -90,6 +114,14 @@ function normalizeUrl(rawUrl: string): string {
   }
 
   return parsed.toString()
+}
+
+function isSupportedRemoteImageMediaType(contentType: string): boolean {
+  return SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES.has(parseMediaType(contentType))
+}
+
+function isImageLikeContentType(contentType: string): boolean {
+  return parseMediaType(contentType).startsWith('image/')
 }
 
 function extractHtmlMetadata(rawHtml: string): {
@@ -346,6 +378,7 @@ function selectRelevantSections(
 
 async function fetchWithRedirectHandling(
   inputUrl: string,
+  signal: AbortSignal,
   redirectLimit: number = 5,
 ): Promise<Response | RedirectResponse> {
   let currentUrl = inputUrl
@@ -356,8 +389,9 @@ async function fetchWithRedirectHandling(
       headers: {
         'user-agent': 'dclaw/0.1.0',
         accept:
-          'text/html,application/xhtml+xml,application/json,text/plain,text/markdown;q=0.9,*/*;q=0.1',
+          'text/html,application/xhtml+xml,application/json,text/plain,text/markdown,image/png,image/jpeg,image/gif,image/webp;q=0.9,*/*;q=0.1',
       },
+      signal,
     })
 
     const location = response.headers.get('location')
@@ -387,6 +421,15 @@ async function fetchWithRedirectHandling(
   }
 
   throw new Error(`WebFetch exceeded redirect limit while fetching ${inputUrl}`)
+}
+
+function createFetchTimeout(timeoutMs: number): FetchTimeout {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  return {
+    signal: controller.signal,
+    dispose: () => clearTimeout(timeout),
+  }
 }
 
 function buildRedirectMessage(
@@ -453,9 +496,117 @@ function buildResultText(
   }
 }
 
+function buildImageResultText(
+  input: WebFetchToolInput,
+  response: Response,
+  contentType: string,
+  sourceBytes: number,
+  attachedBytes: number,
+  attachedMediaType: string,
+  wasOptimized: boolean,
+  estimatedTokens: number,
+): string {
+  const lines = [
+    `Prompt: ${input.prompt}`,
+    '',
+    `Fetched from: ${response.url}`,
+    `Status: ${response.status} ${response.statusText}`,
+    `Content-Type: ${contentType || '<unknown>'}`,
+    `Bytes: ${attachedBytes}`,
+    '',
+  ]
+
+  if (wasOptimized) {
+    lines.push(
+      `Downloaded ${sourceBytes} source bytes and attached an optimized ${attachedMediaType} payload (${attachedBytes} bytes, ~${estimatedTokens} tokens) for the prompt.`,
+    )
+  } else {
+    lines.push(
+      `Downloaded image content for the prompt. The image is attached below as structured tool result content (~${estimatedTokens} tokens).`,
+    )
+  }
+
+  return lines.join('\n')
+}
+
+function getContentLength(response: Response): number | undefined {
+  const header = response.headers.get('content-length')
+  if (!header) {
+    return undefined
+  }
+
+  const parsed = Number(header)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+}
+
+async function readRemoteImage(
+  response: Response,
+  maxImageSourceBytes: number,
+  maxTokens: number,
+): Promise<{
+  bytes: number
+  mediaType: string
+  data: string
+  sourceBytes: number
+  wasOptimized: boolean
+  estimatedTokens: number
+}> {
+  const contentType = response.headers.get('content-type') ?? ''
+  const mediaType = parseMediaType(contentType)
+  if (!isSupportedRemoteImageMediaType(contentType)) {
+    throw new Error(
+      `WebFetch only supports remote images with media types: ${[...SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES].join(', ')}. Received ${mediaType || '<unknown>'}.`,
+    )
+  }
+
+  const contentLength = getContentLength(response)
+  if (
+    typeof contentLength === 'number' &&
+    contentLength > maxImageSourceBytes
+  ) {
+    throw new Error(
+      `WebFetch image source is too large (${contentLength} bytes). Limit is ${maxImageSourceBytes} bytes.`,
+    )
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (buffer.length > maxImageSourceBytes) {
+    throw new Error(
+      `WebFetch image source is too large (${buffer.length} bytes). Limit is ${maxImageSourceBytes} bytes.`,
+    )
+  }
+
+  const optimizedImage = await optimizeImageForModel(buffer, mediaType, {
+    maxTokens,
+  })
+  if (optimizedImage.buffer.length > IMAGE_TARGET_RAW_SIZE) {
+    throw new Error(
+      `WebFetch image could not be reduced to the model attachment limit (${IMAGE_TARGET_RAW_SIZE} bytes raw payload target).`,
+    )
+  }
+  if (optimizedImage.estimatedTokens > maxTokens) {
+    throw new Error(
+      `WebFetch image could not be reduced to the image token budget (${optimizedImage.estimatedTokens}/${maxTokens} estimated tokens).`,
+    )
+  }
+
+  return {
+    bytes: optimizedImage.buffer.length,
+    mediaType: optimizedImage.mediaType,
+    data: optimizedImage.buffer.toString('base64'),
+    sourceBytes: buffer.length,
+    wasOptimized: optimizedImage.wasOptimized,
+    estimatedTokens: optimizedImage.estimatedTokens,
+  }
+}
+
 export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTool({
   name: 'WebFetch',
   description: DESCRIPTION,
+  // Keep text fetches budget-aware. Remote image fetches are self-bounded by
+  // the source-image limit plus fetch-time optimization, and they return
+  // structured content, so the aggregate tool-result budget skips them
+  // entirely.
   maxResultSizeChars: 40_000,
   prompt() {
     return PROMPT
@@ -485,6 +636,8 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
       durationMs: { type: 'integer' },
       url: { type: 'string' },
       contentType: { type: 'string' },
+      contentKind: { type: 'string' },
+      mediaType: { type: 'string' },
       title: { type: 'string' },
       description: { type: 'string' },
       wasTruncated: { type: 'boolean' },
@@ -497,6 +650,7 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
       'durationMs',
       'url',
       'contentType',
+      'contentKind',
       'wasTruncated',
     ],
     additionalProperties: false,
@@ -534,61 +688,117 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
   async call(input): Promise<ToolResult<WebFetchToolOutput>> {
     const start = Date.now()
     const normalizedUrl = normalizeUrl(input.url)
-    const fetched = await fetchWithRedirectHandling(normalizedUrl)
+    const limits = getDefaultReadLimits()
+    const fetchTimeout = createFetchTimeout(FETCH_TIMEOUT_MS)
+    try {
+      const fetched = await fetchWithRedirectHandling(normalizedUrl, fetchTimeout.signal)
 
-    if ('type' in fetched && fetched.type === 'redirect') {
-      const result = buildRedirectMessage(
-        normalizedUrl,
-        fetched.location,
-        fetched.response.status,
-        input.prompt,
+      if ('type' in fetched && fetched.type === 'redirect') {
+        const result = buildRedirectMessage(
+          normalizedUrl,
+          fetched.location,
+          fetched.response.status,
+          input.prompt,
+        )
+
+        return {
+          ok: true,
+          output: {
+            bytes: Buffer.byteLength(result, 'utf8'),
+            code: fetched.response.status,
+            codeText:
+              REDIRECT_STATUS_TEXT[fetched.response.status] ??
+              fetched.response.statusText,
+            result,
+            durationMs: Date.now() - start,
+            url: normalizedUrl,
+            contentType: fetched.response.headers.get('content-type') ?? '',
+            contentKind: 'text',
+            wasTruncated: false,
+          },
+          summary: `Redirected from ${normalizedUrl}`,
+        }
+      }
+
+      const contentType = fetched.headers.get('content-type') ?? ''
+      if (isSupportedRemoteImageMediaType(contentType)) {
+        const image = await readRemoteImage(
+          fetched,
+          limits.maxImageSourceBytes,
+          limits.maxTokens,
+        )
+        const resultText = buildImageResultText(
+          input,
+          fetched,
+          contentType,
+          image.sourceBytes,
+          image.bytes,
+          image.mediaType,
+          image.wasOptimized,
+          image.estimatedTokens,
+        )
+
+        return {
+          ok: true,
+          output: {
+            bytes: image.bytes,
+            code: fetched.status,
+            codeText: fetched.statusText,
+            result: resultText,
+            durationMs: Date.now() - start,
+            url: fetched.url,
+            contentType,
+            contentKind: 'image',
+            mediaType: image.mediaType,
+            wasTruncated: false,
+          },
+          content: [
+            {
+              type: 'text',
+              text: resultText,
+            },
+            createImageBlock(image.mediaType, image.data),
+          ],
+          summary: `Fetched image ${fetched.url}`,
+        }
+      }
+
+      if (isImageLikeContentType(contentType)) {
+        throw new Error(
+          `WebFetch only supports remote images with media types: ${[...SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES].join(', ')}. Received ${parseMediaType(contentType) || '<unknown>'}.`,
+        )
+      }
+
+      const rawText = await fetched.text()
+      const normalized = normalizeFetchedText(rawText, contentType)
+      const rendered = buildResultText(
+        input,
+        fetched,
+        contentType,
+        normalized.text,
+        normalized.title,
+        normalized.description,
       )
 
       return {
         ok: true,
         output: {
-          bytes: Buffer.byteLength(result, 'utf8'),
-          code: fetched.response.status,
-          codeText:
-            REDIRECT_STATUS_TEXT[fetched.response.status] ??
-            fetched.response.statusText,
-          result,
+          bytes: Buffer.byteLength(rawText, 'utf8'),
+          code: fetched.status,
+          codeText: fetched.statusText,
+          result: rendered.result,
           durationMs: Date.now() - start,
-          url: normalizedUrl,
-          contentType: fetched.response.headers.get('content-type') ?? '',
-          wasTruncated: false,
+          url: fetched.url,
+          contentType,
+          contentKind: 'text',
+          ...(normalized.title ? { title: normalized.title } : {}),
+          ...(normalized.description ? { description: normalized.description } : {}),
+          wasTruncated: rendered.wasTruncated,
         },
-        summary: `Redirected from ${normalizedUrl}`,
+        summary: `Fetched ${fetched.url}`,
       }
-    }
-
-    const rawText = await fetched.text()
-    const contentType = fetched.headers.get('content-type') ?? ''
-    const normalized = normalizeFetchedText(rawText, contentType)
-    const rendered = buildResultText(
-      input,
-      fetched,
-      contentType,
-      normalized.text,
-      normalized.title,
-      normalized.description,
-    )
-
-    return {
-      ok: true,
-      output: {
-        bytes: Buffer.byteLength(rawText, 'utf8'),
-        code: fetched.status,
-        codeText: fetched.statusText,
-        result: rendered.result,
-        durationMs: Date.now() - start,
-        url: fetched.url,
-        contentType,
-        ...(normalized.title ? { title: normalized.title } : {}),
-        ...(normalized.description ? { description: normalized.description } : {}),
-        wasTruncated: rendered.wasTruncated,
-      },
-      summary: `Fetched ${fetched.url}`,
+    } finally {
+      fetchTimeout.dispose()
     }
   },
 })

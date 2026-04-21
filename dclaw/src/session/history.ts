@@ -42,10 +42,16 @@ function truncate(value: string, maxLength: number = 120): string {
 
 function summarizeMessage(message: Message): string | undefined {
   const text = getTextContent(message).trim()
+  const imageCount = message.content.filter(
+    block => block.type === 'image',
+  ).length
   if (text.length > 0) {
     return truncate(
       (describeSystemReminderText(text) ?? text).replace(/\s+/g, ' '),
     )
+  }
+  if (imageCount > 0) {
+    return imageCount === 1 ? '[image]' : `[${imageCount} images]`
   }
 
   for (const block of message.content) {

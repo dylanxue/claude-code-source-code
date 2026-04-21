@@ -91,7 +91,7 @@ Claude Code 当前源码就是这样做的：
 - reminder / attachment 主要用于承载“动态、会变化、按会话增量更新”的信息
 - 静态、稳定的工具使用规则，仍应优先留在 tool prompt
 
-Claude Code 当前源码中，除 `plan / task / todo` 外，真正明确走 reminder / attachment 注入的工具相关信息，主要有：
+Claude Code 当前源码中，除 `plan / task` 外，真正明确走 reminder / attachment 注入的工具相关信息，主要有：
 
 - `Agent`
   - agent 类型列表不再稳定内嵌在 tool prompt 中
@@ -164,7 +164,7 @@ Claude Code 当前源码中，除 `plan / task / todo` 外，真正明确走 rem
 - cwd
 - git 状态
 - `CLAUDE.md`
-- task / todo / current step 摘要
+- task / current step 摘要
 - memory
 - MCP
 - language

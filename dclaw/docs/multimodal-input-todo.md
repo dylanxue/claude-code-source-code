@@ -7,53 +7,75 @@
 当前这项工作的严格边界：
 
 - 只做消息级 `content blocks` 主路径
-- 当前优先做“模型通过工具读取图片并继续分析”
+- OpenAI 与 Anthropic 保持相同能力模型
 - 不额外发明通用附件系统
 - 不顺手扩成 PDF、音频、视频、OCR、文件上传平台
 
-这里再补一条很重要的实现分层：
+记住我们的原则：无限靠拢 Claude Code 的实现，不额外加戏。（claudecode源码在本项目的src目录，与dclaw目录同级)
 
-- 第一阶段优先支持“模型调用工具读取图片，并把图片作为结构化结果回给模型”
-- 第一阶段内优先打通 `tool_result` 结构化图片回传与 `WebFetch` 远程图片读取
-- 第二阶段再补“用户附图给模型看”
-- `--print --image` 暂不进入近期主线
+## 2. 当前实现状态
 
-记住我们的原则：无限靠拢 Claude Code 的实现，不额外加戏。
+截至当前代码，第一阶段已经不再是“先做 provider 私有的图片型 `tool_result` 回传”，而是收敛到更统一的运行时方案：
 
-## 2. 设计结论
+- 用户图片输入已接入共享消息模型
+- `Anthropic` 已支持用户消息里的 `text + image`
+- `OpenAI Responses` 已支持用户消息里的 `text + image`
+- `OpenAI chat-completions` 也已支持用户消息里的 `text + image`
+- 工具返回图片时，会先持久化在 `tool_result.content`
+- provider 侧仍只发送标准 `tool_result.output`
+- runtime 会把当前可见消息中的图片型 `tool_result.content` 重建为下一轮临时 `user image message`
+- `resume` 仍可依靠已持久化的 `tool_result.content` 恢复这条图片上下文
+- `compact` 后不再每轮重扫全历史图片，而是仅在 freshly compacted session 上一次性恢复少量最近图片
 
-根据 Claude Code 当前源码，真正的一等公民不是“附件”，而是：
+这意味着当前的真实主路径已经变成：
+
+1. 用户附图：
+   - 输入层生成 `user message` 的 `text + image blocks`
+   - provider 直接按标准多模态请求发送
+2. 模型主动取远程图片：
+   - 模型调用 `WebFetch`
+   - `WebFetch` 返回标准文本 `output` 与结构化 `content`
+   - runtime 将其中的图片内容提升为下一轮临时 `user image message`
+   - 两家 provider 都按相同方式继续推理
+
+## 3. 设计结论
+
+根据当前代码与 Claude Code 对齐方向，真正的一等公民不是“附件”，而是统一消息模型：
 
 - 用户消息 `content` 可以同时包含 `text` 与 `image`
 - 图片在进入模型前会被整理成消息块
 - 输入侧、会话侧、provider 侧都围绕同一份消息模型工作
 
-对 `dclaw` 来说，最小且正确的落地顺序应是：
+同时要明确区分两层语义：
 
-1. 先改共享消息模型
-2. 再改 provider 适配
-3. 再改 `tool_result` 的结构化多模态回填
-4. 再打通图片读取工具链路，优先 `WebFetch`
-5. 最后再补用户输入入口
+1. 持久化真值：
+   - `Message.content`
+   - `tool_result.output`
+   - `tool_result.content`
+2. 运行时桥接：
+   - 对工具返回的图片，不直接依赖 provider 私有的“image inside tool_result”能力
+   - 而是由 runtime 将 `tool_result.content` 重建成下一轮临时图片消息
+   - compact 之后，这条桥接会收敛到“只看 boundary 后消息 + 一次性 post-compact 图片恢复”
 
-同时要明确三条不同链路：
+这样做的原因是：
 
-1. 模型主动取本地图片：
-   - 模型先调用工具
-   - 工具读取本地图片
-   - 通过结构化 `tool_result` 把图片回传给模型
-2. 模型主动取远程图片：
-   - 模型先调用工具
-   - 工具从 URL 获取远程图片
-   - 通过结构化 `tool_result` 把图片回传给模型
-3. 用户附图：
-   - 输入层读取图片
-   - 写入 user message `image block`
-   - 直接进入本轮模型上下文
+- `Anthropic` 虽然原生支持图片型 `tool_result`
+- `OpenAI` 的标准 `tool result / tool message` 仍以文本输出为主
+- 若继续依赖 provider 私有协议，OpenAI 和 Anthropic 的能力会分叉
+- 统一改成 runtime 注入临时图片消息后，两家 provider 可以共享同一条能力主路径
 
-## 3. 明确不做
+对 `dclaw` 来说，当前最小且正确的落地顺序已经收敛为：
 
-以下内容本轮明确不做：
+1. 共享消息模型支持 `image block`
+2. provider 支持用户图片输入
+3. `tool_result` 支持结构化 `content`
+4. runtime 将工具图片结果转成临时图片消息
+5. 远程图片读取优先复用 `WebFetch`
+6. 后续再补本地图片读取与显式用户输入入口
+
+## 4. 明确不做
+
+以下内容当前明确不做：
 
 - 通用 attachment 平台
 - PDF 输入
@@ -64,213 +86,199 @@
 - 终端内图片预览 UI
 - 在当前 `readline` REPL 上伪装 Claude Code 级粘贴体验
 
-另外，下面这条不是“不做”，而是**不进入第一阶段**：
+另外，下面这些不是“不做”，而是当前尚未进入已完成主线：
 
+- 本地图片读取工具
+- `QueryEngine` 公开结构化用户输入接口
+- interactive 对话的图片输入
 - `--print --image`
-- 用户附图输入主路径
 
-## 4. 任务拆解
+## 5. 任务拆解
 
-### 4.1 P0：消息模型收口到 image content block
+### 5.1 P0：共享消息模型与基础观察面
 
-- [ ] 在 `src/types/message.ts` 增加图片消息块类型
-- [ ] 新增最小图片 source 结构：
+- [x] 在 `src/types/message.ts` 增加图片消息块类型
+- [x] 新增最小图片 source 结构：
   - `type: 'base64'`
   - `mediaType`
   - `data`
-- [ ] 将 `ContentBlock` 联合类型扩展为：
-  - `text`
-  - `image`
-  - `thinking`
-  - `redacted_thinking`
-  - `reasoning`
-  - `tool_use`
-  - `tool_result`
-- [ ] 保持 `Message.content` 作为唯一真值
-- [ ] 不引入独立 `Attachment` / `Asset` / `Upload` 实体
-- [ ] 补充最小辅助函数，确保“提取文本”和“识别非文本消息”仍可工作
+- [x] 将 `ContentBlock` 联合类型扩展为支持 `image`
+- [x] 保持 `Message.content` 作为唯一真值
+- [x] 不引入独立 `Attachment` / `Asset` / `Upload` 实体
+- [x] transcript / history / verbose 遇到图片时输出受控占位，而不是刷出 base64
+- [x] 共用图片大小校验逻辑
 
-涉及文件：
-
-- `src/types/message.ts`
-- `src/session/transcript.ts`
-- 视需要补到引用 `ContentBlock` 的公共工具模块
-
-验收标准：
+当前结果：
 
 - 用户消息可以同时包含 `text` 和 `image`
-- 现有 `tool_use / tool_result` 链路不受影响
-- history/transcript 遇到图片时不再退化成完全不可辨识的 `[non-text content]`
+- transcript / history 不再退化成完全不可辨识的 `[non-text content]`
+- 文本-only 链路未被破坏
 
-### 4.2 P0：Anthropic provider 打通图片透传
+### 5.2 P0：Anthropic 与 OpenAI 的用户图片输入
 
-- [ ] 为 `Anthropic` provider 增加 image content block 映射
-- [ ] 请求映射时保留用户消息里的 `text + image` 顺序
-- [ ] 非用户消息不引入额外图片逻辑
-- [ ] 响应解析逻辑保持现状，不额外伪造图片输出能力
-- [ ] 在 API 边界增加最小图片大小校验
+- [x] `Anthropic` provider 支持用户消息里的 `text + image`
+- [x] `OpenAI Responses` 支持用户消息里的 `text + image`
+- [x] `OpenAI chat-completions` 也支持用户消息里的 `text + image`
+- [x] 两家 provider 共用图片大小校验
+- [x] 保留 block 顺序，不提前做本地图像理解
 
-涉及文件：
-
-- `src/llm/providers/anthropic.ts`
-- `src/llm/types.ts`
-- 新增一个最小图片校验模块或 provider 侧校验函数
-
-验收标准：
+当前结果：
 
 - `Anthropic` 请求体可以携带 base64 image block
-- 文本-only 请求与现有行为一致
-- 图片超限时返回明确错误，而不是 provider 侧随机 400
+- `OpenAI Responses API` 请求可以携带 `input_text + input_image`
+- `OpenAI chat-completions` 请求可以携带 `text + image_url(data URL)` content parts
 
-### 4.3 P0：OpenAI Responses 主路径支持图片输入
+### 5.3 P0：工具结果支持结构化多模态 content
 
-- [ ] 为 `OpenAI Responses` 输入模型补充多模态 user item 映射
-- [ ] 不再把包含图片的用户消息打平成纯字符串
-- [ ] 保留 block 顺序，不提前做本地图像理解
-- [ ] 在有图片时仍允许工具调用主循环继续工作
-- [ ] 与 `Anthropic` 共用图片大小校验逻辑
-
-涉及文件：
-
-- `src/llm/providers/openai.ts`
-
-验收标准：
-
-- `OpenAI Responses API` 请求可以携带 `text + image`
-- 工具调用、streaming、reasoning 现有主路径不被破坏
-
-### 4.4 P0：显式收紧 OpenAI chat-completions 边界
-
-- [ ] 审查当前 `chat-completions` 分支是否天然支持图片输入
-- [ ] 若当前实现无法无偏差对齐，则在检测到图片输入时显式报错
-- [ ] 或在能力边界明确可控时，将含图片请求自动收敛到 `responses`
-- [ ] 不为了“看起来支持”而自行拼接非标准 shim
-
-涉及文件：
-
-- `src/llm/providers/openai.ts`
-- `src/llm/providerSelection.ts`
-- `src/llm/providerConfig.ts`
-
-验收标准：
-
-- 含图片的 OpenAI 请求不会静默丢图
-- 用户能得到明确、稳定、可预期的行为
-
-### 4.5 P0：工具结果支持结构化多模态 content
-
-这一阶段开始支持“模型主动取图”链路，但仍然只围绕图片，不扩成泛化附件平台。
-
-- [ ] 将 `tool_result` 通道从“仅文本/JSON”扩展为可承载结构化 content blocks
-- [ ] 明确 `tool_result` 至少可承载：
+- [x] 将 `tool_result` 从“仅文本/JSON”扩展为可承载结构化 `content`
+- [x] 当前 `tool_result.content` 至少可承载：
   - `text`
   - `image`
-- [ ] 保持现有纯文本/JSON tool result 完全兼容
-- [ ] 不为了支持图片结果而重写整个 tool 协议
-- [ ] 在 query loop 中确认工具结果回填给模型时不会丢失结构化 block
-- [ ] 在 transcript / verbose / trace 中为“tool 返回图片”提供受控摘要
-- [ ] 不在 transcript / log 中输出原始 base64
+- [x] 现有纯文本/JSON tool result 保持兼容
+- [x] query loop 会保留结构化 `tool_result.content`
+- [x] trace / transcript / verbose 不输出原始 base64
+- [x] `tool result budget` 不会错误持久化或替换带图片内容的结果
 
-涉及文件：
+当前结果：
 
-- `src/types/message.ts`
-- `src/core/queryLoop.ts`
-- `src/types/tool.ts`
-- `src/tools/types.ts`
-- `src/session/transcript.ts`
-- `src/cli/verboseEvents.ts`
+- `tool_result.content` 已成为 runtime 级桥接数据
+- provider 侧不再直接依赖“图片型 tool_result”协议
+- 现有文本型工具无需跟着大改
 
-验收标准：
+### 5.4 P0：runtime 统一桥接工具图片结果
 
-- tool result 可以携带图片 block 回到模型
-- 现有所有文本型工具不需要跟着大改
-- query loop 不会把结构化 tool result 压扁成字符串
+- [x] 新增 runtime 桥接层，从历史消息扫描 `tool_result.content`
+- [x] 将图片工具结果重建为下一轮临时 `user image message`
+- [x] Anthropic 与 OpenAI 都继续只接收标准文本型 `tool_result.output`
+- [x] 不引入 provider-specific shim
 
-### 4.6 P0：远程图片读取工具链路，优先 WebFetch
+当前结果：
 
-这一阶段支持模型通过 URL 获取远程图片，并把图片作为结构化结果交回模型。
+- `Anthropic` 与 `OpenAI` 保持相同能力模型
+- “工具读图后继续分析”不再依赖 provider 私有能力
+- 图片工具结果不会污染持久 transcript 展示，但会继续参与后续模型推理
 
-边界要收紧：
+### 5.5 P0：远程图片读取工具链路，优先 WebFetch
 
-- 这是图片读取能力，不是通用下载器
-- 优先复用 `WebFetch` 主路径，不先发明第二套网络工具
-- 只处理明确是图片的远程资源
-- 不顺手扩成“任意二进制文件下载”
+- [x] 复用 `WebFetch` 的请求/权限/重定向主链路
+- [x] 支持从 URL 下载远程图片
+- [x] 校验协议、content-type、大小限制
+- [x] 明确下载超时与失败语义
+- [x] 对支持的远程图片返回：
+  - 标准文本 `output`
+  - 结构化 `text + image content`
+- [x] 非图片 URL 不会被静默当成图片
+- [x] 不在第一版引入缓存、对象存储、临时上传中心等机制
 
-- [ ] 评估并优先复用 `WebFetch` 的请求/权限/重定向主链路
-- [ ] 支持从 URL 下载远程图片
-- [ ] 校验协议、重定向、content-type、大小限制
-- [ ] 明确下载超时与失败语义
-- [ ] 将远程图片转成 `image block` 回传给模型
-- [ ] 保持与本地图片读取工具链路尽量一致
-- [ ] 不在第一版引入缓存、对象存储、临时上传中心等额外机制
+当前边界：
 
-涉及文件：
+- 当前仅支持受控远程图片类型：
+  - `image/jpeg`
+  - `image/png`
+  - `image/gif`
+  - `image/webp`
+- `svg` 等 image-like 资源当前明确不支持
 
-- `src/tools/WebFetch*` 或其直接相关模块
-- `src/core/queryLoop.ts`
-- 视需要新增轻量图片下载/识别模块
+### 5.6 P0：会话持久化、resume、compact 与观察面
 
-验收标准：
+- [x] `messages.jsonl` 可持久化 `image block`
+- [x] `tool_result.content` 会随 session 一并持久化
+- [x] `resume` 后图片工具结果可继续被重建为临时图片消息
+- [x] `compact` 后首轮可通过受控的 post-compact 图片恢复继续分析最近图片
+- [x] transcript / history / verbose 继续只输出受控摘要
 
-- 模型可通过 `WebFetch` 路径抓取远程图片并继续分析
-- 非图片 URL 不会被静默当成图片
-- 超大/异常远程响应不会把主链路拖垮
+当前结果：
 
-### 4.7 P1：本地图片读取工具链路
+- 当前已经不再依赖“compact 后每轮重扫全历史图片”
+- 当前更接近 Claude Code 的做法：
+  - 正常轮次只从当前可见消息恢复图片型 `tool_result`
+  - freshly compacted session 只一次性恢复少量最近图片
+  - 图片恢复同时受数量与总预算约束
 
-这一阶段支持模型主动读取本地图片文件，再把图片交回模型分析。
+### 5.7 P1：本地图片读取链路，收敛到扩展现有 Read
 
-- [ ] 评估当前 `Read` 是否应扩展为支持图片文件
-- [ ] 若与现有 `Read` 语义冲突，则新增最小专用图片读取工具
-- [ ] 工具输入至少支持：
-  - 本地图片路径
-- [ ] 工具输出至少支持：
-  - 可选文本摘要
-  - 原始图片 `image block`
-- [ ] 加入路径校验、大小限制、media type 识别
-- [ ] 对非图片路径、损坏图片、超限图片给出明确错误
-- [ ] 保持权限语义与现有文件读取工具一致
+这一阶段已经收敛方向并落了首版实现：
 
-涉及文件：
+- [x] 重新对齐 Claude Code 源码后，确认本地多模态文件读取主路径应扩展现有 `Read`
+- [x] 不新增独立 `ReadImage` / `OpenImage` 工具
+- [x] `Read` 已支持受控本地图片类型：
+  - `image/jpeg`
+  - `image/png`
+  - `image/gif`
+  - `image/webp`
+- [x] 加入本地图片大小限制与 media type 识别
+- [x] 对超限图片与无法识别的图片内容给出明确错误
+- [x] 图片读取结果继续复用现有 `tool_result.content -> runtime 临时图片消息` 主路径
+- [x] 保持 `Read` 的权限语义与现有文件读取工具一致
+- [x] 明确收紧 `offset / limit` 边界：仅适用于文本读取，不适用于图片文件
 
-- `src/tools/registry.ts`
-- `src/tools/*`
-- `src/types/tool.ts`
-- `src/core/queryLoop.ts`
+当前结果：
 
-验收标准：
-
-- 模型可以通过工具读取本地图片
-- 工具结果中的图片能继续进入后续模型推理
+- 模型可以通过现有 `Read` 工具读取本地图片
+- 图片读取结果会返回：
+  - 标准 `output.type = "image"` 元数据
+  - 结构化 `tool_result.content` 中的图片 block
+  - 额外的补充文本消息，走更接近 Claude Code 的 `tool -> newMessages` 追加消息路径
 - 不需要用户手工先把图片转 base64 再贴给 agent
 
-### 4.8 P1：会话持久化与 transcript 观察面补齐
+当前仍需继续评估的收口点：
 
-- [ ] 确认 `messages.jsonl` 可以稳定持久化 image block
-- [ ] `resume` 后图片消息结构不丢失
-- [ ] transcript / history 对图片给出受控文本表示，例如：
-  - `[image]`
-  - `[2 images]`
-  - `[text + 1 image]`
-- [ ] 不在 transcript 中输出整段 base64
-- [ ] verbose / SSE 如需展示内容摘要，只输出图片占位，不输出原始数据
+- `dclaw` 已补上最小 `tool -> newMessages` 机制，并先用于本地图片 `Read` 的补充文本消息；但当前仍只在少数多模态场景使用，还没有像 Claude Code 那样系统性接到 PDF/更多工具类型
+- 当前 `Read` 已显式拒绝在图片文件上使用 `offset / limit`，避免静默忽略参数。后续仍可继续评估是否要进一步向 Claude Code 的统一多媒体参数语义靠拢
+- 当前 `tool result budget` 会跳过带结构化 `content` 的图片结果，不会把这类结果持久化替换成磁盘引用。这样能避免破坏图片继续分析链路，但也意味着后续仍要继续评估是否需要更接近 Claude Code 的多模态 budget / attachment 策略
 
-涉及文件：
+### 5.8 P1：tool result budget 与图片结果的融合评估
 
-- `src/session/store.ts`
-- `src/session/transcript.ts`
-- `src/cli/interactiveSession.ts`
-- `src/cli/verboseEvents.ts`
+这一阶段已经完成源码对齐结论，并落了第一版运行时收口。
 
-验收标准：
+- [x] 重新核对 Claude Code 源码中 `tool result budget`、`FileReadTool`、`compact`、`attachments` 相关实现
+- [x] 确认 Claude Code 不会把带 `image block` 的 `tool_result` 纳入文本型 budget 持久化替换
+- [x] 确认 Claude Code 的图片预算主约束在读图阶段，而不是在 `tool_result` 持久化阶段
+- [x] 确认 Claude Code 在 compact 后更偏向通过 `file attachments` 恢复近期文件上下文，而不是继续依赖原始 `tool_result` 重扫
+- [x] 停止 `dclaw` 在 compact 后每轮重扫全历史图片型 `tool_result`
+- [x] 为 `dclaw` 增加更接近 Claude Code 的一次性 post-compact 图片恢复
+- [x] 将 post-compact 图片恢复收紧为“最近少量 + 总预算受控”
+- [x] 评估 `Read` / `WebFetch` 是否需要像 Claude Code 一样更明确地收敛为“工具自带预算，budget 层不再碰图片”
 
-- session resume 后仍能继续携带历史图片上下文
-- transcript 可读且不会泄露/刷屏 base64 数据
+当前结论：
 
-### 4.9 P2：QueryEngine 输入面支持结构化用户消息
+- Claude Code 对图片结果采用的是“分层处理”，不是让现有文本型 `tool result budget` 直接处理图片
+- 第一层是读图阶段预算：
+  - `Read` 图片时先做 resize / downsample / token budget 控制
+  - 图片过大时优先压缩，而不是在后续 `tool_result` 阶段改写
+- 第二层是 `tool result budget`：
+  - 明确跳过带 `image block` 的 `tool_result`
+  - 文本大结果才会被持久化替换成 preview
+- 第三层是 compact / 恢复：
+  - Claude Code 更接近通过 `file attachments` 恢复最近读过的图片/文件上下文
+  - `dclaw` 现在也开始朝这个方向收口：compact 后只一次性恢复少量最近图片，并且受总预算限制，而不是每轮重扫全历史
 
-这一阶段开始补用户附图主路径，但不再把它作为近期第一优先级。
+对 `dclaw` 当前实现的含义：
+
+- 当前 `tool result budget` 跳过图片结果，这一点已经与 Claude Code 大方向一致
+- 当前 `compact / resume` 恢复策略已经更接近 Claude Code：
+  - `resume` 仍可依赖持久化 `tool_result.content`
+  - `compact` 已不再走全历史图片回灌，而是改成按数量与预算受控的一次性恢复
+- 当前 `Read` / `WebFetch` 的图片路径已经满足“工具自带预算，budget 层不碰图片”：
+  - `Read` / `WebFetch` 图片现在都先走 resize / downsample
+  - 两者都会按 Claude Code 同款近似公式先估图片 token：`estimatedTokens ~= base64Chars * 0.125`
+  - 当常规 resize 后仍超图片 token budget 时，会继续做更激进压缩，而不是直接把原图交给 provider
+  - 图片 token budget 与 source image 上限已经收敛到共享 `readLimits` 入口，不再散落在图片 helper 内部
+  - 两者都先用较宽松的 source image 上限收口，再对实际附给模型的图片负载做优化
+  - 两者返回图片时都会走结构化 `content`
+  - 当前 `tool result budget` 只处理没有结构化 `content` 的纯文本型结果，因此不会碰图片结果
+- 这让 `dclaw` 更接近 Claude Code 的真实分层：
+  - 图片预算优先在读图阶段解决
+  - budget 层继续只管文本型大结果
+- 因此不建议把 `Read` / `WebFetch` 整体改成 `maxResultSizeChars = Infinity`
+  - 否则会连它们的文本路径一起绕开 budget
+  - 这会削弱大文本读取/抓取结果的收口能力，也不符合我们当前更细粒度的实现
+- 所以下一步不应是“把图片塞进现有文本型 budget 做持久化替换”
+- 下一步更值得评估的是“是否要继续把这条一次性图片恢复扩展成更完整的 multimodal attachment restore”
+
+### 5.9 P2：QueryEngine 输入面支持结构化用户消息
+
+这一阶段仍未开工。
 
 - [ ] 将 `QueryEngine.submitUserPrompt()` 从只接收 `string` 扩展为支持结构化输入
 - [ ] `submitUserPromptWithHandlers()` 同步支持结构化输入
@@ -281,14 +289,6 @@
 - [ ] 约定用户图片输入的 block 排序与 Claude Code 一致：
   - 文字在前
   - 图片在后
-- [ ] `systemPromptResolver` 与 `turnCompleteHook` 继续接收“用户文本 prompt”
-- [ ] 当输入仅包含图片时，传给 resolver/hook 的 `userPrompt` 为空字符串
-
-涉及文件：
-
-- `src/core/queryEngine.ts`
-- 可能涉及 `src/core/queryLoop.ts`
-- 可能涉及 verbose / trace 的消息摘要代码
 
 验收标准：
 
@@ -296,11 +296,11 @@
 - 消息持久化与恢复后，图片块顺序不丢失
 - 不需要为多模态单独开一套 query loop
 
-### 4.10 P2：REPL 多模态输入重构准备
+### 5.10 P2：REPL 多模态输入重构准备
 
-这一阶段只做“准备”和“边界确认”，不在当前 `readline` REPL 上假装支持 Claude Code 的粘贴体验。
+这一阶段仍未开工。
 
-- [ ] 明确当前 `readline` REPL 不能对齐 Claude Code 的 paste/image path/clipboard 检测
+- [ ] 明确当前 `readline` REPL 不能对齐 Claude Code 的 paste / image path / clipboard 检测
 - [ ] 评估是否需要将 interactive 输入层迁移到原始 TTY 事件流
 - [ ] 评估未来是否引入：
   - bracketed paste 检测
@@ -308,18 +308,7 @@
   - macOS 剪贴板图片读取
 - [ ] 在真实输入层改造完成前，不对外宣称 interactive 已支持 Claude Code 级图片输入
 
-涉及文件：
-
-- `src/cli/repl.ts`
-- `src/cli/interactive.ts`
-- 未来可能新增专门的 interactive input handler
-
-验收标准：
-
-- 文档和实现边界一致
-- 不会出现“headless 能发图，interactive 假装能发但实际丢图”的误导
-
-### 4.11 P3：headless 模式显式图片输入入口
+### 5.11 P3：headless 模式显式图片输入入口
 
 这条能力保留，但当前不进入近期主线。
 
@@ -332,107 +321,88 @@
 - [ ] 保持文字 prompt 与图片共同进入同一条用户消息
 - [ ] 对路径不存在、非图片文件、读取失败给出明确错误
 
-涉及文件：
+## 6. 建议实施顺序
 
-- `src/cli/parseArgs.ts`
-- `src/cli/headless.ts`
-- 视需要新增 `src/cli/inputImages.ts` 或 `src/llm/imageInput.ts`
+当前建议顺序已经更新为：
 
-验收标准：
+1. 已完成：共享消息模型与图片校验
+2. 已完成：Anthropic / OpenAI 用户图片输入
+3. 已完成：`tool_result.content` 结构化多模态支持
+4. 已完成：runtime 将工具图片结果转成临时图片消息
+5. 已完成：`WebFetch` 远程图片读取链路
+6. 已完成：session / resume / compact / transcript 收口
+7. 已完成：本地图片读取链路收敛到扩展现有 `Read`
+8. 待做：tool result budget 与图片结果的融合评估
+9. 待做：`QueryEngine` 公开结构化用户输入
+10. 待做：interactive 输入层重构准备
+11. 待做：`--print --image`
 
-- 可以执行：
-  - `dclaw --print --image ./a.png "解释这张图"`
-  - `dclaw --print --image ./a.png --image ./b.jpg "比较这两张图"`
-- 消息中真实包含图片 block，而不是把路径字符串塞给模型
+## 7. 测试状态
 
-## 5. 建议实施顺序
+### 7.1 已补齐的回归
 
-建议严格按下面顺序推进：
-
-1. `P0` 消息模型
-2. `P0` Anthropic provider
-3. `P0` OpenAI Responses
-4. `P0` OpenAI chat-completions 边界收紧
-5. `P0` tool result 结构化多模态支持
-6. `P0` WebFetch 远程图片读取链路
-7. `P1` 本地图片读取工具链路
-8. `P1` session / transcript / verbose 收口
-9. `P2` QueryEngine 用户结构化输入
-10. `P2` interactive 输入层重构准备
-11. `P3` `--print --image`
-
-## 6. 测试任务
-
-### 6.1 单元测试
-
-- [ ] `types/message`：
+- [x] `types/message`：
   - image block 类型与辅助函数
-- [ ] `Anthropic provider`：
-  - 正确映射图片 block
+- [x] `Anthropic provider`：
+  - 正确映射用户图片 block
   - 超限图片被拦截
-- [ ] `OpenAI provider`：
+- [x] `OpenAI provider`：
   - `responses` 正确映射图片输入
-  - `chat-completions` 在含图片时行为明确
-- [ ] `session/transcript`：
+  - `chat-completions` 正确映射图片输入
+- [x] `session/transcript`：
   - image block 可持久化
   - transcript 不泄露 base64
-- [ ] `tool_result`：
+- [x] `tool_result`：
   - 结构化图片结果不会被压扁
-  - 文本型工具结果不回归
-- [ ] `本地图片读取工具`：
-  - 图片路径成功读取
-  - 非图片/超限/不存在路径失败语义明确
-- [ ] `远程图片读取工具`：
-  - 图片 URL 成功下载并回传图片 block
-  - 非图片 URL / 异常 content-type / 超限响应处理明确
-- [ ] `QueryEngine`：
-  - 可提交 `ContentBlock[]`
-  - text-only 行为不回归
-  - image-only 行为可工作
-- [ ] `headless CLI`：
-  - `--image` 解析
-  - 多图顺序
-  - 非法路径 / 非图片报错
+  - provider 只继续序列化标准 `tool_result.output`
+- [x] `WebFetch`：
+  - 支持的远程图片可成功下载并返回结构化内容
+  - 非支持 image-like media type 会明确失败
+- [x] `QueryEngine`：
+  - 工具图片结果会被注入为临时图片消息
+  - `compact` 后仍可恢复
+  - `resume` 后仍可恢复
+- [x] `Read` 本地图片：
+  - 支持本地图片读取
+  - 显式拒绝图片文件上的 `offset / limit`
+  - 通过 `tool -> newMessages` 追加补充文本消息
 
-### 6.2 集成测试
+### 7.2 仍待补齐的测试
 
-- [ ] 模型通过 `WebFetch` 读取远程图片并继续分析 smoke test
-- [ ] 模型调用工具读取本地图片并继续分析 smoke test
-- [ ] `resume` 后继续对包含历史图片的 session 发问
-- [ ] `--print` + `Anthropic` 图片输入 smoke test
-- [ ] `--print` + `OpenAI Responses` 图片输入 smoke test
+- [ ] budget / compact 与图片结果融合策略的后续实现
+- [ ] 更接近 Claude Code 的 multimodal attachment restore
+- [ ] `QueryEngine` 结构化用户输入接口
+- [ ] `headless CLI --image`
+- [ ] interactive 图片输入
 
-## 7. 最小完成定义
+## 8. 最小完成定义
 
-以下条件同时满足，才算这条主线完成最小闭环：
+当前已经完成的第一阶段闭环：
 
 - `dclaw` 的共享消息模型已支持 `image` block
-- `Anthropic` provider 已支持图片透传
-- `OpenAI Responses` 已支持图片透传
-- `chat-completions` 含图片时边界明确
+- `Anthropic` provider 已支持用户图片输入
+- `OpenAI Responses` 已支持用户图片输入
+- `OpenAI chat-completions` 已支持用户图片输入
 - `tool_result` 已支持结构化图片内容
+- runtime 已能把工具图片结果转成下一轮临时图片消息
 - 模型可以通过 `WebFetch` 路径读取远程图片并继续分析
-- 模型可以通过工具读取本地图片并继续分析
-- session / resume / transcript 不丢结构、不泄露 base64
+- 模型可以通过现有 `Read` 工具读取本地图片并继续分析
+- `session / compact / resume / transcript` 不丢结构、不泄露 base64
 
-这是第一阶段完成定义。
+当前尚未完成的第二阶段：
 
-第二阶段完成定义：
-
-- `QueryEngine` 已支持结构化用户输入
-- interactive 对话中的图片输入主路径已具备明确实现
-- 工具链路与用户附图链路共用同一套消息级 image block 真值
-
-第三阶段完成定义：
-
+- `tool result budget / compact` 与多模态结果进一步向 Claude Code 靠拢
+- `QueryEngine` 已支持公开的结构化用户输入
+- interactive 对话中的图片输入主路径具备明确实现
 - `--print --image <path>` 可以工作
 
-## 8. 后续扩展入口
+## 9. 后续扩展入口
 
-等这条最小主线完成后，才允许评估后续扩展：
+等第二阶段主线完成后，才允许评估后续扩展：
 
 - interactive paste / drag path / clipboard image
 - 图片缩放与下采样优化
+- 更接近 Claude Code 的 post-compact multimodal attachment 恢复
 - 更细的 provider 差异处理
 - 更丰富的 transcript / verbose 摘要
 - 更完整的工具产出多模态内容类型

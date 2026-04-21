@@ -14,7 +14,7 @@
 - permission mode 与 hooks
 - session / history / resume
 - compact / autocompact
-- plan / task / todo
+- plan / task
 - memory 与 relevance recall
 - subagent / coordinator / worktree
 - MCP / skills / plugins / remote bridge
@@ -81,13 +81,13 @@
 
 - permission mode
 - hook 执行与阻断
-- task / todo / plan 状态管理
+- task / plan 状态管理
 - session 生命周期管理
 
 其中阶段 9 首版建议引入 `task board` 作为 planning / execution 状态容器：
 
 - session 负责消息历史
-- task board 负责 `plan mode`、task、todo、current step 真值
+- task board 负责 `plan mode`、task、current step 真值
 - session meta 通过 `taskBoardId` 挂接 task board
 
 详细结构见 [plan-task-spec.md](./plan-task-spec.md)。

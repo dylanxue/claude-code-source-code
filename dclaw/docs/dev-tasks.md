@@ -2,119 +2,133 @@
 
 ## 当前迭代
 
-目标：结束 `v0.1` 收尾并切换到 `v0.2` 主线；阶段 8 已按当前范围收口，当前优先推进阶段 9、10，把 Plan / Task 与 Memory 做成新的核心主线。
+目标：进入 `v0.3` 主线；本轮只专注 `subagent` 与 `skills` 两件事。除这两条线外，其它未完成功能统一下调到 `v0.4`。
 记住我们的原则：无限靠拢Claude Code源码的实现，不额外加戏。
 
 最近核对结论：
 - `compact` 主路径实现与当前文档描述基本一致；manual compact、消息级 boundary/runtime slicing、共享 `contextStats`、dry-run recommendation、最小 autocompact，以及首版 post-compact attachment 恢复均已真实落地
-- 当前没有发现“文档已标完成但代码未落地”的重大偏差；阶段 8 已按当前产品范围收口，`partial compact / reactive compact` 都已像 `TodoWrite` 一样明确主动舍弃；阶段 9-2 的 `ExitPlanMode` 审批正文展示、approved-plan -> 初始 task list materialize，以及“已完成 task board 5 秒后自动 retire，避免后续新请求继续拼接旧任务板”的生命周期规则都已收口；阶段 10-2 已从 deterministic 过渡实现收口到更接近 Claude Code 的 `MEMORY.md` 常驻 + side-query 相关 memory 选择，阶段 10 当前剩余更多属于后续体验与策略打磨
+- 阶段 8-10 已按当前产品范围收口；`v0.3` 不再继续摊大范围，只做 `subagent` 与 `skills` 的最小主路径
+- 阶段 11 在 `v0.3` 只做 `subagent`，`worktree / coordinator / 多 worker 调度` 统一后置到 `v0.4`
+- 阶段 12 在 `v0.3` 只做 `skills`，`MCP / plugins / remote bridge` 统一后置到 `v0.4`
+- 多模态输入首轮已真实落地，但不进入当前 `v0.2` 主线：共享 `image block`、Anthropic / OpenAI 用户图片输入、`WebFetch` 远程图片读取，以及“工具结果图片 -> runtime 临时图片消息 -> 后续继续推理”的统一桥接链路都已存在；`compact / resume` 当前也可恢复这类图片上下文。剩余未做项主要是本地图片读取工具、`QueryEngine` 公开结构化输入、interactive 图片输入与 `--print --image`
 
 ## Todo
 
-- [x] `P0 / 阶段 10-1`：建立 memory 文件系统骨架，先对齐 Claude Code `memdir` 风格
+- [ ] `P0 / 阶段 11-1`：建立 subagent 最小运行时骨架，先对齐 Claude Code `AgentTool` 主路径
 
-- [x] 新建 `src/memory/`，先落：
-  - `paths.ts`
+- [ ] 新建 `src/agent/`，先落：
+  - `types.ts`
   - `store.ts`
-  - `frontmatter.ts`
-  - `manifest.ts`
-  - `recall.ts`
+  - `runtime.ts`
+  - `session.ts`
 
-- [x] 按 `docs/memory-spec.md` 先实现路径约定：
-  - `~/.dclaw/projects/<sanitized-workspace>/memory/`
-  - `MEMORY.md`
-  - memory 独立 markdown 文件
+- [ ] 定义最小 agent 真值结构：
+  - `agentId`
+  - `parentAgentId`
+  - `status`
+  - `task`
+  - `createdAt`
+  - `updatedAt`
 
-- [x] 定义 memory frontmatter 最小字段：
+- [ ] 建立主 agent 与 subagent 的关联方式：
+  - parent turn 可挂接 child agent id / status
+  - subagent 拥有独立消息历史，不直接污染主 transcript
+
+- [ ] 为 subagent 子流程显式传入独立 `maxTurns/maxIterations`
+
+- [ ] 验证标准：给定一个主会话，可稳定创建 / 读取 / 列出子代理运行态
+
+- [ ] `P0 / 阶段 11-2`：接通模型侧 subagent delegation 最小闭环
+
+- [ ] 接入最小 `Agent` tool 主路径：
+  - `spawn`
+  - `send`
+  - `wait`
+  - `stop`
+
+- [ ] 子代理首版继续复用现有 `client/model/toolRegistry/permissionMode`，不额外发明第二套执行协议
+
+- [ ] 让主代理能收到受控的子代理完成摘要，而不是整段转抄 child transcript
+
+- [ ] 为 `resume / history / transcript / trace` 增加最小 subagent 观察面
+
+- [ ] 验证标准：主代理可委派一个受限任务，并在同一会话中拿到完成结果
+
+- [ ] `P1 / 阶段 11-3`：收口 subagent 边界，不把 `worktree / coordinator` 提前混进 `v0.3`
+
+- [ ] 明确当前 `v0.3` 不做：
+  - worktree isolation
+  - coordinator mode
+  - 多 worker 调度
+  - mailbox / notification center
+
+- [ ] 明确 subagent 权限边界：
+  - 继承或收紧主 agent tool set
+  - 不默认拥有额外 UI / host 能力
+
+- [ ] 验证标准：`v0.3` 的 subagent 主线能跑通，但不会提前分叉出 `worktree/coordinator` 次路径
+
+- [ ] `P0 / 阶段 12-1`：建立 skills 文件系统骨架与加载器
+
+- [ ] 新建 `src/skills/`，先落：
+  - `types.ts`
+  - `loader.ts`
+  - `registry.ts`
+  - `prompt.ts`
+
+- [ ] 首版只支持两类来源：
+  - builtin skills
+  - project skills
+
+- [ ] 定义最小 skill 结构：
   - `name`
   - `description`
-  - `type`
-  - `updated_at`
+  - `source`
+  - `prompt`
 
-- [x] 先把 memory 做成 file-based manifest，不急着做复杂 ranking
+- [ ] 验证标准：给定 workspace，可稳定发现 / 读取 / 枚举 skills
 
-- [x] 验证标准：给定一个 workspace，能稳定创建 / 读取 / 枚举 memory 文件与索引
+- [ ] `P0 / 阶段 12-2`：接通 `SkillTool` 主路径
 
-- [x] `P0 / 阶段 10-2`：实现 query-time recall 与 prompt 注入
+- [ ] 实现统一 `SkillTool`，不允许 skill 绕开主消息循环
 
-- [x] 在 prompt 装配层增加 memory section，入口统一收敛到 `src/prompt/systemPrompt.ts`
+- [ ] skill 首版默认运行在当前 agent 上下文中，不默认 fork
 
-- [x] 实现首版 recall：
-  - 扫描 manifest
-  - 基于 query 文本和 description 做轻量筛选
-  - 单次最多注入少量 memory
+- [ ] SkillTool 返回结果时保留最小来源与调用可观察性
 
-- [x] 先以 deterministic 规则实现 recall，不依赖额外模型调用
+- [ ] 验证标准：模型可调用一个 builtin skill 和一个 project skill，并继续当前对话
 
-- [x] 为 injected memory 增加可观察来源，便于 verbose / trace / doctor 排查
+- [ ] `P1 / 阶段 12-3`：补 skill discovery / invoked-skill 提示链路
 
-- [x] 验证标准：不同 query 能召回不同 memory，且注入规模受控
+- [ ] 将“当前相关 skills”与“已调用 skill 的持续约束”优先收敛到 runtime reminder
 
-- [x] 将 `10-2` 的 recall 从 deterministic 过渡实现收口到 Claude Code 主线：
-  - `MEMORY.md` 继续常驻 system prompt
-  - query-time 相关 memory 改为“扫描 manifest + side-query 语义选择”，不再只靠本地 token overlap
-  - 保持单次最多 surfacing 少量 memory，并保留来源可观察性
+- [ ] 避免把动态 skill 列表长期塞进 system prompt 或 tool prompt
 
-- [x] 明确当前 memory selector 的模型边界：
-  - 当前 side-query recall 永远复用主对话的 `client/model`
-  - 不再单独引入 selector model / 独立 routing
-  - 这项工作不再单列阶段，作为当前 memory 主线的明确产品决策保留
+- [ ] 保持范围克制：
+  - `v0.3` 不做 plugin-provided skills
+  - `v0.3` 不做 skill marketplace / install flow
 
-- [x] `P1 / 阶段 10-5`：将 turn-end memory extraction 改为不阻塞主 turn
-  - 当前 automatic extraction 已改为后台执行 / fire-and-forget 风格，不再在主响应返回前等待完成
-  - interactive / resume 主路径不再被 memory 写回阻塞
-  - headless 与 REPL 退出路径会做软 drain，给后台写回一个有限收尾窗口，同时保留可观察性
+- [ ] 验证标准：skill 的动态发现和调用约束可观察，且不会造成 prompt 膨胀
 
-- [x] `P0 / bugfix`：收口 `plan mode` 审批重复请求问题，继续向 Claude Code 当前源码靠拢
+- [ ] `P0 / 文档与测试`：补齐 `v0.3` 的 subagent / skills 文档口径与最小回归护栏
 
-- [x] 先按 Claude Code 当前主路径重新校正 `EnterPlanMode / ExitPlanMode` 语义：
-  - `EnterPlanMode` 不再要求用户批准进入；进入 planning 本身不是 approval step
-  - `ExitPlanMode` 才是计划审批点；用户拒绝时应继续留在 `plan mode`
+- [ ] 为阶段 11 增加单测：
+  - agent store / status persistence
+  - `spawn / send / wait / stop` 主路径
+  - parent/child observability
 
-- [x] 修正 `ExitPlanMode` 被拒绝后的模型反馈语义：
-  - 不再只返回弱语义的 `status: rejected`
-  - 当前已对齐到 Claude Code 的 plan rejection 基础语义，把“计划被拒绝、继续留在 plan mode、附带被拒绝 plan 正文”明确传回模型
+- [ ] 为阶段 12 增加单测：
+  - skill loader / registry
+  - `SkillTool` invoke path
+  - skill reminder / discovery boundary
 
-- [ ] 不额外引入本地 cooldown / plan hash 去重 / “必须先改文件才能再次批准” 之类策略
-  - 在没有 Claude Code 对应实现证据前，不自行加这类 heuristic
-  - 当前已先落地源码对齐路径；若仍有重复请求，再继续回到 Claude Code 源码找证据，不先补本地规则
+- [ ] 验证标准：`subagent / skills` 两条主线均有最小单测护栏
 
-- [ ] 验证标准：
-  - 用户拒绝 plan 后，模型不会在未获得新反馈或未先继续 planning 的情况下，立刻原样再次请求批准
-  - `EnterPlanMode` 不再出现额外批准弹窗
-  - 相关文档口径需同步从“进入 plan mode 需要用户确认”收敛到 Claude Code 当前源码语义
+## v0.4 / Deferred
 
-- [ ] `P1 / 阶段 10-3`：明确 memory 写回策略与边界，避免与 `CLAUDE.md` / transcript / todo 混淆
-
-- [x] 明确首版 memory 写入触发点：
-  - 当前已接入 turn-end automatic extraction
-  - 由独立 memory extraction 子流程在 query 完成后按规则自动尝试写回，不把写回混进主对话 prompt
-
-- [x] 设计去重 / 升级规则，至少覆盖“同名 memory 更新”和“描述相似但文件不同”的处理
-  - 当前已按 Claude Code 的保守边界收口：不引入额外 merge 引擎，只在 extraction 写入校验时基于 manifest 拦截重复新建
-  - 已覆盖同 type 下的同名升级，以及“唯一相似描述”命中时优先升级已有文件；多候选歧义保持不强行合并
-
-- [x] 明确哪些信息禁止写入 memory：
-  - 当前会话短期步骤
-  - 已稳定存在于 `CLAUDE.md` 的规则
-  - 可从仓库直接读取的代码事实
-  - 当前已按 Claude Code `WHAT_NOT_TO_SAVE_SECTION` 收口到 extraction prompt：额外覆盖 `git history / who-changed-what / debugging recipes / transcript-like recap / activity summary / PR list`
-
-- [x] 验证标准：memory 不会退化成 transcript 备份，也不会与 todo store 重叠
-  - 当前先以 Claude Code 对齐方式落在 extraction prompt 与单测护栏，不额外引入本地语义分类器
-
-- [ ] `P0 / 文档与测试`：补齐 `v0.2` 文档口径与核心回归用例
-
-- [ ] 为阶段 10 增加单测：
-  - [x] memory frontmatter 解析
-  - [x] recall 筛选
-  - [x] prompt 注入上限
-  - [x] extraction 写回去重 / 升级护栏
-  - [x] side-query recall 选择 / fallback / 可观察性
-
-- [ ] 验证标准：`compact / plan / memory` 三条主线均有最小单测护栏
-
-## Deferred
+- [ ] `v0.4`：阶段 11 的 `worktree isolation / coordinator mode / 多 worker 调度 / mailbox` 继续后置
+- [ ] `v0.4`：阶段 12 的 `MCP / plugins / remote bridge` 继续后置
+- [ ] `v0.4`：多模态剩余项继续后置，包括 `QueryEngine` 结构化输入、interactive 图片输入与 `--print --image`
 
 - [ ] backlog：继续细化 `Bash / Glob / Grep` 的统计、分页、结果映射与模型侧结果收口
 - [ ] backlog：继续细化 `Read / Grep` 在超大文件、超大命中集和更复杂文件语义下的剩余边界
@@ -127,15 +141,50 @@
 - [ ] backlog：梳理当前 Tool 协议与文档之间的差距
 - [ ] backlog：扩展自动化测试覆盖到更复杂文件语义、provider 边界与其余核心工具结果结构
 - [ ] `Bash` 的真 sandbox、AST 级 shell 解析和更细粒度 permission 规则暂缓；当前仅在出现真实 bug 或明确需求时继续下探
-- [ ] `v0.3`：继续细化阶段 6 的 permission mode / hooks，包括更明确的 evaluator 位置、更细粒度规则与 tool 执行链路深化
-- [ ] `v0.3`：继续推进 `tool result budget / persistence` 的参数化、上下文级 compact，以及 model limits 在更广调度路径上的接线
-- [ ] `v0.3`：继续打磨 `CLAUDE.md`，补齐完整 include 语义、优先级细节、frontmatter / managed memory / instruction hooks
-- [ ] `v0.2+ / 低优先级`：继续打磨 `WebFetch / AskUserQuestion`，重点放在 `WebFetch` 的权限/安全链路、cache、binary content 与更强的 prompt 处理，以及 `AskUserQuestion` 的 richer host UI、preview 展示与 annotations 采集
-- [ ] `v0.2+ / 低优先级`：在已有 provider 重试 / 限流 / 结构化错误基础上，继续细化 `Anthropic` 的更完整错误类型映射、可配置 token 参数与更长等待策略
-- [ ] `v0.2+ / 低优先级`：在已补 `verbosity / reasoning.effort / store / previous_response_id / parallel_tool_calls / max_tool_calls / include / truncation / metadata / text.format` 的基础上，继续扩展 `OpenAI Responses API` 的更多 request 参数与更广的事件覆盖
-- [ ] `v0.2+ / 低优先级`：将 provider / Responses 的 annotation、specialized output types 与更广事件覆盖继续接到 transcript / verbose / headless 展示层
+- [ ] `v0.4`：继续细化阶段 6 的 permission mode / hooks，包括更明确的 evaluator 位置、更细粒度规则与 tool 执行链路深化
+- [ ] `v0.4`：继续推进 `tool result budget / persistence` 的参数化、上下文级 compact，以及 model limits 在更广调度路径上的接线
+- [ ] `v0.4`：继续打磨 `CLAUDE.md`，补齐完整 include 语义、优先级细节、frontmatter / managed memory / instruction hooks
+- [ ] `v0.4 / 低优先级`：继续打磨 `WebFetch / AskUserQuestion`，重点放在 `WebFetch` 的权限/安全链路、cache、binary content 与更强的 prompt 处理，以及 `AskUserQuestion` 的 richer host UI、preview 展示与 annotations 采集
+- [ ] `v0.4 / 低优先级`：在已有 provider 重试 / 限流 / 结构化错误基础上，继续细化 `Anthropic` 的更完整错误类型映射、可配置 token 参数与更长等待策略
+- [ ] `v0.4 / 低优先级`：在已补 `verbosity / reasoning.effort / store / previous_response_id / parallel_tool_calls / max_tool_calls / include / truncation / metadata / text.format` 的基础上，继续扩展 `OpenAI Responses API` 的更多 request 参数与更广的事件覆盖
+- [ ] `v0.4 / 低优先级`：将 provider / Responses 的 annotation、specialized output types 与更广事件覆盖继续接到 transcript / verbose / headless 展示层
 
 ## Done
+### v0.2 收官（由原 Todo 挪入）
+
+- [x] `P0 / 阶段 10-1`：建立 memory 文件系统骨架，先对齐 Claude Code `memdir` 风格
+  - 新建 `src/memory/`，落地 `paths.ts / store.ts / frontmatter.ts / manifest.ts / recall.ts`
+  - 按 `docs/memory-spec.md` 落地 `~/.dclaw/projects/<sanitized-workspace>/memory/`、`MEMORY.md` 与独立 memory 文件
+  - 定义 `name / description / type / updated_at` 最小 frontmatter
+  - 将 memory 收口为 file-based manifest，不额外引入复杂 ranking
+
+- [x] `P0 / 阶段 10-2`：实现 query-time recall 与 prompt 注入
+  - `MEMORY.md` 常驻 system prompt
+  - recall 从 deterministic helper 收口到“manifest + side-query 语义选择”
+  - 为 injected memory 保留来源可观察性，并明确 selector 永远复用主对话 `client/model`
+
+- [x] `P1 / 阶段 10-3`：明确 memory 写回策略与边界
+  - 已接入 turn-end automatic extraction
+  - 已补齐去重 / 升级护栏与 `WHAT_NOT_TO_SAVE_SECTION` 写回边界
+  - extraction 只使用 memory-only scoped `Read / Edit / Write`
+  - `MEMORY.md` 只作索引，不存整段正文
+  - 成功写回只追加 transcript-only system note，不把 extraction 对话混回主 prompt
+
+- [x] `P1 / 阶段 10-5`：将 turn-end memory extraction 改为不阻塞主 turn
+  - 当前 automatic extraction 已改为后台执行 / fire-and-forget
+  - interactive / resume 主路径不再被 memory 写回阻塞
+  - headless 与 REPL 退出路径会做软 drain
+
+- [x] `P0 / bugfix`：收口 `plan mode` 审批重复请求问题
+  - `EnterPlanMode` 不再要求用户批准进入；进入 planning 本身不是 approval step
+  - `ExitPlanMode` 才是计划审批点；用户拒绝时应继续留在 `plan mode`
+  - 拒绝反馈已对齐到 Claude Code 风格的 rejection 语义
+
+- [x] `P0 / 文档与测试`：补齐 `v0.2` 文档口径与核心回归用例
+  - 已补齐 `README / 01-总体方案 / 03-扩展设计 / phases / project-status / memory-spec / dev-tasks`
+  - 已为阶段 10 补齐 frontmatter / recall / prompt 注入上限 / 去重升级 / recall fallback / extraction prompt 边界单测
+  - `compact / plan / memory` 三条主线均已具备最小单测护栏
+
 - [x] `P0 / bugfix`：对齐 Claude Code 的 completed task list 生命周期，避免同一 session 继续向旧 board 追加新任务
 
 - [x] 收口规则：

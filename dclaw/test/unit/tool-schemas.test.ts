@@ -14,7 +14,10 @@ import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
 import { validateJsonSchema } from '../../src/tools/schema.js'
 import { buildTool } from '../../src/tools/types.js'
-import { createTextMessage } from '../../src/types/message.js'
+import {
+  createImageBlock,
+  createTextMessage,
+} from '../../src/types/message.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
 class CapturingLlmClient implements LlmClient {
@@ -27,6 +30,41 @@ class CapturingLlmClient implements LlmClient {
     this.requests.push(request)
     return {
       message: createTextMessage('assistant', 'schema capture ok'),
+    }
+  }
+}
+
+class ToolThenAnswerClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+
+  constructor(private readonly toolName: string) {}
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+
+    if (this.requests.length === 1) {
+      return {
+        message: {
+          role: 'assistant',
+          id: 'msg_tool_use',
+          createdAt: new Date().toISOString(),
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tool_1',
+              name: this.toolName,
+              input: {},
+            },
+          ],
+        },
+      }
+    }
+
+    return {
+      message: createTextMessage('assistant', 'done'),
     }
   }
 }
@@ -300,7 +338,7 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   assert.match(taskCreate?.description ?? '', /Complex multi-step tasks/i)
   assert.match(taskCreate?.description ?? '', /Check TaskList first/i)
   assert.match(taskCreate?.description ?? '', /fewer than 3 trivial steps/i)
-  assert.match(taskCreate?.description ?? '', /follow-up tasks/i)
+  assert.match(taskCreate?.description ?? '', /follow-up task/i)
 
   const taskList = tools.find(tool => tool.name === 'TaskList')
   assert.match(taskList?.description ?? '', /prefer working on tasks in ID order/i)
@@ -355,6 +393,158 @@ test('query loop stores model-facing tool results separately from raw tool resul
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('query loop preserves structured tool_result content for the next llm request', async () => {
+  const registry = new ToolRegistry()
+  registry.register(
+    buildTool({
+      name: 'RemoteImage',
+      description: 'Returns an image as structured tool result content.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          contentKind: { type: 'string' },
+          mediaType: { type: 'string' },
+          result: { type: 'string' },
+        },
+        required: ['contentKind', 'mediaType', 'result'],
+        additionalProperties: false,
+      },
+      async call() {
+        return {
+          ok: true,
+          output: {
+            contentKind: 'image',
+            mediaType: 'image/png',
+            result: 'Downloaded image content for analysis.',
+          },
+          content: [
+            { type: 'text', text: 'Downloaded image content for analysis.' },
+            createImageBlock('image/png', 'abc123'),
+          ],
+          summary: 'Fetched remote image',
+        }
+      },
+      isReadOnly() {
+        return true
+      },
+    }),
+  )
+
+  const client = new ToolThenAnswerClient('RemoteImage')
+
+  await executeSingleTurn({
+    client,
+    messages: [createTextMessage('user', 'please use the RemoteImage tool')],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: ['RemoteImage'],
+    }),
+  })
+
+  const toolResultMessage = client.requests[1]?.messages.find(
+    (message: (typeof client.requests)[number]['messages'][number]) =>
+      message.role === 'user' &&
+      message.content.some(block => block.type === 'tool_result'),
+  )
+  const block = toolResultMessage?.content[0]
+  assert.ok(block && block.type === 'tool_result')
+  assert.deepEqual(
+    block.content?.map(
+      (
+        item: NonNullable<typeof block.content>[number],
+      ) => item.type,
+    ),
+    ['text', 'image'],
+  )
+  const imageBlock = block.content?.[1]
+  assert.ok(imageBlock && imageBlock.type === 'image')
+  assert.equal(imageBlock.source.mediaType, 'image/png')
+  assert.equal(block.rawOutput && typeof block.rawOutput, 'object')
+})
+
+test('query loop appends tool-generated messages to the next llm request', async () => {
+  const registry = new ToolRegistry()
+  registry.register(
+    buildTool({
+      name: 'LocalImage',
+      description: 'Returns image content plus an additional user message.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          contentKind: { type: 'string' },
+          mediaType: { type: 'string' },
+        },
+        required: ['contentKind', 'mediaType'],
+        additionalProperties: false,
+      },
+      async call() {
+        return {
+          ok: true,
+          output: {
+            contentKind: 'image',
+            mediaType: 'image/png',
+          },
+          content: [createImageBlock('image/png', 'abc123')],
+          newMessages: [
+            createTextMessage(
+              'user',
+              'Read image metadata: local image attached for analysis.',
+            ),
+          ],
+          summary: 'Read local image',
+        }
+      },
+      isReadOnly() {
+        return true
+      },
+    }),
+  )
+
+  const client = new ToolThenAnswerClient('LocalImage')
+
+  await executeSingleTurn({
+    client,
+    messages: [createTextMessage('user', 'please use the LocalImage tool')],
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: ['LocalImage'],
+    }),
+  })
+
+  const followUpUserTextMessage = client.requests[1]?.messages.find(
+    message =>
+      message.role === 'user' &&
+      message.content.length === 1 &&
+      message.content[0]?.type === 'text' &&
+      message.content[0].text.includes('Read image metadata'),
+  )
+  assert.ok(followUpUserTextMessage)
+
+  const toolResultMessage = client.requests[1]?.messages.find(
+    message =>
+      message.role === 'user' &&
+      message.content.some(block => block.type === 'tool_result'),
+  )
+  const block = toolResultMessage?.content[0]
+  assert.ok(block && block.type === 'tool_result')
+  assert.deepEqual(
+    block.content?.map(
+      (item: NonNullable<typeof block.content>[number]) => item.type,
+    ),
+    ['image'],
+  )
 })
 
 test('query loop rejects tool outputs that violate declared outputSchema', async () => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { formatTranscript } from '../../src/session/transcript.js'
 import {
+  createImageBlock,
   createMessage,
   createToolResultMessage,
 } from '../../src/types/message.js'
@@ -173,4 +174,26 @@ test('formatTranscript renders reasoning and thinking in a readable style', () =
     lines.some(line => line === 'Thinking: Need to inspect the file contents first.'),
   )
   assert.ok(lines.some(line => line === 'Thinking: [hidden (11 chars)]'))
+})
+
+test('formatTranscript renders image placeholders without leaking base64 payloads', () => {
+  const lines = formatTranscript(
+    [
+      createMessage('user', [createImageBlock('image/png', 'abc123base64payload')]),
+      createMessage('assistant', [
+        {
+          type: 'text',
+          text: 'I inspected the image.',
+        },
+        createImageBlock('image/png', 'anotherbase64payload'),
+      ]),
+    ],
+    {
+      includeThinking: false,
+    },
+  )
+
+  assert.ok(lines.includes('user: [image]'))
+  assert.ok(lines.includes('assistant: I inspected the image. [image]'))
+  assert.ok(lines.every(line => !line.includes('base64payload')))
 })

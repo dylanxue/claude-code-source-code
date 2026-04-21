@@ -2,9 +2,32 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import sharp from 'sharp'
+import { getMaxRawBytesForImageTokens } from '../../src/llm/imageProcessing.js'
 import { webFetchTool } from '../../src/tools/builtin/webFetch.js'
 import { askUserQuestionTool } from '../../src/tools/builtin/askUserQuestion.js'
+import { getDefaultReadLimits } from '../../src/tools/builtin/readLimits.js'
 import { createToolContext } from '../helpers/toolContext.js'
+
+async function createNoisyPng(
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const pixels = Buffer.alloc(width * height * 3)
+  for (let index = 0; index < pixels.length; index += 1) {
+    pixels[index] = (index * 17) % 256
+  }
+
+  return sharp(pixels, {
+    raw: {
+      width,
+      height,
+      channels: 3,
+    },
+  })
+    .png({ compressionLevel: 0 })
+    .toBuffer()
+}
 
 test('WebFetch strips HTML and includes prompt context', async () => {
   const server = createServer((_, response) => {
@@ -172,6 +195,184 @@ test('WebFetch falls back to leading excerpts for generic prompts', async () => 
     assert.equal(result.ok, true)
     assert.match(result.output.result, /Leading excerpt from the page:/)
     assert.match(result.output.result, /Opening summary/)
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch returns structured image content for supported remote images', async () => {
+  const pngBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxL8AAAAASUVORK5CYII=',
+    'base64',
+  )
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(pngBytes.length),
+    })
+    response.end(pngBytes)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/cat.png`,
+        prompt: 'Describe the image',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.contentKind, 'image')
+    assert.equal(result.output.mediaType, 'image/png')
+    assert.equal(result.output.bytes, pngBytes.length)
+    assert.match(result.output.result, /Downloaded image content/)
+    assert.deepEqual(
+      result.content?.map(block => block.type),
+      ['text', 'image'],
+    )
+    const imageBlock = result.content?.[1]
+    assert.ok(imageBlock && imageBlock.type === 'image')
+    assert.equal(imageBlock.source.mediaType, 'image/png')
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch downscales oversized-dimension remote images before attaching them', async () => {
+  const sourceBuffer = await sharp({
+    create: {
+      width: 3_000,
+      height: 3_000,
+      channels: 3,
+      background: { r: 180, g: 80, b: 30 },
+    },
+  })
+    .png()
+    .toBuffer()
+
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(sourceBuffer.length),
+    })
+    response.end(sourceBuffer)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/large.png`,
+        prompt: 'Describe the image',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.contentKind, 'image')
+    assert.equal(result.output.mediaType, 'image/png')
+    const imageBlock = result.content?.[1]
+    assert.ok(imageBlock && imageBlock.type === 'image')
+    const optimizedBuffer = Buffer.from(imageBlock.source.data, 'base64')
+    const metadata = await sharp(optimizedBuffer).metadata()
+    assert.equal(metadata.width, 2_000)
+    assert.equal(metadata.height, 2_000)
+    assert.equal(result.output.bytes, optimizedBuffer.length)
+    assert.ok(optimizedBuffer.length < sourceBuffer.length)
+    assert.match(result.output.result, /attached an optimized image\/png payload/i)
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch applies token-aware compression for dense remote images', async () => {
+  const sourceBuffer = await createNoisyPng(1_400, 1_400)
+  const limits = getDefaultReadLimits()
+  const tokenBudgetBytes = getMaxRawBytesForImageTokens(limits.maxTokens)
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(sourceBuffer.length),
+    })
+    response.end(sourceBuffer)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    assert.ok(sourceBuffer.length > tokenBudgetBytes)
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/dense.png`,
+        prompt: 'Describe the image',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.contentKind, 'image')
+    const imageBlock = result.content?.[1]
+    assert.ok(imageBlock && imageBlock.type === 'image')
+    const optimizedBuffer = Buffer.from(imageBlock.source.data, 'base64')
+    assert.ok(optimizedBuffer.length <= tokenBudgetBytes)
+    assert.ok(result.output.bytes <= tokenBudgetBytes)
+    assert.match(result.output.result, /~\d+ tokens/i)
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch rejects unsupported remote image media types', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'image/svg+xml' })
+    response.end('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    await assert.rejects(
+      webFetchTool.call(
+        {
+          url: `http://127.0.0.1:${address.port}/vector.svg`,
+          prompt: 'Describe the image',
+        },
+        createToolContext(),
+      ),
+      /only supports remote images with media types/i,
+    )
   } finally {
     server.close()
     await once(server, 'close')

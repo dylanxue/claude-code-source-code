@@ -115,7 +115,7 @@
 
 ### 4.1 为什么不直接绑死在 session
 
-如果 `task / todo` 只挂在单个 `sessionId` 上，那么一旦：
+如果 `task` 只挂在单个 `sessionId` 上，那么一旦：
 
 - `/compact`
 - 同一任务跨 compact 继续推进

@@ -17,7 +17,10 @@ import {
   type ContentBlock,
   type Message,
 } from '../types/message.js'
-import type { ToolContext } from '../types/tool.js'
+import type {
+  ToolContext,
+  ToolResult as ToolExecutionResult,
+} from '../types/tool.js'
 import { evaluateToolPermission } from '../permissions/evaluator.js'
 import type { ToolRegistry } from '../tools/registry.js'
 import { validateJsonSchema } from '../tools/schema.js'
@@ -149,6 +152,27 @@ function stringifyOutput(value: unknown): string {
   return stringifyJson(value)
 }
 
+function summarizeToolResultContent(
+  result: ToolExecutionResult,
+): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(result.content) || result.content.length === 0) {
+    return undefined
+  }
+
+  return result.content.map(block =>
+    block.type === 'text'
+      ? {
+          type: 'text',
+          textPreview: truncateForTrace(block.text, 240),
+        }
+      : {
+          type: 'image',
+          mediaType: block.source.mediaType,
+          dataChars: block.source.data.length,
+        },
+  )
+}
+
 function truncateForTrace(value: string, maxLength: number = 2_000): string {
   return value.length <= maxLength
     ? value
@@ -225,6 +249,30 @@ function summarizeMessageForTrace(message: Message): Record<string, unknown> {
       name: block.name,
       input: block.input,
     })),
+    toolResults: message.content
+      .filter(
+        (
+          block,
+        ): block is Extract<ContentBlock, { type: 'tool_result' }> =>
+          block.type === 'tool_result',
+      )
+      .map(block => ({
+        toolUseId: block.toolUseId,
+        outputPreview: truncateForTrace(stringifyOutput(block.output), 500),
+        content:
+          block.content?.map(item =>
+            item.type === 'text'
+              ? {
+                  type: 'text',
+                  textPreview: truncateForTrace(item.text, 240),
+                }
+              : {
+                  type: 'image',
+                  mediaType: item.source.mediaType,
+                  dataChars: item.source.data.length,
+                },
+          ) ?? [],
+      })),
   }
 }
 
@@ -413,7 +461,7 @@ export async function executeSingleTurn(
           streaming: useStreaming,
           systemPrompt: iterationState.systemPrompt,
           messageCount: iterationState.messages.length,
-          messages: iterationState.messages,
+          messages: iterationState.messages.map(summarizeMessageForTrace),
           toolNames: iterationState.toolDefinitions.map(tool => tool.name),
         },
         iteration,
@@ -576,6 +624,7 @@ export async function executeSingleTurn(
       }
 
       const toolResultMessages: Message[] = []
+      const toolGeneratedMessages: Message[] = []
       const toolResultMetadata = new Map<string, ToolResultBudgetMetadata>()
       for (const block of toolUseBlocks) {
         const tool = request.toolRegistry.get(block.name)
@@ -728,12 +777,16 @@ export async function executeSingleTurn(
             block.id,
             mappedResult,
             result,
+            result.content,
           )
           toolResultMessages.push(toolResultMessage)
           toolResultMetadata.set(block.id, {
             toolName: tool.name,
             maxResultSizeChars: tool.maxResultSizeChars,
           })
+          if (Array.isArray(result.newMessages) && result.newMessages.length > 0) {
+            toolGeneratedMessages.push(...result.newMessages)
+          }
           recordTrace(
             request.queryTraceSink,
             'tool.call.result',
@@ -744,7 +797,21 @@ export async function executeSingleTurn(
               summary: result.summary,
               sandboxMode: getSandboxModeFromToolOutput(result.output),
               mappedOutput: mappedResult,
-              result,
+              result: {
+                ok: result.ok,
+                summary: result.summary,
+                output: result.output,
+                ...(result.content && result.content.length > 0
+                  ? { content: summarizeToolResultContent(result) }
+                  : {}),
+                ...(result.newMessages && result.newMessages.length > 0
+                  ? {
+                      newMessages: result.newMessages.map(
+                        summarizeMessageForTrace,
+                      ),
+                    }
+                  : {}),
+              },
               outputPreview: truncateForTrace(stringifyOutput(result.output)),
             },
             iteration,
@@ -812,18 +879,22 @@ export async function executeSingleTurn(
       lastToolResultMessages = budgetedToolResults.messages
       workingMessages.push(...budgetedToolResults.messages)
       addedMessages.push(...budgetedToolResults.messages)
+      if (toolGeneratedMessages.length > 0) {
+        workingMessages.push(...toolGeneratedMessages)
+        addedMessages.push(...toolGeneratedMessages)
+      }
       recordTrace(
         request.queryTraceSink,
         'iteration.tool_results',
         {
           count: budgetedToolResults.messages.length,
+          generatedMessageCount: toolGeneratedMessages.length,
           contextStatsAfter: getContextStatsForTrace(request, [
             ...workingMessages,
-            ...budgetedToolResults.messages,
           ]),
           compactRecommendationAfter: getCompactRecommendationForTrace(
             request,
-            [...workingMessages, ...budgetedToolResults.messages],
+            [...workingMessages],
           ),
           toolUseIds: budgetedToolResults.messages
             .map(message => message.content[0])
@@ -837,6 +908,10 @@ export async function executeSingleTurn(
               } => Boolean(block && block.type === 'tool_result'),
             )
             .map(block => block.toolUseId),
+          generatedMessages:
+            toolGeneratedMessages.length > 0
+              ? toolGeneratedMessages.map(summarizeMessageForTrace)
+              : undefined,
         },
         iteration,
       )

@@ -17,6 +17,7 @@ import type {
 import { ToolRegistry } from '../../src/tools/registry.js'
 import { buildTool } from '../../src/tools/types.js'
 import {
+  createImageBlock,
   createTextMessage,
   createToolResultMessage,
   createToolUseMessage,
@@ -107,6 +108,43 @@ test('applyToolResultBudget persists the largest outputs when the turn aggregate
   } finally {
     await rm(dclawHome, { recursive: true, force: true })
   }
+})
+
+test('applyToolResultBudget does not persist structured tool_result image content', async () => {
+  const message = createToolResultMessage(
+    'user',
+    'tool_img',
+    {
+      contentKind: 'image',
+      mediaType: 'image/png',
+      result: 'Downloaded image content for analysis.',
+    },
+    {
+      ok: true,
+      output: {
+        contentKind: 'image',
+        mediaType: 'image/png',
+        result: 'Downloaded image content for analysis.',
+      },
+    },
+    [
+      { type: 'text', text: 'Downloaded image content for analysis.' },
+      createImageBlock('image/png', 'abc123'),
+    ],
+  )
+
+  const result = await applyToolResultBudget(
+    [message],
+    new Map([['tool_img', { toolName: 'WebFetch', maxResultSizeChars: 1 }]]),
+    {
+      defaultMaxResultSizeChars: 1,
+      maxToolResultsPerTurnChars: 1,
+      previewChars: 1,
+    },
+  )
+
+  assert.equal(result.replacements.length, 0)
+  assert.equal(result.messages[0], message)
 })
 
 class ToolThenAnswerClient implements LlmClient {

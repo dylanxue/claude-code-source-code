@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  createImageBlock,
   createMessage,
   createTextMessage,
   createToolResultMessage,
@@ -400,6 +401,241 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
   } finally {
     server.close()
     await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient maps user image blocks to Responses input content', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'ok' }],
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+    })
+
+    await client.createMessage({
+      model: 'gpt-4.1-mini',
+      messages: [
+        createMessage('user', [
+          { type: 'text', text: 'What is in this image?' },
+          createImageBlock('image/png', 'abc123'),
+        ]),
+      ],
+    })
+
+    assert.deepEqual(
+      (capturedBody as { input?: unknown[] }).input,
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'What is in this image?' },
+            {
+              type: 'input_image',
+              image_url: 'data:image/png;base64,abc123',
+            },
+          ],
+        },
+      ],
+    )
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
+test('OpenAiLlmClient maps user image blocks to chat-completions content parts', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'ok',
+              },
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'chat-completions',
+    })
+
+    await client.createMessage({
+      model: 'gpt-4.1-mini',
+      messages: [
+        createMessage('user', [
+          { type: 'text', text: 'What is in this image?' },
+          createImageBlock('image/png', 'abc123'),
+        ]),
+      ],
+    })
+
+    assert.deepEqual(
+      (capturedBody as { messages?: unknown[] }).messages,
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is in this image?' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: 'data:image/png;base64,abc123',
+              },
+            },
+          ],
+        },
+      ],
+    )
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
+test('OpenAiLlmClient stringifies tool_result output even when structured image content exists', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'ok',
+              },
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'chat-completions',
+    })
+
+    await client.createMessage({
+      model: 'gpt-4.1-mini',
+      messages: [
+        createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'tool_img_1',
+            name: 'WebFetch',
+            input: { url: 'https://example.com/cat.png', prompt: 'Describe it' },
+          },
+        ]),
+        createToolResultMessage(
+          'user',
+          'tool_img_1',
+          {
+            contentKind: 'image',
+            mediaType: 'image/png',
+            result: 'Downloaded image content for analysis.',
+          },
+          {
+            ok: true,
+            output: {
+              contentKind: 'image',
+              mediaType: 'image/png',
+              result: 'Downloaded image content for analysis.',
+            },
+          },
+          [
+            { type: 'text', text: 'Downloaded image content for analysis.' },
+            createImageBlock('image/png', 'abc123'),
+          ],
+        ),
+      ],
+    })
+
+    assert.equal(
+      (capturedBody as { messages?: Array<{ role: string; content: string }> })
+        .messages?.[1]?.content,
+      '{\n  "contentKind": "image",\n  "mediaType": "image/png",\n  "result": "Downloaded image content for analysis."\n}',
+    )
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
   }
 })
 

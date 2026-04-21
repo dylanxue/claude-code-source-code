@@ -553,11 +553,15 @@ export function formatProgressThinkingLine(summary?: string): string {
 }
 
 function formatContentBlock(block: ContentBlock): string | null {
-  if (block.type !== 'text') {
-    return null
+  if (block.type === 'text') {
+    return `[content] ${block.text}`
   }
 
-  return `[content] ${block.text}`
+  if (block.type === 'image') {
+    return `[content:image] ${block.source.mediaType}`
+  }
+
+  return null
 }
 
 function formatToolCallBlock(block: ContentBlock): string | null {
@@ -820,7 +824,9 @@ export function getVerboseReasoningBlocks(
 export function getVerboseContentBlocks(
   content: ContentBlock[],
 ): Array<ContentBlock> {
-  return content.filter(block => block.type === 'text')
+  return content.filter(
+    block => block.type === 'text' || block.type === 'image',
+  )
 }
 
 export function collectToolCalls(messages: Message[]): ToolUseContentBlock[] {

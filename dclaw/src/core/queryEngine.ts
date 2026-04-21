@@ -41,6 +41,7 @@ import {
   snapshotReadState,
   type PostCompactReadStateSnapshot,
 } from './postCompactAttachments.js'
+import { createToolResultAttachmentMessages } from './toolResultAttachments.js'
 import { createTaskToolReminderMessage } from './taskToolReminder.js'
 import type { ReadStateEntry } from '../types/tool.js'
 
@@ -225,9 +226,14 @@ export class QueryEngine {
     messages: Message[]
     usedPostCompactAttachments: boolean
   }> {
+    const visibleMessages = getMessagesAfterCompactBoundary(baseMessages)
+    const transientMessages: Message[] = createToolResultAttachmentMessages(
+      visibleMessages,
+    )
+
     if (!this.toolContext.sessionId) {
       return {
-        messages: [],
+        messages: transientMessages,
         usedPostCompactAttachments: false,
       }
     }
@@ -237,8 +243,7 @@ export class QueryEngine {
       this.modelLimitsEnv,
     )
     const allMessages = baseMessages
-    const messages = getMessagesAfterCompactBoundary(allMessages)
-    const transientMessages: Message[] = []
+    const messages = visibleMessages
     const recoveryReadState = this.postCompactReadState?.entries
     const postCompactAttachments = await createPostCompactAttachmentMessages(
       allMessages,

@@ -17,6 +17,17 @@ export type TextContentBlock = {
   annotations?: TextAnnotation[]
 }
 
+export type Base64ImageSource = {
+  type: 'base64'
+  mediaType: string
+  data: string
+}
+
+export type ImageContentBlock = {
+  type: 'image'
+  source: Base64ImageSource
+}
+
 export type ThinkingContentBlock = {
   type: 'thinking'
   thinking: string
@@ -43,15 +54,21 @@ export type ToolUseContentBlock = {
   input: Record<string, unknown>
 }
 
+export type ToolResultStructuredContentBlock =
+  | TextContentBlock
+  | ImageContentBlock
+
 export type ToolResultContentBlock = {
   type: 'tool_result'
   toolUseId: string
   output: unknown
   rawOutput?: unknown
+  content?: ToolResultStructuredContentBlock[]
 }
 
 export type ContentBlock =
   | TextContentBlock
+  | ImageContentBlock
   | ThinkingContentBlock
   | RedactedThinkingContentBlock
   | ReasoningContentBlock
@@ -85,6 +102,20 @@ export function createTextMessage(role: MessageRole, text: string): Message {
   return createMessage(role, [{ type: 'text', text }])
 }
 
+export function createImageBlock(
+  mediaType: string,
+  data: string,
+): ImageContentBlock {
+  return {
+    type: 'image',
+    source: {
+      type: 'base64',
+      mediaType,
+      data,
+    },
+  }
+}
+
 export function createTranscriptOnlyTextMessage(
   role: MessageRole,
   text: string,
@@ -115,6 +146,7 @@ export function createToolResultMessage(
   toolUseId: string,
   output: unknown,
   rawOutput?: unknown,
+  content?: ToolResultStructuredContentBlock[],
 ): Message {
   return createMessage(role, [
     {
@@ -122,6 +154,7 @@ export function createToolResultMessage(
       toolUseId,
       output,
       ...(rawOutput === undefined ? {} : { rawOutput }),
+      ...(content === undefined || content.length === 0 ? {} : { content }),
     },
   ])
 }
@@ -136,6 +169,12 @@ export function getTextContent(message: Message): string {
 export function getToolUseBlocks(message: Message): ToolUseContentBlock[] {
   return message.content.filter(
     (block): block is ToolUseContentBlock => block.type === 'tool_use',
+  )
+}
+
+export function getImageContentBlocks(message: Message): ImageContentBlock[] {
+  return message.content.filter(
+    (block): block is ImageContentBlock => block.type === 'image',
   )
 }
 

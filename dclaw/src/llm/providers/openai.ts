@@ -1,9 +1,13 @@
 import {
   createMessage,
   type ContentBlock,
+  type ImageContentBlock,
   type Message,
   type TextAnnotation,
 } from '../../types/message.js'
+import {
+  validateImagesForProvider,
+} from '../imageValidation.js'
 import { resolveModelLimits } from '../modelLimits.js'
 import {
   getLlmMaxRetries,
@@ -42,10 +46,20 @@ export {
   type OpenAiConfig,
 }
 
+type OpenAiResponsesMessageInputContent =
+  | {
+      type: 'input_text'
+      text: string
+    }
+  | {
+      type: 'input_image'
+      image_url: string
+    }
+
 type OpenAiResponsesInputItem =
   | {
       role: 'user' | 'assistant'
-      content: string
+      content: string | OpenAiResponsesMessageInputContent[]
     }
   | {
       type: 'reasoning'
@@ -164,7 +178,7 @@ type OpenAiResponsesMessageItem = {
 
 type OpenAiChatMessage =
   | {
-      role: 'system' | 'user' | 'assistant'
+      role: 'system' | 'assistant'
       content: string
       tool_calls?: Array<{
         id: string
@@ -176,9 +190,25 @@ type OpenAiChatMessage =
       }>
     }
   | {
+      role: 'user'
+      content: string | OpenAiChatContentPart[]
+    }
+  | {
       role: 'tool'
       tool_call_id: string
       content: string
+    }
+
+type OpenAiChatContentPart =
+  | {
+      type: 'text'
+      text: string
+    }
+  | {
+      type: 'image_url'
+      image_url: {
+        url: string
+      }
     }
 
 type OpenAiChatCompletionResponse = {
@@ -290,52 +320,45 @@ type ResolvedOpenAiResponsesOptions = {
   textFormat?: Record<string, unknown>
 }
 
-function toResponsesInputItem(
-  block: ContentBlock,
-  role: 'user' | 'assistant',
-): OpenAiResponsesInputItem[] {
-  switch (block.type) {
-    case 'text':
-      return [{ role, content: block.text }]
-    case 'thinking':
-    case 'redacted_thinking':
-      return []
-    case 'reasoning':
-      return [
-        {
-          type: 'reasoning',
-          ...(block.id ? { id: block.id } : {}),
-          ...(block.summary.length > 0
-            ? {
-                summary: block.summary.map(text => ({
-                  type: 'summary_text' as const,
-                  text,
-                })),
-              }
-            : {}),
-          ...(block.encryptedContent
-            ? { encrypted_content: block.encryptedContent }
-            : {}),
-          ...(block.status ? { status: block.status } : {}),
-        },
-      ]
-    case 'tool_use':
-      return [
-        {
-          type: 'function_call',
-          call_id: block.id,
-          name: block.name,
-          arguments: JSON.stringify(block.input),
-        },
-      ]
-    case 'tool_result':
-      return [
-        {
-          type: 'function_call_output',
-          call_id: block.toolUseId,
-          output: stringifyJson(block.output),
-        },
-      ]
+function toResponsesImageUrl(block: ImageContentBlock): string {
+  return `data:${block.source.mediaType};base64,${block.source.data}`
+}
+
+function stringifyToolResultForOpenAi(output: unknown): string {
+  return stringifyJson(output)
+}
+
+function toResponsesMessageContent(
+  block: Extract<ContentBlock, { type: 'text' | 'image' }>,
+): OpenAiResponsesMessageInputContent {
+  if (block.type === 'text') {
+    return {
+      type: 'input_text',
+      text: block.text,
+    }
+  }
+
+  return {
+    type: 'input_image',
+    image_url: toResponsesImageUrl(block),
+  }
+}
+
+function toChatCompletionContentPart(
+  block: Extract<ContentBlock, { type: 'text' | 'image' }>,
+): OpenAiChatContentPart {
+  if (block.type === 'text') {
+    return {
+      type: 'text',
+      text: block.text,
+    }
+  }
+
+  return {
+    type: 'image_url',
+    image_url: {
+      url: toResponsesImageUrl(block),
+    },
   }
 }
 
@@ -346,10 +369,90 @@ function toResponsesInput(messages: Message[]): OpenAiResponsesInputItem[] {
     if (message.role === 'system') {
       continue
     }
+    const role: 'user' | 'assistant' = message.role
+
+    let messageContent: Array<Extract<ContentBlock, { type: 'text' | 'image' }>> = []
+
+    const flushMessageContent = (): void => {
+      if (messageContent.length === 0) {
+        return
+      }
+
+      const hasImage = messageContent.some(block => block.type === 'image')
+      if (message.role === 'assistant' && hasImage) {
+        throw new Error(
+          'OpenAI image blocks are only supported on user messages in dclaw',
+        )
+      }
+
+      if (
+        !hasImage &&
+        messageContent.length === 1 &&
+        messageContent[0]?.type === 'text'
+      ) {
+        items.push({
+          role,
+          content: messageContent[0].text,
+        })
+      } else {
+        items.push({
+          role,
+          content: messageContent.map(toResponsesMessageContent),
+        })
+      }
+
+      messageContent = []
+    }
 
     for (const block of message.content) {
-      items.push(...toResponsesInputItem(block, message.role))
+      switch (block.type) {
+        case 'text':
+        case 'image':
+          messageContent.push(block)
+          break
+        case 'thinking':
+        case 'redacted_thinking':
+          break
+        case 'reasoning':
+          flushMessageContent()
+          items.push({
+            type: 'reasoning',
+            ...(block.id ? { id: block.id } : {}),
+            ...(block.summary.length > 0
+              ? {
+                  summary: block.summary.map(text => ({
+                    type: 'summary_text' as const,
+                    text,
+                  })),
+                }
+              : {}),
+            ...(block.encryptedContent
+              ? { encrypted_content: block.encryptedContent }
+              : {}),
+            ...(block.status ? { status: block.status } : {}),
+          })
+          break
+        case 'tool_use':
+          flushMessageContent()
+          items.push({
+            type: 'function_call',
+            call_id: block.id,
+            name: block.name,
+            arguments: JSON.stringify(block.input),
+          })
+          break
+        case 'tool_result':
+          flushMessageContent()
+          items.push({
+            type: 'function_call_output',
+            call_id: block.toolUseId,
+            output: stringifyToolResultForOpenAi(block.output),
+          })
+          break
+      }
     }
+
+    flushMessageContent()
   }
 
   return items
@@ -942,6 +1045,10 @@ function toChatCompletionMessages(
       continue
     }
 
+    const userContentBlocks = message.content.filter(
+      (block): block is Extract<ContentBlock, { type: 'text' | 'image' }> =>
+        block.type === 'text' || block.type === 'image',
+    )
     const textBlocks = message.content.filter(
       (block): block is Extract<ContentBlock, { type: 'text' }> =>
         block.type === 'text',
@@ -960,18 +1067,27 @@ function toChatCompletionMessages(
         messages.push({
           role: 'tool',
           tool_call_id: block.toolUseId,
-          content: stringifyJson(block.output),
+          content: stringifyToolResultForOpenAi(block.output),
         })
       }
       continue
     }
 
     if (message.role === 'user') {
+      const hasImage = userContentBlocks.some(block => block.type === 'image')
       messages.push({
         role: 'user',
-        content: textBlocks.map(block => block.text).join('\n'),
+        content: hasImage
+          ? userContentBlocks.map(toChatCompletionContentPart)
+          : textBlocks.map(block => block.text).join('\n'),
       })
       continue
+    }
+
+    if (userContentBlocks.some(block => block.type === 'image')) {
+      throw new Error(
+        'OpenAI image blocks are only supported on user messages in dclaw',
+      )
     }
 
     messages.push({
@@ -1195,6 +1311,7 @@ export class OpenAiLlmClient implements LlmClient {
     request: CreateMessageRequest,
   ): Promise<CreateMessageResponse> {
     const { model, limits, responsesOptions } = this.resolveRequestContext(request)
+    validateImagesForProvider(request.messages)
 
     if (this.apiStyle === 'chat-completions') {
       const parsed = await this.withRetry(async () => {
@@ -1275,6 +1392,7 @@ export class OpenAiLlmClient implements LlmClient {
     callbacks: CreateMessageStreamCallbacks,
   ): Promise<CreateMessageResponse> {
     const { model, limits, responsesOptions } = this.resolveRequestContext(request)
+    validateImagesForProvider(request.messages)
 
     if (this.apiStyle !== 'chat-completions') {
       return this.withRetry(async () => {

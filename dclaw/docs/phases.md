@@ -2,16 +2,16 @@
 
 ## 当前快照
 
-- 当前处于 `v0.2` 推进阶段
-- 当前主线：阶段 8 已收口，继续推进阶段 9、10，把 Plan / Task、Memory 做成新的核心主线
+- 当前处于 `v0.3` 准备阶段
+- 当前主线结论：阶段 8-10 已按当前范围收口；`v0.3` 只聚焦 subagent 与 skills，其它未完成项统一后置到 `v0.4`
 - 当前已知进展：
   - 阶段 1-2 已基本完成
   - 阶段 3-5 已打通最小主链路并持续收紧语义
   - 阶段 6 已接入最小 permission evaluator
   - 阶段 7 已接入 session store、`resume`、history 与基础 REPL commands
   - 阶段 8 已按当前范围收口：主路径为 manual compact、共享 `contextStats`、模型生成 compact summary、最小 autocompact 与 post-compact 恢复
-  - 阶段 9 已接入 task board、plan file、最小 `Task*` 与基础 plan mode runtime 摘要
-  - 阶段 10 已完成 `10-1` memory 文件系统骨架，正在推进后续 recall / 注入主链路
+  - 阶段 9 已按当前范围收口：task board、plan file、`Task*`、plan-mode runtime 提醒、审批展示、plan 真值恢复、approved-plan task materialization 与 completed board retire 均已完成
+  - 阶段 10 已按当前范围收口：`MEMORY.md` 常驻注入、side-query recall、自动 extraction、去重/升级、写回边界与非阻塞 drain 均已完成
 
 ## 核心 12 阶段
 
@@ -221,7 +221,7 @@
   - 当前已不只依赖 compact summary 文本
   - compact 后第一轮会通过 runtime attachment 恢复最近文件、plan file、full `plan_mode` reminder，以及带 `current task / current step` 的 task reminder
 - 当前这部分已进入首版结构化 runtime attachment 形态，并已接通 `resume / history / transcript` 的 planning 观察面；阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复路径 / planning 生命周期规则都已收口，而不是把 task board 全量状态写进 transcript
-- 仍未接入 swarm / teammate 相关的 task hook 扩展
+- 按 `v0.2` 当前范围，这一阶段已收口；swarm / teammate 相关的 task hook 扩展后置到 `v0.4`
 
 阶段边界补充：
 
@@ -231,7 +231,7 @@
   - 必要时澄清问题
   - 产出结构化 plan / task breakdown
   - 等待批准后再退出并实施
-- 真正切换当前 session 到 `plan mode` 时，应有明确的用户确认点；用户显式 `/plan` 可直接进入
+- `EnterPlanMode` 直接进入 planning；进入 planning 本身不是审批点。`ExitPlanMode` 才是唯一的计划审批点；用户显式 `/plan` 也可直接进入
 - `plan mode` 需要有专门的 plan file 作为计划真值，而不只是靠聊天文本或结构化状态
 - `task / current step` 必须是可恢复的会话状态，并在 `resume / history / /session` 中可观察
 - `compact` 后如果仍在 `plan mode`，模型必须继续收到 plan-mode 指令，避免压缩后丢失 planning 语义
@@ -264,14 +264,21 @@
   - 独立 memory markdown 文件
   - `name / description / type / updated_at` 最小 frontmatter
   - 基于 frontmatter 的 file-based manifest
-- 当前 `recall.ts` 仅提供 deterministic helper，尚未接入 prompt/query 主路径
-- 当前已补 memory 单测护栏，覆盖 frontmatter、路径、store、manifest 与轻量 recall 筛选
+- 当前已接通：
+  - `MEMORY.md` 常驻 system prompt
+  - side-query recall 与 query-time prompt 注入
+  - turn-end automatic extraction
+  - memory-only scoped `Read / Edit / Write`
+  - 去重 / 升级护栏与 `WHAT_NOT_TO_SAVE_SECTION` 写回边界
+  - 非阻塞后台写回与退出软 drain
+- 当前已补 memory 单测护栏，覆盖 frontmatter、路径、store、manifest、recall 选择/回退、prompt 注入上限、写回去重/升级、后台 extraction 与写回边界提示
 
 阶段边界补充：
 
-- `10-1` 先收口 memory 文件系统骨架，不提前扩写自动写回、复杂 ranking 或 team sync
-- `10-2` 再进入 query-time recall 与 prompt 注入
-- `10-3` 再明确写回策略、去重升级与与 `CLAUDE.md` / transcript / task 的边界
+- memory 继续以文件系统与 `MEMORY.md` 入口为主，不扩成通用知识库或 transcript 备份
+- `MEMORY.md` 只做短索引，不直接承载整段 memory 正文
+- 自动写回只分析最近新增对话，不顺手探索代码库
+- team memory sync、跨端同步与更复杂 ranking 继续后置
 
 ### 阶段 11：多代理、Worktree 与协作执行
 
@@ -325,19 +332,23 @@
 ### v0.2
 
 - 阶段 8-10
-- 当前主线：
+- 当前结论：
   - 上下文管理与自动压缩
   - Plan / Task 执行框架
   - Memory 系统
+  - 已按当前产品范围收口，可进入 `v0.3`
 
 ### v0.3
 
-- 阶段 11-12
+- 阶段 11 的 subagent 主路径
+- 阶段 12 的 skills 主路径
+
+### v0.4
+
+- 阶段 11 的 `worktree / coordinator / 多 worker` 剩余项
+- 阶段 12 的 `MCP / plugins / remote bridge` 剩余项
+- 阶段 13
 - 以及前序阶段中已明确后置的深化项：
   - `CLAUDE.md` 指令系统深化
   - 权限模式 / hooks 继续收口
   - `tool result budget / persistence` 与更广上下文压缩打磨
-
-### v0.4
-
-- 阶段 13

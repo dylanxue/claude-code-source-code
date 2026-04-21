@@ -1,7 +1,16 @@
 import { readFile, stat } from 'node:fs/promises'
+import {
+  IMAGE_TARGET_RAW_SIZE,
+  optimizeImageForModel,
+} from '../../llm/imageProcessing.js'
+import {
+  createImageBlock,
+  createTextMessage,
+} from '../../types/message.js'
 import type { ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
+import { getDefaultReadLimits } from './readLimits.js'
 import {
   DESCRIPTION as READ_DESCRIPTION,
   FILE_PATH_DESCRIPTION,
@@ -11,7 +20,12 @@ import {
   PROMPT,
 } from './readFilePrompt.js'
 
-const DEFAULT_MAX_READ_SIZE_BYTES = 256 * 1024
+const SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+])
 
 export type ReadFileToolInput = {
   file_path?: string
@@ -20,7 +34,7 @@ export type ReadFileToolInput = {
   limit?: number
 }
 
-export type ReadToolOutput = {
+export type ReadTextToolOutput = {
   type: 'text'
   file: {
     filePath: string
@@ -35,6 +49,17 @@ export type ReadToolOutput = {
   warning?: string
 }
 
+export type ReadImageToolOutput = {
+  type: 'image'
+  file: {
+    filePath: string
+    mediaType: string
+    sizeBytes: number
+  }
+}
+
+export type ReadToolOutput = ReadTextToolOutput | ReadImageToolOutput
+
 function splitLogicalLines(text: string): string[] {
   if (text.length === 0) {
     return []
@@ -47,9 +72,72 @@ function splitLogicalLines(text: string): string[] {
   return lines
 }
 
+function parseMediaType(contentType: string): string {
+  return contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+}
+
+function detectImageMediaTypeFromBuffer(buffer: Buffer): string | undefined {
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return 'image/png'
+  }
+
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return 'image/jpeg'
+  }
+
+  if (
+    buffer.length >= 6 &&
+    (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' ||
+      buffer.subarray(0, 6).toString('ascii') === 'GIF89a')
+  ) {
+    return 'image/gif'
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+
+  return undefined
+}
+
+function isSupportedLocalImageMediaType(contentType: string): boolean {
+  return SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES.has(parseMediaType(contentType))
+}
+
+function isSupportedLocalImageExtension(filePath: string): boolean {
+  const extension = filePath.split('.').at(-1)?.toLowerCase() ?? ''
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)
+}
+
+function getUnsupportedImageRangeError(): string {
+  return 'Read does not support offset or limit when reading image files'
+}
+
 export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
   name: 'Read',
   description: READ_DESCRIPTION,
+  // Keep the text path budget-aware. Image reads are self-bounded by the
+  // source-image limit plus read-time optimization, and they return structured
+  // content, so the aggregate tool-result budget skips them entirely.
   maxResultSizeChars: 50_000,
   prompt() {
     return PROMPT
@@ -84,37 +172,74 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
   },
   outputSchema: {
     type: 'object',
+    additionalProperties: false,
     properties: {
-      type: {
-        type: 'string',
-        enum: ['text'],
-      },
-      file: {
-        type: 'object',
-        properties: {
-          filePath: { type: 'string' },
-          content: { type: 'string' },
-          numLines: { type: 'integer' },
-          startLine: { type: 'integer' },
-          endLine: { type: 'integer' },
-          totalLines: { type: 'integer' },
-        },
-        required: [
-          'filePath',
-          'content',
-          'numLines',
-          'startLine',
-          'endLine',
-          'totalLines',
-        ],
-        additionalProperties: false,
-      },
+      type: { type: 'string' },
+      file: { type: 'object' },
       isPartial: { type: 'boolean' },
       didReadToEnd: { type: 'boolean' },
       warning: { type: 'string' },
     },
-    required: ['type', 'file', 'isPartial', 'didReadToEnd'],
-    additionalProperties: false,
+    anyOf: [
+      {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['text'],
+          },
+          file: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              content: { type: 'string' },
+              numLines: { type: 'integer' },
+              startLine: { type: 'integer' },
+              endLine: { type: 'integer' },
+              totalLines: { type: 'integer' },
+            },
+            required: [
+              'filePath',
+              'content',
+              'numLines',
+              'startLine',
+              'endLine',
+              'totalLines',
+            ],
+            additionalProperties: false,
+          },
+          isPartial: { type: 'boolean' },
+          didReadToEnd: { type: 'boolean' },
+          warning: { type: 'string' },
+        },
+        required: ['type', 'file', 'isPartial', 'didReadToEnd'],
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['image'],
+          },
+          file: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              mediaType: {
+                type: 'string',
+                enum: [...SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES],
+              },
+              sizeBytes: { type: 'integer' },
+            },
+            required: ['filePath', 'mediaType', 'sizeBytes'],
+            additionalProperties: false,
+          },
+        },
+        required: ['type', 'file'],
+        additionalProperties: false,
+      },
+    ],
   },
   async validate(input) {
     const filePath = (input.file_path ?? input.path)?.trim()
@@ -153,6 +278,16 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
       }
     }
 
+    if (
+      isSupportedLocalImageExtension(filePath) &&
+      (input.offset !== undefined || input.limit !== undefined)
+    ) {
+      return {
+        ok: false,
+        error: getUnsupportedImageRangeError(),
+      }
+    }
+
     try {
       const fileStat = await stat(toAbsoluteToolPath(filePath))
       if (!fileStat.isFile()) {
@@ -182,12 +317,79 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
     if (!filePath) {
       throw new Error('Read requires a non-empty file_path or path')
     }
+    const limits = getDefaultReadLimits()
 
     const absolutePath = toAbsoluteToolPath(filePath)
+    if (
+      isSupportedLocalImageExtension(absolutePath) &&
+      (input.offset !== undefined || input.limit !== undefined)
+    ) {
+      throw new Error(getUnsupportedImageRangeError())
+    }
+
     const fileStat = await stat(absolutePath)
+    if (isSupportedLocalImageExtension(absolutePath)) {
+      if (fileStat.size > limits.maxImageSourceBytes) {
+        throw new Error(
+          `Read image source is too large (${fileStat.size} bytes). Limit is ${limits.maxImageSourceBytes} bytes.`,
+        )
+      }
+
+      const imageBuffer = await readFile(absolutePath)
+      const detectedMediaType = detectImageMediaTypeFromBuffer(imageBuffer)
+      if (
+        !detectedMediaType ||
+        !isSupportedLocalImageMediaType(detectedMediaType)
+      ) {
+        throw new Error(
+          `Read only supports local images with media types: ${[...SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES].join(', ')}.`,
+        )
+      }
+
+      const optimizedImage = await optimizeImageForModel(
+        imageBuffer,
+        detectedMediaType,
+        { maxTokens: limits.maxTokens },
+      )
+      if (optimizedImage.buffer.length > IMAGE_TARGET_RAW_SIZE) {
+        throw new Error(
+          `Read image could not be reduced to the model attachment limit (${IMAGE_TARGET_RAW_SIZE} bytes raw payload target).`,
+        )
+      }
+      if (optimizedImage.estimatedTokens > limits.maxTokens) {
+        throw new Error(
+          `Read image could not be reduced to the image token budget (${optimizedImage.estimatedTokens}/${limits.maxTokens} estimated tokens).`,
+        )
+      }
+
+      const resultText = optimizedImage.wasOptimized
+        ? `Read image file ${absolutePath} (${fileStat.size} source bytes, ${detectedMediaType}). Attached an optimized ${optimizedImage.mediaType} payload (${optimizedImage.buffer.length} bytes, ~${optimizedImage.estimatedTokens} tokens) for visual analysis.`
+        : `Read image file ${absolutePath} (${optimizedImage.buffer.length} bytes, ${optimizedImage.mediaType}, ~${optimizedImage.estimatedTokens} tokens). The image is attached below for visual analysis.`
+
+      return {
+        ok: true,
+        output: {
+          type: 'image',
+          file: {
+            filePath: absolutePath,
+            mediaType: optimizedImage.mediaType,
+            sizeBytes: optimizedImage.buffer.length,
+          },
+        },
+        content: [
+          createImageBlock(
+            optimizedImage.mediaType,
+            optimizedImage.buffer.toString('base64'),
+          ),
+        ],
+        newMessages: [createTextMessage('user', resultText)],
+        summary: `Read image ${absolutePath}`,
+      }
+    }
+
     if (
       input.limit === undefined &&
-      fileStat.size > DEFAULT_MAX_READ_SIZE_BYTES
+      fileStat.size > limits.maxSizeBytes
     ) {
       throw new Error(
         `Read file is too large (${fileStat.size} bytes) to return in one response. Use offset and limit to read specific portions of the file, or search for specific content instead of reading the whole file.`,
@@ -208,7 +410,7 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
     const didReadToEnd = startIndex >= lines.length
       ? true
       : startIndex + selectedLines.length >= lines.length
-    const output: ReadToolOutput = {
+    const output: ReadTextToolOutput = {
       type: 'text',
       file: {
         filePath: absolutePath,

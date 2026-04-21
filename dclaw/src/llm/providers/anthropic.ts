@@ -1,9 +1,10 @@
 import {
   createMessage,
   type ContentBlock,
+  type ImageContentBlock,
   type Message,
-  type ToolResultContentBlock,
 } from '../../types/message.js'
+import { validateImagesForProvider } from '../imageValidation.js'
 import { resolveModelLimits } from '../modelLimits.js'
 import {
   getLlmMaxRetries,
@@ -48,6 +49,14 @@ type AnthropicContentBlock =
   | {
       type: 'text'
       text: string
+    }
+  | {
+      type: 'image'
+      source: {
+        type: 'base64'
+        media_type: string
+        data: string
+      }
     }
   | {
       type: 'thinking'
@@ -174,7 +183,9 @@ function stringifyToolResultOutput(value: unknown): string {
   return stringifyJson(value)
 }
 
-function isToolResultError(block: ToolResultContentBlock): boolean {
+function isToolResultError(
+  block: Extract<ContentBlock, { type: 'tool_result' }>,
+): boolean {
   const output = block.output
   if (typeof output !== 'object' || output === null) {
     return false
@@ -183,13 +194,32 @@ function isToolResultError(block: ToolResultContentBlock): boolean {
   return typeof (output as { error?: unknown }).error === 'string'
 }
 
-function toAnthropicContentBlock(block: ContentBlock): AnthropicContentBlock {
+function toAnthropicImageBlock(block: ImageContentBlock): AnthropicContentBlock {
+  return {
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: block.source.mediaType,
+      data: block.source.data,
+    },
+  }
+}
+
+function toAnthropicContentBlock(
+  block: ContentBlock,
+  role: 'user' | 'assistant',
+): AnthropicContentBlock {
   switch (block.type) {
     case 'text':
       return {
         type: 'text',
         text: block.text,
       }
+    case 'image':
+      if (role !== 'user') {
+        throw new Error('Anthropic image blocks are only supported on user messages')
+      }
+      return toAnthropicImageBlock(block)
     case 'thinking':
       return {
         type: 'thinking',
@@ -227,10 +257,13 @@ function toAnthropicMessage(message: Message): AnthropicMessage {
   if (message.role === 'system') {
     throw new Error('System messages must be sent via systemPrompt')
   }
+  const role: 'user' | 'assistant' = message.role
 
   return {
-    role: message.role,
-    content: message.content.map(toAnthropicContentBlock),
+    role,
+    content: message.content.map(block =>
+      toAnthropicContentBlock(block, role),
+    ),
   }
 }
 
@@ -330,6 +363,8 @@ export class AnthropicLlmClient implements LlmClient {
   async createMessage(
     request: CreateMessageRequest,
   ): Promise<CreateMessageResponse> {
+    validateImagesForProvider(request.messages)
+
     const { model, limits } = this.resolveRequestContext(request)
     const parsed = await this.withRetry(async () => {
       return this.withRequestTimeout(async signal => {
@@ -368,6 +403,8 @@ export class AnthropicLlmClient implements LlmClient {
     request: CreateMessageRequest,
     callbacks: CreateMessageStreamCallbacks,
   ): Promise<CreateMessageResponse> {
+    validateImagesForProvider(request.messages)
+
     const { model, limits } = this.resolveRequestContext(request)
     return this.withRetry(async () => {
       const response = await this.withRequestTimeout(async signal => {

@@ -22,6 +22,13 @@ export type FormatTranscriptOptions = {
   maxMessages?: number
 }
 
+function formatImageSummary(count: number): string {
+  if (count <= 0) {
+    return ''
+  }
+  return count === 1 ? '[image]' : `[${count} images]`
+}
+
 function truncate(value: string, maxLength: number = 240): string {
   return value.length <= maxLength
     ? value
@@ -50,6 +57,9 @@ function formatMessage(
       .filter(block => block.type === 'text')
       .map(block => block.text)
       .join('\n')
+    const imageCount = message.content.filter(
+      block => block.type === 'image',
+    ).length
 
     if (text.length > 0) {
       const reminderText = describeSystemReminderText(text)
@@ -59,8 +69,12 @@ function formatMessage(
           ? snapshotText
           : reminderText
           ? truncate(reminderText)
+          : imageCount > 0
+          ? `user: ${truncate(text)} ${formatImageSummary(imageCount)}`
           : `user: ${truncate(text)}`,
       )
+    } else if (imageCount > 0) {
+      lines.push(`user: ${formatImageSummary(imageCount)}`)
     }
 
     for (const block of message.content) {
@@ -93,10 +107,19 @@ function formatMessage(
       .filter(block => block.type === 'text')
       .map(block => block.text)
       .join('\n')
+    const imageCount = message.content.filter(
+      block => block.type === 'image',
+    ).length
     const hasOtherContent = message.content.some(block => block.type !== 'text')
 
     if (text.length > 0) {
-      lines.push(`assistant: ${truncate(text)}`)
+      lines.push(
+        imageCount > 0
+          ? `assistant: ${truncate(text)} ${formatImageSummary(imageCount)}`
+          : `assistant: ${truncate(text)}`,
+      )
+    } else if (imageCount > 0) {
+      lines.push(`assistant: ${formatImageSummary(imageCount)}`)
     } else if (hasOtherContent) {
       lines.push('assistant:')
     } else {
@@ -143,6 +166,7 @@ function formatMessage(
             }),
           )
           break
+        case 'image':
         case 'text':
         case 'tool_result':
           break

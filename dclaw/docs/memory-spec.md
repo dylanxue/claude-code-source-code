@@ -61,11 +61,15 @@ memory 使用本地文件持久化。
 - 已将 recall 收口到 side-query 选择主路径
 - 已明确 side-query selector 永远复用主对话的 `client/model`，不单独引入 selector model / routing
 - 已将 turn-end automatic extraction 收口到非阻塞 / 后台写回主路径
+- 已将 memory 写回边界收口到受限的 memory-only `Read / Edit / Write` 子工具链，不让 extraction 顺手读仓库或写出 memory 目录
+- 已将写回去重 / 升级规则收口到 manifest 校验：覆盖同 type 下同名升级，以及“唯一相似描述”优先升级已有文件
+- 已明确 `MEMORY.md` 只作为入口索引，不直接存整段 memory 正文
+- 已明确成功写回只追加 transcript-only system note，不把 memory extraction 对话混回主对话 prompt
 
-当前尚未完成：
+当前后置：
 
-- 自动/手动写回策略收口
 - team memory sync
+- 更进一步的策略打磨与体验优化
 
 ## 3. memory 类型
 
@@ -83,13 +87,21 @@ memory 使用本地文件持久化。
 - 仅当前会话有效的短期执行步骤
 - 已在 `CLAUDE.md` 中稳定存在的项目指令
 - 可从当前仓库直接推导出的代码事实
+- `git history`、近期改动、谁改了什么
+- debugging recipe、活动总结、PR 列表、transcript-like recap
 
 这类信息更适合：
 
 - plan
 - task
-- todo
 - `CLAUDE.md`
+
+补充边界：
+
+- memory extraction 只分析最近新增的 model-visible conversation，不额外探索代码库
+- 若用户要求“记住”，应优先提炼其中持久、非显然的事实
+- 若用户要求“忘记”，应更新或删除对应 memory
+- `MEMORY.md` 只做短索引项；正文必须留在独立 memory 文件
 
 ## 5. recall 上限
 
