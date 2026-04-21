@@ -85,6 +85,36 @@ export function getSessionMessagesPath(
   return join(getSessionDir(sessionId, env), 'messages.jsonl')
 }
 
+export function getSessionSubagentsDir(
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getSessionDir(sessionId, env), 'subagents')
+}
+
+export function getSessionAgentMetaPath(
+  sessionId: string,
+  agentId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getSessionSubagentsDir(sessionId, env), `agent-${agentId}.meta.json`)
+}
+
+export function getSessionAgentMessagesPath(
+  sessionId: string,
+  agentId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getSessionSubagentsDir(sessionId, env), `agent-${agentId}.jsonl`)
+}
+
+export function getSessionAgentLinksPath(
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getSessionDir(sessionId, env), 'agents.json')
+}
+
 export function getTaskBoardPath(
   boardId: string,
   env: NodeJS.ProcessEnv = process.env,

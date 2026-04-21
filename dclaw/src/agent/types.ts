@@ -1,0 +1,86 @@
+import type { LlmClient } from '../llm/types.js'
+import type { LlmProviderName } from '../llm/providerNames.js'
+import type { Message } from '../types/message.js'
+import type { PermissionMode, ToolContext } from '../types/tool.js'
+import type { ToolRegistry } from '../tools/registry.js'
+
+export const DEFAULT_SUBAGENT_MAX_TURNS = 16
+export const DEFAULT_SUBAGENT_MAX_ITERATIONS = 64
+
+export type AgentStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'stopped'
+
+export type AgentRecord = {
+  agentId: string
+  parentAgentId?: string
+  parentSessionId?: string
+  parentTurnId?: string
+  status: AgentStatus
+  task: string
+  cwd: string
+  provider: string
+  model?: string
+  permissionMode: PermissionMode
+  availableTools: string[]
+  maxTurns: number
+  maxIterations: number
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+  lastError?: string
+}
+
+export type SessionAgentLink = {
+  parentTurnId: string
+  agentId: string
+  status: AgentStatus
+  task: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type CreateAgentInput = {
+  agentId?: string
+  parentAgentId?: string
+  parentSessionId: string
+  parentTurnId?: string
+  status?: AgentStatus
+  task: string
+  cwd: string
+  provider: string
+  model?: string
+  permissionMode: PermissionMode
+  availableTools: string[]
+  maxTurns?: number
+  maxIterations?: number
+  env?: NodeJS.ProcessEnv
+}
+
+export type ListAgentsInput = {
+  parentAgentId?: string
+  parentSessionId: string
+  status?: AgentStatus
+  env?: NodeJS.ProcessEnv
+}
+
+export type ParentAgentRuntime = {
+  client: LlmClient
+  provider?: LlmProviderName
+  model?: string
+  cwd: string
+  permissionMode: PermissionMode
+  availableTools: string[]
+  planFilePath?: string
+  askUserQuestions?: ToolContext['askUserQuestions']
+  toolRegistry: ToolRegistry
+}
+
+export type CreateSubagentRuntimeInput = {
+  agent: AgentRecord
+  parent: ParentAgentRuntime
+  initialMessages?: Message[]
+}
