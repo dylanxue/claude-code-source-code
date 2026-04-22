@@ -1,6 +1,28 @@
 import { listSessionHistory } from '../session/history.js'
 import type { HistoryCommand } from './types.js'
 
+function formatSubagentSummaryLine(
+  session: Awaited<ReturnType<typeof listSessionHistory>>[number],
+): string | null {
+  const { subagents } = session
+  if (subagents.count === 0) {
+    return null
+  }
+
+  const parts = [
+    `subagents: ${subagents.count}`,
+    subagents.queuedCount > 0 ? `queued ${subagents.queuedCount}` : undefined,
+    subagents.runningCount > 0 ? `running ${subagents.runningCount}` : undefined,
+    subagents.completedCount > 0
+      ? `completed ${subagents.completedCount}`
+      : undefined,
+    subagents.failedCount > 0 ? `failed ${subagents.failedCount}` : undefined,
+    subagents.stoppedCount > 0 ? `stopped ${subagents.stoppedCount}` : undefined,
+  ].filter((part): part is string => Boolean(part))
+
+  return parts.join('  ')
+}
+
 export async function runHistory(command: HistoryCommand): Promise<void> {
   const sessions = await listSessionHistory()
   const lines = ['dclaw history', '']
@@ -52,6 +74,18 @@ export async function runHistory(command: HistoryCommand): Promise<void> {
     session.planningSummary.forEach(line => {
       lines.push(`   ${line}`)
     })
+    const subagentLine = formatSubagentSummaryLine(session)
+    if (subagentLine) {
+      lines.push(`   ${subagentLine}`)
+      if (session.subagents.lastStatus && session.subagents.lastTask) {
+        lines.push(
+          `   last subagent: ${session.subagents.lastStatus}  ${session.subagents.lastTask}`,
+        )
+      }
+      if (session.subagents.lastTracePath) {
+        lines.push(`   last subagent trace: ${session.subagents.lastTracePath}`)
+      }
+    }
     if (index < sessions.length - 1) {
       lines.push('')
     }

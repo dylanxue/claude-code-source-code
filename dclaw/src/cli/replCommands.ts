@@ -805,6 +805,19 @@ async function resumeConversation(
     ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
     ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
     ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...(resumed.subagents.count > 0
+      ? [
+          `subagents: ${resumed.subagents.count}`,
+          ...(resumed.subagents.lastStatus && resumed.subagents.lastTask
+            ? [
+                `last subagent: ${resumed.subagents.lastStatus}  ${resumed.subagents.lastTask}`,
+              ]
+            : []),
+          ...(resumed.subagents.lastTracePath
+            ? [`last subagent trace: ${resumed.subagents.lastTracePath}`]
+            : []),
+        ]
+      : []),
     ...(queryTracePath ? [`query trace: ${queryTracePath}`] : []),
     '',
     'restored transcript preview:',

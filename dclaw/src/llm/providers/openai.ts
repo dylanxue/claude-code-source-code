@@ -287,6 +287,13 @@ type StreamingResponsesState = {
   annotationsByOutputIndex: Map<number, TextAnnotation[]>
   reasoningByOutputIndex: Map<number, StreamingReasoningState>
   toolCallsByOutputIndex: Map<number, StreamingToolCallState>
+  lastTextAppendByOutputIndex: Map<
+    number,
+    {
+      source: 'output_text' | 'content_part' | 'refusal'
+      text: string
+    }
+  >
   outputOrder: number[]
 }
 
@@ -659,6 +666,35 @@ function ensureOutputOrder(state: StreamingResponsesState, outputIndex: number):
   }
 }
 
+function appendStreamingTextDelta(
+  state: StreamingResponsesState,
+  outputIndex: number,
+  source: 'output_text' | 'content_part' | 'refusal',
+  text: string,
+): boolean {
+  const lastAppend = state.lastTextAppendByOutputIndex.get(outputIndex)
+  if (
+    lastAppend &&
+    lastAppend.source !== source &&
+    lastAppend.text === text
+  ) {
+    state.lastTextAppendByOutputIndex.set(outputIndex, {
+      source,
+      text,
+    })
+    return false
+  }
+
+  const current = state.textByOutputIndex.get(outputIndex) ?? ''
+  state.textByOutputIndex.set(outputIndex, current + text)
+  state.lastTextAppendByOutputIndex.set(outputIndex, {
+    source,
+    text,
+  })
+  ensureOutputOrder(state, outputIndex)
+  return true
+}
+
 function getOrCreateReasoningState(
   state: StreamingResponsesState,
   outputIndex: number,
@@ -833,11 +869,18 @@ function parseResponsesStreamEvent(
     const outputIndex = getOutputIndex(event)
     if (typeof event.delta === 'string') {
       if (typeof outputIndex === 'number') {
-        const current = state.textByOutputIndex.get(outputIndex) ?? ''
-        state.textByOutputIndex.set(outputIndex, current + event.delta)
-        ensureOutputOrder(state, outputIndex)
+        const appended = appendStreamingTextDelta(
+          state,
+          outputIndex,
+          'output_text',
+          event.delta,
+        )
+        if (appended) {
+          callbacks.onTextDelta?.(event.delta)
+        }
+      } else {
+        callbacks.onTextDelta?.(event.delta)
       }
-      callbacks.onTextDelta?.(event.delta)
     }
     return
   }
@@ -885,8 +928,15 @@ function parseResponsesStreamEvent(
         if (event.type === 'response.content_part.done') {
           state.textByOutputIndex.set(outputIndex, deltaText)
         } else {
-          state.textByOutputIndex.set(outputIndex, current + deltaText)
-          callbacks.onTextDelta?.(deltaText)
+          const appended = appendStreamingTextDelta(
+            state,
+            outputIndex,
+            'content_part',
+            deltaText,
+          )
+          if (appended) {
+            callbacks.onTextDelta?.(deltaText)
+          }
         }
         if (Array.isArray(event.part?.annotations) && event.part.annotations.length > 0) {
           const currentAnnotations =
@@ -922,8 +972,15 @@ function parseResponsesStreamEvent(
         if (event.type === 'response.refusal.done') {
           state.textByOutputIndex.set(outputIndex, deltaText)
         } else {
-          state.textByOutputIndex.set(outputIndex, current + deltaText)
-          callbacks.onTextDelta?.(deltaText)
+          const appended = appendStreamingTextDelta(
+            state,
+            outputIndex,
+            'refusal',
+            deltaText,
+          )
+          if (appended) {
+            callbacks.onTextDelta?.(deltaText)
+          }
         }
         ensureOutputOrder(state, outputIndex)
         if (event.type === 'response.refusal.done' && current.length === 0) {
@@ -1427,10 +1484,12 @@ export class OpenAiLlmClient implements LlmClient {
           annotationsByOutputIndex: new Map(),
           reasoningByOutputIndex: new Map(),
           toolCallsByOutputIndex: new Map(),
+          lastTextAppendByOutputIndex: new Map(),
           outputOrder: [],
         }
         let terminalResponse: OpenAiResponsesResponse | undefined
         let sawStreamEvent = false
+        let sawStreamData = false
 
         try {
           await readSseEvents(
@@ -1457,12 +1516,19 @@ export class OpenAiLlmClient implements LlmClient {
 
               parseResponsesStreamEvent(streamState, payload, callbacks)
             },
-            this.streamIdleTimeoutMs === undefined
-              ? undefined
-              : { idleTimeoutMs: this.streamIdleTimeoutMs },
+            {
+              ...(this.streamIdleTimeoutMs === undefined
+                ? {}
+                : { idleTimeoutMs: this.streamIdleTimeoutMs }),
+              onChunk(chunk) {
+                if (chunk.length > 0) {
+                  sawStreamData = true
+                }
+              },
+            },
           )
         } catch (error) {
-          if (sawStreamEvent) {
+          if (sawStreamEvent || sawStreamData) {
             throw new NonRetryableError(error)
           }
           return this.createMessage(request)
@@ -1510,6 +1576,7 @@ export class OpenAiLlmClient implements LlmClient {
       let reasoning = ''
       const toolCalls: StreamingToolCallState[] = []
       let sawStreamEvent = false
+      let sawStreamData = false
 
       try {
         await readSseEvents(
@@ -1562,12 +1629,19 @@ export class OpenAiLlmClient implements LlmClient {
               }
             }
           },
-          this.streamIdleTimeoutMs === undefined
-            ? undefined
-            : { idleTimeoutMs: this.streamIdleTimeoutMs },
+          {
+            ...(this.streamIdleTimeoutMs === undefined
+              ? {}
+              : { idleTimeoutMs: this.streamIdleTimeoutMs }),
+            onChunk(chunk) {
+              if (chunk.length > 0) {
+                sawStreamData = true
+              }
+            },
+          },
         )
       } catch (error) {
-        if (sawStreamEvent) {
+        if (sawStreamEvent || sawStreamData) {
           throw new NonRetryableError(error)
         }
         return this.createMessage(request)

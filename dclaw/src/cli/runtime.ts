@@ -1,3 +1,4 @@
+import { drainAgentRuns } from '../agent/scheduler.js'
 import { QueryEngine } from '../core/queryEngine.js'
 import {
   createFileQueryTraceSink,
@@ -8,14 +9,17 @@ import {
 import { createLlmClient } from '../llm/client.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import {
-  formatClaudeMdLoadOrder,
-  loadClaudeMdEntries,
-} from '../prompt/claudeMd.js'
+  formatDclawMdLoadOrder,
+  loadDclawMdEntries,
+} from '../prompt/dclawMd.js'
+import { loadPromptEnvironmentContext } from '../prompt/environment.js'
 import { loadPromptMemoryContext } from '../memory/prompt.js'
 import { createAutomaticMemoryExtractor } from '../memory/extract.js'
 import { assemblePromptContext } from '../prompt/contextAssembler.js'
 import { buildSystemPrompt } from '../prompt/systemPrompt.js'
 import type { PromptMode } from '../prompt/types.js'
+import { createSkillRegistry } from '../skills/registry.js'
+import { loadSkills } from '../skills/loader.js'
 import { summarizePendingTasks } from '../tasks/planAttachment.js'
 import { loadTaskBoardForSession } from '../tasks/store.js'
 import { getCurrentTask } from '../tasks/taskState.js'
@@ -38,7 +42,7 @@ export type PreparedCliRuntime = {
   runtime: ReturnType<typeof resolveLlmRuntimeConfig>
   permissionMode: PermissionMode
   permissionModeSource: PermissionModeSource
-  claudeMdEntries: Awaited<ReturnType<typeof loadClaudeMdEntries>>
+  dclawMdEntries: Awaited<ReturnType<typeof loadDclawMdEntries>>
   toolRegistry: ReturnType<typeof createDefaultToolRegistry>
   engine: QueryEngine
   rotateQueryTrace: (sessionId?: string) => Promise<string | undefined>
@@ -62,7 +66,13 @@ export async function prepareCliRuntime(
     configured.env,
     key => configured.keySources[key],
   )
-  const claudeMdEntries = await loadClaudeMdEntries(options.cwd)
+  const dclawMdEntries = await loadDclawMdEntries(options.cwd)
+  const promptEnvironment = await loadPromptEnvironmentContext(options.cwd)
+  const skillRegistry = createSkillRegistry(
+    await loadSkills({
+      cwd: options.cwd,
+    }),
+  )
 
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
@@ -106,6 +116,14 @@ export async function prepareCliRuntime(
       model: state.model ?? runtime.model,
       mode,
       permissionMode: state.permissionMode,
+      currentDate: promptEnvironment.currentDate,
+      environment: {
+        platform: promptEnvironment.platform,
+        shell: promptEnvironment.shell,
+        osVersion: promptEnvironment.osVersion,
+        isGitRepository: promptEnvironment.isGitRepository,
+      },
+      gitStatus: promptEnvironment.gitStatus,
       plan: board
         ? {
             boardId: board.boardId,
@@ -118,7 +136,6 @@ export async function prepareCliRuntime(
         : undefined,
       memory,
       userSystemPrompt: options.systemPrompt,
-      claudeMdEntries,
     })
     return buildSystemPrompt(promptContext)
   }
@@ -176,6 +193,7 @@ export async function prepareCliRuntime(
       })
       return []
     },
+    dclawMdEntries,
     toolRegistry,
     toolContext: {
       cwd: options.cwd,
@@ -183,6 +201,32 @@ export async function prepareCliRuntime(
       permissionMode: resolvedPermissionMode.permissionMode,
       planFilePath: undefined,
       readState: new Map(),
+      skillRegistry,
+      agentRuntime: {
+        client,
+        provider: runtime.provider,
+        model: runtime.model,
+        cwd: options.cwd,
+        permissionMode: resolvedPermissionMode.permissionMode,
+        availableTools: toolRegistry.list().map(tool => tool.name),
+        planFilePath: undefined,
+        toolRegistry,
+        skillRegistry,
+        modelLimitsEnv: configured.env,
+        systemPromptResolver: resolveSystemPromptForUserPrompt,
+        dclawMdEntries,
+        env: configured.env,
+        createQueryTraceSink: async (sessionId: string, tracePath?: string) => {
+          if (!queryTraceEnabled) {
+            return undefined
+          }
+
+          return createFileQueryTraceSink(
+            tracePath ?? createQueryTraceFilePath(configured.env, sessionId),
+            sessionId,
+          )
+        },
+      },
       askUserQuestions: askUserQuestionsInteractively,
     },
     initialMessages,
@@ -194,7 +238,7 @@ export async function prepareCliRuntime(
     runtime,
     permissionMode: resolvedPermissionMode.permissionMode,
     permissionModeSource: resolvedPermissionMode.permissionModeSource,
-    claudeMdEntries,
+    dclawMdEntries,
     toolRegistry,
     engine,
     rotateQueryTrace: async (sessionId?: string) => {
@@ -212,8 +256,9 @@ export async function prepareCliRuntime(
     },
     drainBackgroundWork: async (timeoutMs?: number) => {
       await memoryExtractor.drainPendingExtraction(timeoutMs)
+      await drainAgentRuns(timeoutMs)
     },
   }
 }
 
-export { formatClaudeMdLoadOrder }
+export { formatDclawMdLoadOrder }

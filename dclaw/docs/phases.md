@@ -58,7 +58,7 @@
 - prompt sections
 - context assembler
 
-### 阶段 4：CLAUDE.md 指令系统
+### 阶段 4：DCLAW.md 指令系统
 
 目标：
 
@@ -68,10 +68,10 @@
 
 交付：
 
-- `CLAUDE.md`
-- `.claude/CLAUDE.md`
-- `.claude/rules/*.md`
-- `CLAUDE.local.md`
+- `DCLAW.md`
+- `.dclaw/DCLAW.md`
+- `.dclaw/rules/*.md`
+- `DCLAW.local.md`
 
 ### 阶段 5：Tool 协议与基础工具集
 
@@ -349,6 +349,6 @@
 - 阶段 12 的 `MCP / plugins / remote bridge` 剩余项
 - 阶段 13
 - 以及前序阶段中已明确后置的深化项：
-  - `CLAUDE.md` 指令系统深化
+  - `DCLAW.md` 指令系统深化
   - 权限模式 / hooks 继续收口
   - `tool result budget / persistence` 与更广上下文压缩打磨

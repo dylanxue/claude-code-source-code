@@ -7,7 +7,7 @@ MVP 只覆盖以下能力：
 - CLI 与 headless
 - Query Engine
 - System Prompt 装配
-- `CLAUDE.md` 基础加载
+- `DCLAW.md` 基础加载
 - 基础 tools
 - permission mode
 - session / resume
@@ -94,18 +94,18 @@ MVP 应满足：
 - 组装最终 system prompt
 - 注入 runtime context
 
-### 3.5 CLAUDE.md
+### 3.5 DCLAW.md
 
 文件：
 
-- `src/prompt/claudeMd.ts`
+- `src/prompt/dclawMd.ts`
 
 MVP 只实现：
 
-- 默认用户级 `CLAUDE.md`：`~/.dclaw/CLAUDE.md`
-- 若设置 `DCLAW_HOME`，则用户级 `CLAUDE.md` 改为 `<DCLAW_HOME>/CLAUDE.md`
-- `<project>/CLAUDE.md`
-- `<project>/CLAUDE.local.md`
+- 默认用户级 `DCLAW.md`：`~/.dclaw/DCLAW.md`
+- 若设置 `DCLAW_HOME`，则用户级 `DCLAW.md` 改为 `<DCLAW_HOME>/DCLAW.md`
+- `<project>/DCLAW.md`
+- `<project>/DCLAW.local.md`
 
 完整 include 和规则目录留到后续阶段。
 
@@ -175,7 +175,7 @@ MVP 模式：
   -> 初始化配置
   -> 创建或恢复 session
   -> 组装 system prompt
-  -> 读取 CLAUDE.md
+  -> 读取 DCLAW.md
   -> 写入 user message
   -> 调用 LLM
   -> 若出现 tool_use 则执行工具
@@ -189,14 +189,14 @@ MVP 模式：
 1. 能完成一次完整的文件读取、编辑、总结闭环。
 2. `--print` 模式可独立工作。
 3. session 可恢复。
-4. 项目级 `CLAUDE.md` 可注入。
+4. 项目级 `DCLAW.md` 可注入。
 5. 危险工具可被权限系统拦截。
 
 ## 6. MVP 之后的首批扩展
 
 MVP 后优先做：
 
-1. 完整 `CLAUDE.md` 发现与 include
+1. 完整 `DCLAW.md` 发现与 include
 2. compact / 更广上下文压缩
 3. 更完整的 history / resume / slash command 体系
 4. task / plan mode

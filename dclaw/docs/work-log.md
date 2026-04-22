@@ -673,45 +673,45 @@
   - `dclaw --print "prompt assembly check"`
   - `dclaw --system-prompt "be terse" --print "override check"`
   - `dclaw "interactive with prompt layer"`
-- 实现基础 `CLAUDE.md` 加载器：
-  - 默认用户级 `CLAUDE.md`：`~/.dclaw/CLAUDE.md`
-  - 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/CLAUDE.md`
-  - `<cwd>/CLAUDE.md`
-  - `<cwd>/CLAUDE.local.md`
-- 将 `CLAUDE.md` 内容作为独立 prompt section 注入
+- 实现基础 `DCLAW.md` 加载器：
+  - 默认用户级 `DCLAW.md`：`~/.dclaw/DCLAW.md`
+  - 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/DCLAW.md`
+  - `<cwd>/DCLAW.md`
+  - `<cwd>/DCLAW.local.md`
+- 将 `DCLAW.md` 内容作为独立 prompt section 注入
 - 调整 prompt sections：
   - `System`
   - `Doing Tasks`
   - `Runtime Context`
-  - `CLAUDE.md Instructions`
+  - `DCLAW.md Instructions`
   - `User Override`
 - 调整 stub provider 输出 `system prompt chars`
 - 增加 fixture：
-  - `test/fixtures/claude-md-basic/CLAUDE.md`
-- 验证 `CLAUDE.md` 链路：
+  - `test/fixtures/claude-md-basic/DCLAW.md`
+- 验证 `DCLAW.md` 链路：
   - `dclaw --print "baseline without fixture"`
   - `dclaw --cwd test/fixtures/claude-md-basic --print "fixture prompt"`
   - `dclaw --cwd test/fixtures/claude-md-basic "interactive fixture"`
-- 将 `CLAUDE.md` 发现升级为多层模式：
-  - 默认用户级 `~/.dclaw/CLAUDE.md`
-  - 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/CLAUDE.md`
-  - 从 cwd 向上查找 `<dir>/CLAUDE.md`
-  - 从 cwd 向上查找 `<dir>/.claude/CLAUDE.md`
-  - 从 cwd 向上查找 `<dir>/.claude/rules/*.md`
-  - 从 cwd 向上查找 `<dir>/CLAUDE.local.md`
+- 将 `DCLAW.md` 发现升级为多层模式：
+  - 默认用户级 `~/.dclaw/DCLAW.md`
+  - 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/DCLAW.md`
+  - 从 cwd 向上查找 `<dir>/DCLAW.md`
+  - 从 cwd 向上查找 `<dir>/.dclaw/DCLAW.md`
+  - 从 cwd 向上查找 `<dir>/.dclaw/rules/*.md`
+  - 从 cwd 向上查找 `<dir>/DCLAW.local.md`
 - 修正目录内加载顺序，确保 local 规则仍保持更高优先级
 - 增加树形 fixture：
-  - `test/fixtures/claude-md-tree/CLAUDE.md`
-  - `test/fixtures/claude-md-tree/.claude/CLAUDE.md`
-  - `test/fixtures/claude-md-tree/.claude/rules/root-rule.md`
-  - `test/fixtures/claude-md-tree/app/CLAUDE.md`
-  - `test/fixtures/claude-md-tree/app/.claude/rules/app-rule.md`
-  - `test/fixtures/claude-md-tree/app/CLAUDE.local.md`
+  - `test/fixtures/claude-md-tree/DCLAW.md`
+  - `test/fixtures/claude-md-tree/.dclaw/DCLAW.md`
+  - `test/fixtures/claude-md-tree/.dclaw/rules/root-rule.md`
+  - `test/fixtures/claude-md-tree/app/DCLAW.md`
+  - `test/fixtures/claude-md-tree/app/.dclaw/rules/app-rule.md`
+  - `test/fixtures/claude-md-tree/app/DCLAW.local.md`
 - 验证多层发现链路：
   - `dclaw --cwd test/fixtures/claude-md-basic --print "basic fixture"`
   - `dclaw --cwd test/fixtures/claude-md-tree/app --print "tree fixture"`
   - `dclaw --cwd test/fixtures/claude-md-tree/app "interactive tree"`
-- 为 `CLAUDE.md` 增加基础 include 能力：
+- 为 `DCLAW.md` 增加基础 include 能力：
   - 支持 `@path`
   - 支持 `@./path`
   - 支持 `@~/path`
@@ -732,28 +732,28 @@
   - `space note.md`
   - `ignored-comment.md`
   - `ignored-code.md`
-  - 并在 `CLAUDE.local.md` 中加入：
+  - 并在 `DCLAW.local.md` 中加入：
     - 带转义空格和 `#fragment` 的 include
     - HTML 注释中的 include
     - fenced code block 中的 include
 - 验证 include 边界：
   - `dclaw --cwd test/fixtures/claude-md-tree/app --print "include edge cases"`
   - `dclaw --cwd test/fixtures/claude-md-tree/app "interactive include edge cases"`
-  - interactive 显示 `claude.md files loaded: 8`
-- 为 `interactive` 和 `--print` 增加 `--verbose` 下的 `CLAUDE.md` 加载顺序输出
+  - interactive 显示 `dclaw.md files loaded: 8`
+- 为 `interactive` 和 `--print` 增加 `--verbose` 下的 `DCLAW.md` 加载顺序输出
 - 验证加载顺序：
   - `dclaw --verbose --cwd test/fixtures/claude-md-tree/app --print "show order"`
   - `dclaw --verbose --cwd test/fixtures/claude-md-tree/app "show order interactive"`
 - 验证结果显示当前顺序为：
   - 根目录 project
-  - 根目录 `.claude/CLAUDE.md`
+  - 根目录 `.dclaw/DCLAW.md`
   - 根目录 `rules`
   - 子目录 include
-  - 子目录 `CLAUDE.md`
+  - 子目录 `DCLAW.md`
   - 子目录 `rules`
   - 子目录 local include
-  - 子目录 `CLAUDE.local.md`
-- 将 `CLAUDE.md` 加载顺序格式化抽成可复用工具
+  - 子目录 `DCLAW.local.md`
+- 将 `DCLAW.md` 加载顺序格式化抽成可复用工具
 - 在文档中明确当前基础版尚未覆盖的边界：
   - managed memory
   - frontmatter 条件规则
@@ -790,11 +790,11 @@
   - `dclaw --print "tool:Glob pattern=*.md path=/abs/path/to/dir"`
 - 为树形 fixture 增加 include 文件：
   - `test/fixtures/claude-md-tree/app/included-note.md`
-  - 并在 `app/CLAUDE.md` 中引用
+  - 并在 `app/DCLAW.md` 中引用
 - 验证 include 链路：
   - `dclaw --cwd test/fixtures/claude-md-tree/app --print "include fixture"`
   - `dclaw --cwd test/fixtures/claude-md-tree/app "interactive include"`
-  - interactive 显示 `claude.md files loaded: 7`
+  - interactive 显示 `dclaw.md files loaded: 7`
 
 ### 当前代码状态
 
@@ -803,13 +803,13 @@
 - Query Engine 最小链路已实现
 - 默认 provider 为本地 `stub`
 - prompt 装配层已有最小实现
-- 基础 `CLAUDE.md` 加载已接入
-- 多层 `CLAUDE.md` 发现已接入
+- 基础 `DCLAW.md` 加载已接入
+- 多层 `DCLAW.md` 发现已接入
 - 基础 include 已接入
 - include 语义已更贴近 Claude Code
 - include 边界行为已进一步贴近 Claude Code
-- `CLAUDE.md` 加载顺序现在可直接观察
-- 当前 `CLAUDE.md` 基础版的完成边界已经明确
+- `DCLAW.md` 加载顺序现在可直接观察
+- 当前 `DCLAW.md` 基础版的完成边界已经明确
 - 最小工具主链路已经打通
 - `src/` 其余模块仍以骨架为主
 
@@ -819,13 +819,13 @@
 - 阶段 1 已基本完成
 - 阶段 2 已启动，并已跑通最小消息循环
 - 阶段 3 的 prompt 层已经有初始落点
-- 基础 `CLAUDE.md` 注入已可工作
-- 多层 `CLAUDE.md` 发现已可工作
+- 基础 `DCLAW.md` 注入已可工作
+- 多层 `DCLAW.md` 发现已可工作
 - 基础 include 已可工作
 - include 行为已更接近 Claude Code
 - include 边界规则已覆盖到代码块、注释、转义空格和片段标识
 - 当前优先级顺序可通过 `--verbose` 直接验证
-- 当前可以考虑把 `CLAUDE.md` 基础版视作一个阶段性完成点
+- 当前可以考虑把 `DCLAW.md` 基础版视作一个阶段性完成点
 - 现在已经可以把主线切回 Tool 协议与基础工具
 - 下一步应继续推进完整 prompt section 和更严格的指令规则，不要在 stub 层停留太久
 
@@ -833,7 +833,7 @@
 
 - 继续阶段 2
 - 准备阶段 3：System Prompt 与指令装配
-- 开始接入 `CLAUDE.md` 与更明确的 prompt sections
+- 开始接入 `DCLAW.md` 与更明确的 prompt sections
 - 下一步应继续推进阶段 3
 - 评估是否进入阶段 4 的完整指令系统
 - 继续完善 include 语义与优先级规则

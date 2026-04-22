@@ -21,7 +21,7 @@ test('formatProgressToolUseLine includes the tool target', () => {
         limit: 5,
       },
     }),
-    'Read /tmp/example.ts:10-14',
+    'Reading /tmp/example.ts:10-14',
   )
 
   assert.equal(
@@ -31,7 +31,7 @@ test('formatProgressToolUseLine includes the tool target', () => {
         command: 'git status --short',
       },
     }),
-    'Ran git status --short',
+    'Running git status --short',
   )
 })
 
@@ -114,7 +114,7 @@ test('formatVerboseLines includes tool result previews after tool calls', () => 
 
   assert.deepEqual(lines, [
     '[content] I will inspect the file first.',
-    'Read /tmp/example.ts:1-2',
+    'Reading /tmp/example.ts:1-2',
     'Read /tmp/example.ts:1-2 (lines 1-2 of 20; starts with "export const value = 1")',
   ])
 })
@@ -266,5 +266,90 @@ test('formatProgressToolResultLine summarizes search, fetch, and question result
       },
     ),
     'Asked 1 question (Plan) (answered: plan_choice=Option A)',
+  )
+})
+
+test('formatProgressToolResultLine surfaces subagent wait results clearly', () => {
+  assert.equal(
+    formatProgressToolResultLine(
+      {
+        name: 'Agent',
+        input: {
+          action: 'wait',
+          agent_id: 'lesson-analyzer',
+        },
+      },
+      {
+        ok: true,
+        summary: 'Subagent lesson-analyzer completed: analyzed lesson1',
+        output: {
+          action: 'wait',
+          agent: {
+            agent_id: 'lesson-analyzer',
+            status: 'completed',
+            task: 'Analyze lesson1',
+          },
+          result: {
+            summary: 'analyzed lesson1',
+            output_text: 'lesson1 matches requirements',
+          },
+        },
+      },
+    ),
+    'Subagent lesson-analyzer completed (analyzed lesson1)',
+  )
+})
+
+test('formatProgressToolUseLine uses in-progress phrasing for subagent actions', () => {
+  assert.equal(
+    formatProgressToolUseLine({
+      name: 'Agent',
+      input: {
+        action: 'spawn',
+        agent_id: 'lesson1-analyzer',
+        task: '分析lesson1的需求文档和代码实现是否匹配',
+      },
+    }),
+    'Starting subagent lesson1-analyzer for "分析lesson1的需求文档和代码实现是否匹配"',
+  )
+
+  assert.equal(
+    formatProgressToolUseLine({
+      name: 'Agent',
+      input: {
+        action: 'wait',
+        agent_id: 'lesson1-analyzer',
+      },
+    }),
+    'Waiting for subagent lesson1-analyzer',
+  )
+})
+
+test('formatProgressToolResultLine surfaces subagent spawn status as a state update', () => {
+  assert.equal(
+    formatProgressToolResultLine(
+      {
+        name: 'Agent',
+        input: {
+          action: 'spawn',
+          agent_id: 'lesson1-analyzer',
+          task: '分析lesson1的需求文档和代码实现是否匹配',
+        },
+      },
+      {
+        ok: true,
+        summary:
+          'Subagent lesson1-analyzer queued: 分析lesson1的需求文档和代码实现是否匹配',
+        output: {
+          action: 'spawn',
+          agent: {
+            agent_id: 'lesson1-analyzer',
+            status: 'queued',
+            task: '分析lesson1的需求文档和代码实现是否匹配',
+          },
+        },
+      },
+    ),
+    'Subagent lesson1-analyzer queued',
   )
 })

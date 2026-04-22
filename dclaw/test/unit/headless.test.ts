@@ -450,7 +450,12 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
     response.write(
       'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"to inspect."}}\n\n',
     )
-    response.destroy()
+    // Give the client a chance to receive partial SSE bytes before terminating
+    // the connection, otherwise this scenario becomes timing-dependent and may
+    // look like "no stream output ever arrived".
+    setTimeout(() => {
+      response.destroy()
+    }, 10)
   })
 
   server.listen(0, '127.0.0.1')

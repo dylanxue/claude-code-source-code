@@ -12,6 +12,7 @@ import {
 import {
   createToolResultMessage,
   createTextMessage,
+  getModelVisibleMessages,
   getTextContent,
   getToolUseBlocks,
   type ContentBlock,
@@ -131,7 +132,9 @@ async function resolveIterationState(
   const resolved = request.resolveIterationRequest
     ? await request.resolveIterationRequest(workingMessages)
     : undefined
-  const messages = resolved?.messages ?? workingMessages
+  const messages = getModelVisibleMessages(
+    resolved?.messages ?? workingMessages,
+  )
   const availableTools = getAvailableTools(
     request.toolRegistry,
     request.toolContext,
@@ -150,6 +153,49 @@ async function resolveIterationState(
 
 function stringifyOutput(value: unknown): string {
   return stringifyJson(value)
+}
+
+function createSystemReminderMessage(text: string): Message {
+  return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
+}
+
+function hasRepairableEmptyAssistantResponse(message: Message): boolean {
+  if (getToolUseBlocks(message).length > 0) {
+    return false
+  }
+
+  if (getTextContent(message).trim().length > 0) {
+    return false
+  }
+
+  return message.content.some(
+    block =>
+      block.type === 'thinking' ||
+      block.type === 'reasoning' ||
+      block.type === 'redacted_thinking',
+  )
+}
+
+function buildEmptyTurnRepairReminderMessage(): Message {
+  return createSystemReminderMessage(
+    [
+      'Your previous response contained no user-visible text and no valid tool call.',
+      'If you intended to use a tool, emit a valid tool call now using the standard tool-calling protocol.',
+      'Otherwise, answer directly with normal text.',
+      'Do not place tool-call syntax inside thinking or reasoning.',
+    ].join('\n'),
+  )
+}
+
+function buildEmptyTurnRepairFailureMessage(
+  attemptedRepair: boolean,
+): Message {
+  return createTextMessage(
+    'assistant',
+    attemptedRepair
+      ? 'The model returned no final text or valid tool call, even after a repair attempt. Please retry the request or switch to a model with more reliable tool-calling behavior.'
+      : 'The model returned no final text or valid tool call. Please retry the request or switch to a model with more reliable tool-calling behavior.',
+  )
 }
 
 function summarizeToolResultContent(
@@ -374,6 +420,8 @@ export async function executeSingleTurn(
   let lastToolResultMessages: Message[] = []
   let outputText = ''
   let usedPostCompactAttachments = false
+  let emptyTurnRepairAttempted = false
+  let pendingEmptyTurnRepairMessages: Message[] = []
   const initialIterationState = await resolveIterationState(
     request,
     workingMessages,
@@ -411,12 +459,21 @@ export async function executeSingleTurn(
 
   try {
     for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-      const iterationState =
+      const baseIterationState =
         iteration === 1
           ? initialIterationState
           : await resolveIterationState(request, workingMessages)
       if (iteration > 1) {
-        usedPostCompactAttachments ||= iterationState.usedPostCompactAttachments
+        usedPostCompactAttachments ||= baseIterationState.usedPostCompactAttachments
+      }
+      const repairMessagesForIteration = pendingEmptyTurnRepairMessages
+      pendingEmptyTurnRepairMessages = []
+      const iterationState = {
+        ...baseIterationState,
+        messages: [
+          ...baseIterationState.messages,
+          ...repairMessagesForIteration,
+        ],
       }
       recordTrace(
         request.queryTraceSink,
@@ -559,6 +616,7 @@ export async function executeSingleTurn(
       }
       const assistantMessage = streamedResponse.message
       lastAssistantMessage = assistantMessage
+      request.toolContext.activeTurnId = assistantMessage.id
       workingMessages.push(assistantMessage)
       addedMessages.push(assistantMessage)
       request.streamHandlers?.onAssistantMessage?.({
@@ -598,6 +656,59 @@ export async function executeSingleTurn(
           name: block.name,
           input: block.input,
         })
+      }
+      if (hasRepairableEmptyAssistantResponse(assistantMessage)) {
+        recordTrace(
+          request.queryTraceSink,
+          'llm.empty_turn.detected',
+          {
+            attemptedRepair: emptyTurnRepairAttempted,
+            contentTypes: assistantMessage.content.map(block => block.type),
+          },
+          iteration,
+        )
+
+        if (!emptyTurnRepairAttempted && iteration < maxIterations) {
+          const repairReminderMessage = buildEmptyTurnRepairReminderMessage()
+          pendingEmptyTurnRepairMessages = [repairReminderMessage]
+          emptyTurnRepairAttempted = true
+          recordTrace(
+            request.queryTraceSink,
+            'llm.empty_turn.repair_scheduled',
+            {
+              reminderMessage: summarizeMessageForTrace(repairReminderMessage),
+            },
+            iteration,
+          )
+          continue
+        }
+
+        const repairFailureMessage = buildEmptyTurnRepairFailureMessage(
+          emptyTurnRepairAttempted,
+        )
+        outputText = getTextContent(repairFailureMessage)
+        addedMessages.push(repairFailureMessage)
+        recordTrace(
+          request.queryTraceSink,
+          'llm.empty_turn.repair_failed',
+          {
+            attemptedRepair: emptyTurnRepairAttempted,
+            outputText: truncateForTrace(outputText),
+          },
+          iteration,
+        )
+        recordTrace(request.queryTraceSink, 'turn.complete', {
+          iterations: iteration,
+          outputText: truncateForTrace(outputText),
+        })
+        return {
+          assistantMessage: repairFailureMessage,
+          toolResultMessages: lastToolResultMessages,
+          addedMessages,
+          outputText,
+          iterations: iteration,
+          usedPostCompactAttachments,
+        }
       }
       if (toolUseBlocks.length === 0) {
         outputText = getTextContent(assistantMessage)

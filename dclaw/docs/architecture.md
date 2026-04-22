@@ -9,7 +9,7 @@
 - CLI / interactive / headless 双入口
 - query engine 与消息循环
 - system prompt 装配
-- `CLAUDE.md` 指令系统
+- `DCLAW.md` 指令系统
 - tool 协议与工具注册
 - permission mode 与 hooks
 - session / history / resume
@@ -55,7 +55,7 @@
 
 - 组装 system prompt
 - 注入系统 section
-- 加载 `CLAUDE.md` 指令
+- 加载 `DCLAW.md` 指令
 - 注入 memory、hooks、MCP、输出风格等上下文
 
 对应目录：
@@ -166,7 +166,7 @@ User Input
 ```text
 Default System Prompt
   + CLI/System Prompt Overrides
-  + CLAUDE.md Instructions
+  + DCLAW.md Instructions
   + Memory Prompt
   + Hooks Prompt
   + MCP Prompt
@@ -221,7 +221,7 @@ Session History
 - CLI 与 headless
 - Query Engine
 - Prompt Assembler
-- `CLAUDE.md`
+- `DCLAW.md`
 - 基础工具
 - Permission Mode
 - Session / Resume

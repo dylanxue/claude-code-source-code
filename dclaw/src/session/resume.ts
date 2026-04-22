@@ -1,5 +1,9 @@
 import type { Message } from '../types/message.js'
 import {
+  loadSessionSubagentSummary,
+  type SessionSubagentSummary,
+} from '../agent/observability.js'
+import {
   loadSessionMessages,
   loadSessionMeta,
   type SessionMeta,
@@ -8,6 +12,7 @@ import {
 export type ResumedSession = {
   meta: SessionMeta
   messages: Message[]
+  subagents: SessionSubagentSummary
 }
 
 export async function loadSessionForResume(
@@ -20,8 +25,10 @@ export async function loadSessionForResume(
   }
 
   const messages = await loadSessionMessages(sessionId, env)
+  const subagents = await loadSessionSubagentSummary(sessionId, env)
   return {
     meta,
     messages,
+    subagents,
   }
 }

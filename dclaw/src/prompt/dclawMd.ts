@@ -2,16 +2,17 @@ import { access, readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { getDclawHomeDir } from '../session/paths.js'
+import { createTextMessage, type Message } from '../types/message.js'
 
-export type ClaudeMdSource = 'user' | 'project' | 'local' | 'rules'
+export type DclawMdSource = 'user' | 'project' | 'local' | 'rules'
 
-export type ClaudeMdEntry = {
-  source: ClaudeMdSource
+export type DclawMdEntry = {
+  source: DclawMdSource
   path: string
   content: string
 }
 
-const MAX_CLAUDE_MD_CHARS = 20_000
+const MAX_CLAW_MD_CHARS = 20_000
 const ALLOWED_INCLUDE_EXTENSIONS = new Set([
   '.md',
   '.txt',
@@ -118,7 +119,7 @@ async function readIfExists(path: string): Promise<string | null> {
     if (trimmed.length === 0) {
       return null
     }
-    return trimmed.slice(0, MAX_CLAUDE_MD_CHARS)
+    return trimmed.slice(0, MAX_CLAW_MD_CHARS)
   } catch {
     return null
   }
@@ -237,10 +238,10 @@ function extractIncludes(content: string): string[] {
 }
 
 async function loadEntryWithIncludes(
-  source: ClaudeMdSource,
+  source: DclawMdSource,
   path: string,
   state: LoadState,
-): Promise<ClaudeMdEntry[]> {
+): Promise<DclawMdEntry[]> {
   const normalizedPath = normalizePath(path)
   if (state.loadedPaths.has(normalizedPath)) {
     return []
@@ -253,7 +254,7 @@ async function loadEntryWithIncludes(
 
   state.loadedPaths.add(normalizedPath)
   const includeReferences = extractIncludes(content)
-  const includedEntries: ClaudeMdEntry[] = []
+  const includedEntries: DclawMdEntry[] = []
 
   for (const reference of includeReferences) {
     const resolved = resolveIncludePath(reference, normalizedPath)
@@ -299,8 +300,8 @@ function listDirectoriesFromRootToCwd(cwd: string): string[] {
 async function loadRulesEntries(
   dir: string,
   state: LoadState,
-): Promise<ClaudeMdEntry[]> {
-  const rulesDir = join(dir, '.claude', 'rules')
+): Promise<DclawMdEntry[]> {
+  const rulesDir = join(dir, '.dclaw', 'rules')
 
   try {
     const entries = await readdir(rulesDir, { withFileTypes: true })
@@ -324,12 +325,12 @@ async function loadRulesEntries(
 async function loadEntriesForDirectory(
   dir: string,
   state: LoadState,
-): Promise<ClaudeMdEntry[]> {
+): Promise<DclawMdEntry[]> {
   const [projectEntry, dotClaudeEntry, localEntry, rulesEntries] =
     await Promise.all([
-      loadEntryWithIncludes('project', join(dir, 'CLAUDE.md'), state),
-      loadEntryWithIncludes('project', join(dir, '.claude', 'CLAUDE.md'), state),
-      loadEntryWithIncludes('local', join(dir, 'CLAUDE.local.md'), state),
+      loadEntryWithIncludes('project', join(dir, 'DCLAW.md'), state),
+      loadEntryWithIncludes('project', join(dir, '.dclaw', 'DCLAW.md'), state),
+      loadEntryWithIncludes('local', join(dir, 'DCLAW.local.md'), state),
       loadRulesEntries(dir, state),
     ])
 
@@ -341,14 +342,14 @@ async function loadEntriesForDirectory(
   ]
 }
 
-export async function loadClaudeMdEntries(
+export async function loadDclawMdEntries(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<ClaudeMdEntry[]> {
+): Promise<DclawMdEntry[]> {
   const state: LoadState = { loadedPaths: new Set() }
   const userEntry = await loadEntryWithIncludes(
     'user',
-    join(getDclawHomeDir(env), 'CLAUDE.md'),
+    join(getDclawHomeDir(env), 'DCLAW.md'),
     state,
   )
   const directories = listDirectoriesFromRootToCwd(cwd)
@@ -362,13 +363,47 @@ export async function loadClaudeMdEntries(
   ]
 }
 
-export function formatClaudeMdLoadOrder(entries: ClaudeMdEntry[]): string[] {
+export function formatDclawMdLoadOrder(entries: DclawMdEntry[]): string[] {
   if (entries.length === 0) {
     return []
   }
 
   return [
-    'claude.md load order:',
+    'dclaw.md load order:',
     ...entries.map(entry => `- [${entry.source}] ${entry.path}`),
   ]
+}
+
+export function buildDclawMdReminderText(
+  entries: DclawMdEntry[],
+): string | null {
+  if (entries.length === 0) {
+    return null
+  }
+
+  const blocks = entries.map(entry =>
+    [
+      `## [${entry.source}] ${entry.path}`,
+      entry.content,
+    ].join('\n'),
+  )
+
+  return [
+    "As you answer the user's questions, you can use the following context:",
+    '# DCLAW.md',
+    ...blocks,
+    '',
+    'IMPORTANT: this context may or may not be relevant to the current task. You should not respond to this context unless it is highly relevant to the task.',
+  ].join('\n')
+}
+
+export function createDclawMdReminderMessage(
+  entries: DclawMdEntry[],
+): Message | null {
+  const text = buildDclawMdReminderText(entries)
+  if (!text) {
+    return null
+  }
+
+  return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
 }

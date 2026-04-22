@@ -6,7 +6,7 @@
 
 - 固定默认 system prompt
 - 按 section 组装动态上下文
-- 接收来自 `CLAUDE.md`、memory、MCP、hooks 的追加信息
+- 接收来自 `DCLAW.md`、memory、MCP、hooks 的追加信息
 - 对 interactive 和 headless 复用同一套 prompt 组装流程
 
 ## 2. 设计原则
@@ -139,7 +139,7 @@ Claude Code 当前源码中，除 `plan / task` 外，真正明确走 reminder /
 1. 默认 system prompt
 2. 固定 section
 3. runtime context
-4. `CLAUDE.md` 指令
+4. `DCLAW.md` 指令
 5. plan / task context
 6. memory prompt
 7. MCP instructions
@@ -163,7 +163,7 @@ Claude Code 当前源码中，除 `plan / task` 外，真正明确走 reminder /
 
 - cwd
 - git 状态
-- `CLAUDE.md`
+- `DCLAW.md`
 - task / current step 摘要
 - memory
 - MCP
@@ -221,7 +221,7 @@ headless 模式不能使用不同 prompt 体系，只能改变 section 注入内
 - `System` section
 - `Doing Tasks` section
 - `Runtime Context` section
-- `CLAUDE.md Instructions` section
+- `DCLAW.md Instructions` section
 - `User Override` section
 
 当前已经做到 Claude Code 那种最小 tool prompt 体系：
@@ -230,16 +230,16 @@ headless 模式不能使用不同 prompt 体系，只能改变 section 注入内
 - `Task*` 已接入长版 task-tool 使用规范
 - 因此当前 task tool 已不只是“功能已存在”，也具备了最小提示策略对齐
 
-当前基础版 `CLAUDE.md` 发现规则包括：
+当前基础版 `DCLAW.md` 发现规则包括：
 
-- 默认用户级 `CLAUDE.md`：`~/.dclaw/CLAUDE.md`
-- 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/CLAUDE.md`
-- 从当前 `cwd` 向上查找 `<dir>/CLAUDE.md`
-- 从当前 `cwd` 向上查找 `<dir>/.claude/CLAUDE.md`
-- 从当前 `cwd` 向上查找 `<dir>/.claude/rules/*.md`
-- 从当前 `cwd` 向上查找 `<dir>/CLAUDE.local.md`
+- 默认用户级 `DCLAW.md`：`~/.dclaw/DCLAW.md`
+- 若设置 `DCLAW_HOME`：`<DCLAW_HOME>/DCLAW.md`
+- 从当前 `cwd` 向上查找 `<dir>/DCLAW.md`
+- 从当前 `cwd` 向上查找 `<dir>/.dclaw/DCLAW.md`
+- 从当前 `cwd` 向上查找 `<dir>/.dclaw/rules/*.md`
+- 从当前 `cwd` 向上查找 `<dir>/DCLAW.local.md`
 
-当前基础版 `CLAUDE.md` include 规则包括：
+当前基础版 `DCLAW.md` include 规则包括：
 
 - 支持整行 `@path`
 - 支持整行 `@./relative/path`
@@ -335,6 +335,6 @@ headless 模式不能使用不同 prompt 体系，只能改变 section 注入内
 
 因此，当前这一层更适合被视为：
 
-- 可工作的基础版 `CLAUDE.md` 指令系统
+- 可工作的基础版 `DCLAW.md` 指令系统
 - 已足够支撑后续主线开发
 - 但还不是完整对齐 Claude Code 的最终形态

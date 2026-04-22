@@ -85,7 +85,7 @@ memory 使用本地文件持久化。
 不应写入 memory 的信息：
 
 - 仅当前会话有效的短期执行步骤
-- 已在 `CLAUDE.md` 中稳定存在的项目指令
+- 已在 `DCLAW.md` 中稳定存在的项目指令
 - 可从当前仓库直接推导出的代码事实
 - `git history`、近期改动、谁改了什么
 - debugging recipe、活动总结、PR 列表、transcript-like recap
@@ -94,7 +94,7 @@ memory 使用本地文件持久化。
 
 - plan
 - task
-- `CLAUDE.md`
+- `DCLAW.md`
 
 补充边界：
 

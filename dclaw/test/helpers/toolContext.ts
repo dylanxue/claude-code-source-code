@@ -5,6 +5,7 @@ export function createToolContext(
 ): ToolContext {
   const context: ToolContext = {
     sessionId: 'session-test',
+    activeTurnId: 'turn-test',
     cwd: process.cwd(),
     availableTools: [],
     permissionMode: 'default' satisfies PermissionMode,

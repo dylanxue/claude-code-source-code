@@ -31,6 +31,37 @@ export function getContextSection(context: PromptContext): string {
   ].join('\n')
 }
 
+export function getCurrentDateSection(context: PromptContext): string | null {
+  if (!context.currentDate) {
+    return null
+  }
+
+  return ['# Current Date', `- today: ${context.currentDate}`].join('\n')
+}
+
+export function getEnvironmentSection(context: PromptContext): string | null {
+  if (!context.environment) {
+    return null
+  }
+
+  const environment = context.environment
+  return [
+    '# Environment',
+    `- is git repository: ${environment.isGitRepository ? 'yes' : 'no'}`,
+    `- platform: ${environment.platform}`,
+    `- shell: ${environment.shell}`,
+    `- os version: ${environment.osVersion}`,
+  ].join('\n')
+}
+
+export function getGitStatusSection(context: PromptContext): string | null {
+  if (!context.gitStatus) {
+    return null
+  }
+
+  return ['# Git Status', context.gitStatus].join('\n\n')
+}
+
 export function getPlanModeSection(context: PromptContext): string | null {
   const plan = context.plan
   if (!plan && context.permissionMode !== 'plan') {
@@ -117,22 +148,6 @@ export function getMemorySection(context: PromptContext): string | null {
     `## Recalled Memories\n- recalled memories for this query: ${memory.recalledEntries.length}/${memory.manifestCount}`,
     ...blocks,
   ].join('\n\n')
-}
-
-export function getClaudeMdSection(context: PromptContext): string | null {
-  if (context.claudeMdEntries.length === 0) {
-    return null
-  }
-
-  const blocks = context.claudeMdEntries.map(entry =>
-    [
-      `## ${entry.source} instructions`,
-      `path: ${entry.path}`,
-      entry.content,
-    ].join('\n'),
-  )
-
-  return ['# CLAUDE.md Instructions', ...blocks].join('\n\n')
 }
 
 export function getUserOverrideSection(context: PromptContext): string | null {

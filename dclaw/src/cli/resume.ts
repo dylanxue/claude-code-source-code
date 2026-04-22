@@ -5,6 +5,7 @@ import {
 import { formatCompactBoundaryLabel } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { loadSessionForResume } from '../session/resume.js'
+import type { SessionSubagentSummary } from '../agent/observability.js'
 import type { SessionPersistedToolResultRecord } from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
 import { recoverTaskBoardPlanFile } from '../tasks/planSnapshots.js'
@@ -21,6 +22,35 @@ import { prepareCliRuntime } from './runtime.js'
 import { getCliErrorOutput } from './errorFormatting.js'
 import type { ResumeCommand } from './types.js'
 import { formatVerboseContextLines } from './verboseEvents.js'
+
+function formatSubagentSummaryLines(
+  subagents: SessionSubagentSummary,
+): string[] {
+  if (subagents.count === 0) {
+    return []
+  }
+
+  const parts = [
+    `subagents: ${subagents.count}`,
+    subagents.queuedCount > 0 ? `queued ${subagents.queuedCount}` : undefined,
+    subagents.runningCount > 0 ? `running ${subagents.runningCount}` : undefined,
+    subagents.completedCount > 0
+      ? `completed ${subagents.completedCount}`
+      : undefined,
+    subagents.failedCount > 0 ? `failed ${subagents.failedCount}` : undefined,
+    subagents.stoppedCount > 0 ? `stopped ${subagents.stoppedCount}` : undefined,
+  ].filter((part): part is string => Boolean(part))
+
+  return [
+    parts.join('  '),
+    ...(subagents.lastStatus && subagents.lastTask
+      ? [`last subagent: ${subagents.lastStatus}  ${subagents.lastTask}`]
+      : []),
+    ...(subagents.lastTracePath
+      ? [`last subagent trace: ${subagents.lastTracePath}`]
+      : []),
+  ]
+}
 
 function getPersistedToolResultInfo(messages: Message[]): {
   count: number
@@ -70,7 +100,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
 
   const {
     runtime,
-    claudeMdEntries,
+    dclawMdEntries,
     toolRegistry,
     engine,
     rotateQueryTrace,
@@ -121,6 +151,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
     ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
     ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...formatSubagentSummaryLines(resumed.subagents),
   ]
 
   if (persistedToolResultInfo.count > 0) {
@@ -145,7 +176,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
   if (command.options.systemPrompt) {
     lines.push('system prompt override: enabled')
   }
-  lines.push(`claude.md files loaded: ${claudeMdEntries.length}`)
+  lines.push(`dclaw.md files loaded: ${dclawMdEntries.length}`)
   lines.push(`tools loaded: ${toolRegistry.list().length}`)
   if (queryTracePath) {
     lines.push(`query trace: ${queryTracePath}`)

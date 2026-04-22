@@ -10,19 +10,20 @@
 - 阶段 8-10 已按当前产品范围收口；`v0.3` 不再继续摊大范围，只做 `subagent` 与 `skills` 的最小主路径
 - 阶段 11 在 `v0.3` 只做 `subagent`，`worktree / coordinator / 多 worker 调度` 统一后置到 `v0.4`
 - 阶段 12 在 `v0.3` 只做 `skills`，`MCP / plugins / remote bridge` 统一后置到 `v0.4`
+- 阶段 11-1 已有真实代码落地：`src/agent/` 已具备最小 `types/store/runtime/session` 骨架，支持 agent store、parent turn links、独立 child transcript，以及独立 `maxTurns/maxIterations`；下一步应直接进入 `Agent` tool 闭环，而不是继续停留在“未开始”
 - 多模态输入首轮已真实落地，但不进入当前 `v0.2` 主线：共享 `image block`、Anthropic / OpenAI 用户图片输入、`WebFetch` 远程图片读取，以及“工具结果图片 -> runtime 临时图片消息 -> 后续继续推理”的统一桥接链路都已存在；`compact / resume` 当前也可恢复这类图片上下文。剩余未做项主要是本地图片读取工具、`QueryEngine` 公开结构化输入、interactive 图片输入与 `--print --image`
 
 ## Todo
 
-- [ ] `P0 / 阶段 11-1`：建立 subagent 最小运行时骨架，先对齐 Claude Code `AgentTool` 主路径
+- [x] `P0 / 阶段 11-1`：建立 subagent 最小运行时骨架，先对齐 Claude Code `AgentTool` 主路径
 
-- [ ] 新建 `src/agent/`，先落：
+- [x] 新建 `src/agent/`，先落：
   - `types.ts`
   - `store.ts`
   - `runtime.ts`
   - `session.ts`
 
-- [ ] 定义最小 agent 真值结构：
+- [x] 定义最小 agent 真值结构：
   - `agentId`
   - `parentAgentId`
   - `status`
@@ -30,97 +31,126 @@
   - `createdAt`
   - `updatedAt`
 
-- [ ] 建立主 agent 与 subagent 的关联方式：
+- [x] 建立主 agent 与 subagent 的关联方式：
   - parent turn 可挂接 child agent id / status
   - subagent 拥有独立消息历史，不直接污染主 transcript
 
-- [ ] 为 subagent 子流程显式传入独立 `maxTurns/maxIterations`
+- [x] 为 subagent 子流程显式传入独立 `maxTurns/maxIterations`
 
-- [ ] 验证标准：给定一个主会话，可稳定创建 / 读取 / 列出子代理运行态
+- [x] 验证标准：给定一个主会话，可稳定创建 / 读取 / 列出子代理运行态
 
-- [ ] `P0 / 阶段 11-2`：接通模型侧 subagent delegation 最小闭环
+- [x] `P0 / 阶段 11-2`：接通模型侧 subagent delegation 最小闭环
 
-- [ ] 接入最小 `Agent` tool 主路径：
+- [x] 接入最小 `Agent` tool 主路径：
   - `spawn`
   - `send`
   - `wait`
   - `stop`
 
-- [ ] 子代理首版继续复用现有 `client/model/toolRegistry/permissionMode`，不额外发明第二套执行协议
+- [x] 子代理首版继续复用现有 `client/model/toolRegistry/permissionMode`，不额外发明第二套执行协议
 
-- [ ] 让主代理能收到受控的子代理完成摘要，而不是整段转抄 child transcript
+- [x] 让主代理能收到受控的子代理完成摘要，而不是整段转抄 child transcript
 
-- [ ] 为 `resume / history / transcript / trace` 增加最小 subagent 观察面
+- [x] 为 `resume / history / transcript / trace` 增加最小 subagent 观察面
 
-- [ ] 验证标准：主代理可委派一个受限任务，并在同一会话中拿到完成结果
+- [x] 验证标准：主代理可委派一个受限任务，并在同一会话中拿到完成结果
+  - 当前 `spawn` 不再只是落一个 queued record；会立即接入最小后台执行器开始运行
+  - 当前 `wait` 优先等待已在运行中的 child；若来自 `resume` 等无内存句柄场景，则退回到按落盘状态继续执行
 
-- [ ] `P1 / 阶段 11-3`：收口 subagent 边界，不把 `worktree / coordinator` 提前混进 `v0.3`
+- [x] `P1 / 阶段 11-3`：收口 subagent 边界，不把 `worktree / coordinator` 提前混进 `v0.3`
 
-- [ ] 明确当前 `v0.3` 不做：
+- [x] 明确当前 `v0.3` 不做：
   - worktree isolation
   - coordinator mode
   - 多 worker 调度
   - mailbox / notification center
 
-- [ ] 明确 subagent 权限边界：
-  - 继承或收紧主 agent tool set
-  - 不默认拥有额外 UI / host 能力
+- [x] 明确 subagent 权限边界：
+  - subagent 默认从 parent tool set 继承后再收紧，显式剥离 `Agent / AskUserQuestion / EnterPlanMode / ExitPlanMode / Task*`
+  - subagent 不再绑定独立顶层 `sessionId`，避免额外 `session / task-board / plan-mode` 宿主副作用
 
-- [ ] 验证标准：`v0.3` 的 subagent 主线能跑通，但不会提前分叉出 `worktree/coordinator` 次路径
+- [x] `Agent.send` 与 `spawn` 一样接回最小后台执行器，不再只把 follow-up prompt 留在 queued 状态等待后续 `wait`
 
-- [ ] `P0 / 阶段 12-1`：建立 skills 文件系统骨架与加载器
+- [x] 验证标准：`v0.3` 的 subagent 主线能跑通，但不会提前分叉出 `worktree/coordinator` 次路径
 
-- [ ] 新建 `src/skills/`，先落：
+- [x] `P0 / 阶段 12-1`：建立 skills 文件系统骨架与加载器
+
+- [x] 新建 `src/skills/`，先落：
   - `types.ts`
   - `loader.ts`
   - `registry.ts`
   - `prompt.ts`
 
-- [ ] 首版只支持两类来源：
+- [x] 首版只支持两类来源：
   - builtin skills
   - project skills
 
-- [ ] 定义最小 skill 结构：
+- [x] 定义最小 skill 结构：
   - `name`
   - `description`
   - `source`
   - `prompt`
 
-- [ ] 验证标准：给定 workspace，可稳定发现 / 读取 / 枚举 skills
+- [x] 验证标准：给定 workspace，可稳定发现 / 读取 / 枚举 skills
 
-- [ ] `P0 / 阶段 12-2`：接通 `SkillTool` 主路径
+- [x] `P0 / 阶段 12-2`：接通 `SkillTool` 主路径
 
-- [ ] 实现统一 `SkillTool`，不允许 skill 绕开主消息循环
+- [x] 实现统一 `SkillTool`，不允许 skill 绕开主消息循环
 
-- [ ] skill 首版默认运行在当前 agent 上下文中，不默认 fork
+- [x] skill 首版默认运行在当前 agent 上下文中，不默认 fork
 
-- [ ] SkillTool 返回结果时保留最小来源与调用可观察性
+- [x] SkillTool 返回结果时保留最小来源与调用可观察性
 
-- [ ] 验证标准：模型可调用一个 builtin skill 和一个 project skill，并继续当前对话
+- [x] 验证标准：模型可调用一个 builtin skill 和一个 project skill，并继续当前对话
 
-- [ ] `P1 / 阶段 12-3`：补 skill discovery / invoked-skill 提示链路
+- [ ] `P0 / 阶段 12-3a`：补 `invoked_skills` 持续约束链路
 
-- [ ] 将“当前相关 skills”与“已调用 skill 的持续约束”优先收敛到 runtime reminder
+- [ ] `Skill` 成功调用后，不只注入单轮 reminder；应补最小“已调用 skill 持续生效”链路
+
+- [ ] 首版优先对齐 Claude Code 的 `invoked_skills` 语义：
+  - 已调用 skill 的内容可在后续 turn 继续恢复
+  - `compact / resume` 后仍可恢复这类约束
+  - 不提前扩成完整 attachment / delta 协议族
+
+- [ ] 验证标准：一个已调用 skill 在后续对话、`compact` 与 `resume` 后仍可观察且继续生效
+
+- [ ] `P1 / 阶段 12-3b`：补 `skill_discovery` 提示链路
+
+- [ ] 只注入“当前任务相关的 skills”，不广播全量 skill 列表
+
+- [ ] 在 `dclaw` 尚未具备真实动态相关性发现前，只允许做条件式、阶段式的最小 runtime reminder 近似
 
 - [ ] 避免把动态 skill 列表长期塞进 system prompt 或 tool prompt
+
+- [ ] 验证标准：当前相关 skills 可被受控 surfaced，且不会伪装成 Claude Code 已具备的完整 `skill_discovery` delta 机制
+
+- [ ] `P1 / 阶段 12-3c`：谨慎补最小 `skill_listing`
+
+- [ ] 若进入 `skill_listing`，只做受控增量或首轮 listing，不做每轮全量广播
+
+- [ ] 若后续同时存在 discovery 与 listing，优先级应为：
+  - `invoked_skills`：持续约束
+  - `skill_discovery`：当前任务相关 skills
+  - `skill_listing`：当前可用 skills 的受控补充，不抢主提示位
 
 - [ ] 保持范围克制：
   - `v0.3` 不做 plugin-provided skills
   - `v0.3` 不做 skill marketplace / install flow
 
-- [ ] 验证标准：skill 的动态发现和调用约束可观察，且不会造成 prompt 膨胀
+- [ ] 验证标准：skill 的动态发现、持续约束与最小 listing 可观察，且不会造成 prompt 膨胀
 
 - [ ] `P0 / 文档与测试`：补齐 `v0.3` 的 subagent / skills 文档口径与最小回归护栏
 
 - [ ] 为阶段 11 增加单测：
-  - agent store / status persistence
-  - `spawn / send / wait / stop` 主路径
-  - parent/child observability
+  - [x] agent store / status persistence
+  - [x] `spawn / send / wait / stop` 主路径
+  - [x] parent/child observability
 
 - [ ] 为阶段 12 增加单测：
-  - skill loader / registry
-  - `SkillTool` invoke path
-  - skill reminder / discovery boundary
+  - [x] skill loader / registry
+  - [x] `SkillTool` invoke path
+  - `invoked_skills` persistence / recovery boundary
+  - `skill_discovery` relevance / prompt-budget boundary
 
 - [ ] 验证标准：`subagent / skills` 两条主线均有最小单测护栏
 
@@ -143,7 +173,7 @@
 - [ ] `Bash` 的真 sandbox、AST 级 shell 解析和更细粒度 permission 规则暂缓；当前仅在出现真实 bug 或明确需求时继续下探
 - [ ] `v0.4`：继续细化阶段 6 的 permission mode / hooks，包括更明确的 evaluator 位置、更细粒度规则与 tool 执行链路深化
 - [ ] `v0.4`：继续推进 `tool result budget / persistence` 的参数化、上下文级 compact，以及 model limits 在更广调度路径上的接线
-- [ ] `v0.4`：继续打磨 `CLAUDE.md`，补齐完整 include 语义、优先级细节、frontmatter / managed memory / instruction hooks
+- [ ] `v0.4`：继续打磨 `DCLAW.md`，补齐完整 include 语义、优先级细节、frontmatter / managed memory / instruction hooks
 - [ ] `v0.4 / 低优先级`：继续打磨 `WebFetch / AskUserQuestion`，重点放在 `WebFetch` 的权限/安全链路、cache、binary content 与更强的 prompt 处理，以及 `AskUserQuestion` 的 richer host UI、preview 展示与 annotations 采集
 - [ ] `v0.4 / 低优先级`：在已有 provider 重试 / 限流 / 结构化错误基础上，继续细化 `Anthropic` 的更完整错误类型映射、可配置 token 参数与更长等待策略
 - [ ] `v0.4 / 低优先级`：在已补 `verbosity / reasoning.effort / store / previous_response_id / parallel_tool_calls / max_tool_calls / include / truncation / metadata / text.format` 的基础上，继续扩展 `OpenAI Responses API` 的更多 request 参数与更广的事件覆盖
@@ -476,19 +506,19 @@
 - [x] 拆出 `queryLoop`
 - [x] 将 QueryEngine 接入 interactive/headless 入口
 - [x] 实现最小 prompt context / system prompt 装配层
-- [x] 实现基础 `CLAUDE.md` 加载器
-- [x] 将基础 `CLAUDE.md` 接入 prompt 链路
-- [x] 支持向上发现多层 `CLAUDE.md`
-- [x] 支持 `.claude/CLAUDE.md`
-- [x] 支持 `.claude/rules/*.md`
+- [x] 实现基础 `DCLAW.md` 加载器
+- [x] 将基础 `DCLAW.md` 接入 prompt 链路
+- [x] 支持向上发现多层 `DCLAW.md`
+- [x] 支持 `.dclaw/DCLAW.md`
+- [x] 支持 `.dclaw/rules/*.md`
 - [x] 支持基础 `@include` 指令
-- [x] 为 `CLAUDE.md` 加载加入去重与循环保护
+- [x] 为 `DCLAW.md` 加载加入去重与循环保护
 - [x] 修正代码块中的 include 误提取
 - [x] 验证 HTML 注释中的 include 不被提取
 - [x] 验证带转义空格和 `#fragment` 的 include 可解析
-- [x] 增加 `CLAUDE.md` 加载顺序的可观察性
-- [x] 抽出可复用的 `CLAUDE.md` 加载顺序格式化工具
-- [x] 明确当前 `CLAUDE.md` 未覆盖的边界
+- [x] 增加 `DCLAW.md` 加载顺序的可观察性
+- [x] 抽出可复用的 `DCLAW.md` 加载顺序格式化工具
+- [x] 明确当前 `DCLAW.md` 未覆盖的边界
 - [x] 实现最小 Tool 协议
 - [x] 实现 tool registry
 - [x] 将默认工具名与 Claude Code 对齐为 `Read / Edit / Write / Bash / Glob / Grep`
@@ -622,14 +652,14 @@
 - 阶段 1：CLI 与运行入口 `completed`
 - 阶段 2：Query Engine 与消息协议 `completed`
 - 阶段 3：System Prompt 与指令装配 `in progress`
-- 阶段 4：`CLAUDE.md` 指令系统 `in progress`
+- 阶段 4：`DCLAW.md` 指令系统 `in progress`
 - 阶段 5：Tool 协议与基础工具 `in progress`
 - 阶段 6：权限模式与 Hooks `in progress`
 - 阶段 7：Session、历史与恢复 `in progress`
 - 阶段 8：上下文管理与自动压缩 `completed`
-- 阶段 9：Plan / Task `in progress`
-- 阶段 10：Memory `in progress`
-- 阶段 11：多代理、Worktree 与协作执行 `not started`
+- 阶段 9：Plan / Task `completed`
+- 阶段 10：Memory `completed`
+- 阶段 11：多代理、Worktree 与协作执行 `in progress`
 - 阶段 12：MCP、Skills、Plugins 与 Remote Bridge `not started`
 - 阶段 13：Coding 场景增强 `not started`
 

@@ -13,7 +13,7 @@ import {
 export async function runInteractive(command: InteractiveCommand): Promise<void> {
   const {
     runtime,
-    claudeMdEntries,
+    dclawMdEntries,
     toolRegistry,
     engine,
     rotateQueryTrace,
@@ -56,7 +56,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
   if (command.options.systemPrompt) {
     lines.push('system prompt override: enabled')
   }
-  lines.push(`claude.md files loaded: ${claudeMdEntries.length}`)
+  lines.push(`dclaw.md files loaded: ${dclawMdEntries.length}`)
   lines.push(`tools loaded: ${toolRegistry.list().length}`)
   if (queryTracePath) {
     lines.push(`query trace: ${queryTracePath}`)

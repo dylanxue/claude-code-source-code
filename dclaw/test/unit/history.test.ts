@@ -80,7 +80,7 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
     assert.equal(sessions.length, 2)
     assert.equal(sessions[0]?.meta.sessionId, 'session-two')
     assert.equal(sessions[0]?.lastUserText, 'second')
-    assert.equal(sessions[0]?.lastAssistantText, 'Read /tmp/two.txt')
+    assert.equal(sessions[0]?.lastAssistantText, 'Reading /tmp/two.txt')
     assert.equal(sessions[0]?.lastBashSandboxMode, 'restricted')
     assert.equal(sessions[0]?.persistedToolResultCount, 1)
     assert.equal(

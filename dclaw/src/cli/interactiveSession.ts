@@ -1,12 +1,15 @@
 import { appendSessionMessages } from '../session/store.js'
 import type { QueryEngine } from '../core/queryEngine.js'
 import {
+  collectProgressAssistantTexts,
   formatAutoCompactLine,
   formatCompactDryRunLine,
+  formatProgressAssistantLines,
+  formatProgressAssistantOutputLines,
   formatLlmErrorLine,
-  formatProgressReasoningLines,
   formatProgressThinkingLine,
-  formatProgressToolResultLine,
+  formatProgressToolResultDisplayLine,
+  formatProgressToolUseDisplayLine,
   formatToolUseLine,
   formatVerboseToolResultLine,
   formatVerboseLines,
@@ -55,12 +58,15 @@ export async function runInteractiveSessionPrompt(
 
   if (options.stream || !options.verbose) {
     let outputEndsWithNewline = true
+    let assistantTextStreamStarted = false
+    let assistantMessageHadStreamedText = false
     let activeReasoningKind: 'reasoning' | 'thinking' | null = null
     const streamedReasoningIterations = new Set<number>()
     const activeToolUses = new Map<
       string,
       { name: string; input: Record<string, unknown> }
     >()
+    const displayedAssistantTexts = new Set<string>()
     let pendingReasoningLines: string[] = []
     const writeEventTextLines = (lines: string[]): void => {
       if (lines.length === 0) {
@@ -134,7 +140,7 @@ export async function runInteractiveSessionPrompt(
       genericThinkingTimer = setTimeout(() => {
         genericThinkingTimer = undefined
         if (!hasConcreteProgress) {
-          writeEventTextLines([formatProgressThinkingLine()])
+          writeEventTextLines([`Assistant: ${formatProgressThinkingLine()}`])
         }
       }, 250)
       genericThinkingTimer.unref?.()
@@ -158,8 +164,17 @@ export async function runInteractiveSessionPrompt(
               activeReasoningKind = null
               outputEndsWithNewline = true
             }
+            if (!options.verbose && !assistantTextStreamStarted) {
+              if (!outputEndsWithNewline) {
+                process.stdout.write('\n')
+              }
+              process.stdout.write('Assistant: ')
+              assistantTextStreamStarted = true
+              outputEndsWithNewline = false
+            }
             process.stdout.write(text)
             if (text.length > 0) {
+              assistantMessageHadStreamedText = true
               outputEndsWithNewline = text.endsWith('\n')
             }
           },
@@ -196,8 +211,16 @@ export async function runInteractiveSessionPrompt(
               return
             }
 
-            const progressLines = formatProgressReasoningLines(message)
-            if (progressLines.length > 0) {
+            const progressLines = formatProgressAssistantLines(message)
+            const progressTexts = collectProgressAssistantTexts(message)
+            for (const text of progressTexts) {
+              displayedAssistantTexts.add(text)
+            }
+            const skipProgressLinesForStreamedText =
+              options.stream && assistantMessageHadStreamedText
+            assistantTextStreamStarted = false
+            assistantMessageHadStreamedText = false
+            if (progressLines.length > 0 && !skipProgressLinesForStreamedText) {
               schedulePendingReasoning(progressLines)
             }
           },
@@ -211,6 +234,13 @@ export async function runInteractiveSessionPrompt(
               writeEventTextLines([formatToolUseLine(toolUse)])
               return
             }
+
+            flushPendingReasoning()
+            markConcreteProgress()
+            assistantTextStreamStarted = false
+            writeEventTextLines([
+              formatProgressToolUseDisplayLine(toolUse),
+            ])
           },
           onToolResult(toolResult) {
             clearPendingReasoningTimer()
@@ -228,8 +258,9 @@ export async function runInteractiveSessionPrompt(
             }
 
             markConcreteProgress()
+            assistantTextStreamStarted = false
             writeEventTextLines([
-              formatProgressToolResultLine(
+              formatProgressToolResultDisplayLine(
                 activeToolUses.get(toolResult.toolUseId),
                 toolResult.output,
               ),
@@ -272,15 +303,16 @@ export async function runInteractiveSessionPrompt(
       result.appendedMessages,
       options.env,
     )
+    const normalizedOutputText = result.outputText.replace(/\s+/g, ' ').trim()
     if (options.stream) {
       if (!outputEndsWithNewline) {
         process.stdout.write('\n')
       }
-    } else if (result.outputText.length > 0) {
-      process.stdout.write(result.outputText)
-      if (!result.outputText.endsWith('\n')) {
-        process.stdout.write('\n')
-      }
+    } else if (
+      result.outputText.length > 0 &&
+      !displayedAssistantTexts.has(normalizedOutputText)
+    ) {
+      writeEventTextLines(formatProgressAssistantOutputLines(result.outputText))
     }
     return {
       sessionId: activeSessionId,

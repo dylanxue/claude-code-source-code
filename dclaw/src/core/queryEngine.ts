@@ -14,6 +14,10 @@ import { resolveModelLimits } from '../llm/modelLimits.js'
 import type { LlmProviderName } from '../llm/providerNames.js'
 import type { LlmClient } from '../llm/types.js'
 import {
+  createDclawMdReminderMessage,
+  type DclawMdEntry,
+} from '../prompt/dclawMd.js'
+import {
   deriveToolResultBudgetFromModelLimits,
 } from './toolResultBudget.js'
 import { type SessionMode } from '../session/store.js'
@@ -74,6 +78,7 @@ export type QueryEngineOptions = {
   maxIterations?: number
   initialMessages?: Message[]
   queryTraceSink?: QueryTraceSink
+  dclawMdEntries?: DclawMdEntry[]
 }
 
 export type QueryResult = {
@@ -107,6 +112,7 @@ export class QueryEngine {
   private readonly maxIterations: number
   private readonly messages: Message[]
   private queryTraceSink?: QueryTraceSink
+  private readonly dclawMdEntries: DclawMdEntry[]
   private postCompactReadState?: {
     boundaryId: string
     entries: PostCompactReadStateSnapshot
@@ -136,6 +142,7 @@ export class QueryEngine {
     this.maxIterations = options.maxIterations ?? DEFAULT_QUERY_MAX_ITERATIONS
     this.messages = [...(options.initialMessages ?? [])]
     this.queryTraceSink = options.queryTraceSink
+    this.dclawMdEntries = [...(options.dclawMdEntries ?? [])]
   }
 
   getMessages(): Message[] {
@@ -221,6 +228,7 @@ export class QueryEngine {
   }
 
   private async getTransientContextMessages(
+    prompt: string,
     baseMessages: Message[] = this.getMessages(),
   ): Promise<{
     messages: Message[]
@@ -230,6 +238,10 @@ export class QueryEngine {
     const transientMessages: Message[] = createToolResultAttachmentMessages(
       visibleMessages,
     )
+    const dclawMdReminder = createDclawMdReminderMessage(this.dclawMdEntries)
+    if (dclawMdReminder) {
+      transientMessages.push(dclawMdReminder)
+    }
 
     if (!this.toolContext.sessionId) {
       return {
@@ -431,6 +443,7 @@ export class QueryEngine {
           const [systemPrompt, transientContext] = await Promise.all([
             this.getResolvedSystemPrompt(prompt),
             this.getTransientContextMessages(
+              prompt,
               currentTurnMessages.length === 0
                 ? persistedMessagesBeforeUser
                 : [...persistedMessagesWithUser, ...currentTurnMessages],

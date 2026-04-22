@@ -80,6 +80,11 @@ function normalizeAgentRecord(agent: AgentRecord): AgentRecord {
             values.indexOf(toolName) === index,
         )
       : [],
+    pendingPrompts: Array.isArray(agent.pendingPrompts)
+      ? agent.pendingPrompts
+          .map(prompt => (typeof prompt === 'string' ? prompt.trim() : ''))
+          .filter(prompt => prompt.length > 0)
+      : [],
     maxTurns: normalizePositiveInteger(
       agent.maxTurns,
       DEFAULT_SUBAGENT_MAX_TURNS,
@@ -91,6 +96,9 @@ function normalizeAgentRecord(agent: AgentRecord): AgentRecord {
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
     completedAt,
+    summary: trimOrUndefined(agent.summary),
+    outputText: trimOrUndefined(agent.outputText),
+    tracePath: trimOrUndefined(agent.tracePath),
     lastError: trimOrUndefined(agent.lastError),
   }
 }
@@ -217,6 +225,7 @@ export async function createAgent(
     model: input.model,
     permissionMode: input.permissionMode,
     availableTools: input.availableTools,
+    pendingPrompts: input.pendingPrompts ?? [],
     maxTurns: input.maxTurns ?? DEFAULT_SUBAGENT_MAX_TURNS,
     maxIterations: input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS,
     createdAt: now,

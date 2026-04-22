@@ -431,6 +431,7 @@ export class AnthropicLlmClient implements LlmClient {
 
       const blocks: StreamingAnthropicBlockState[] = []
       let sawStreamEvent = false
+      let sawStreamData = false
       try {
         await readSseEvents(
           response,
@@ -442,12 +443,19 @@ export class AnthropicLlmClient implements LlmClient {
             sawStreamEvent = true
             this.applyStreamEvent(blocks, callbacks, event)
           },
-          this.streamIdleTimeoutMs === undefined
-            ? undefined
-            : { idleTimeoutMs: this.streamIdleTimeoutMs },
+          {
+            ...(this.streamIdleTimeoutMs === undefined
+              ? {}
+              : { idleTimeoutMs: this.streamIdleTimeoutMs }),
+            onChunk(chunk) {
+              if (chunk.length > 0) {
+                sawStreamData = true
+              }
+            },
+          },
         )
       } catch (error) {
-        if (sawStreamEvent) {
+        if (sawStreamEvent || sawStreamData) {
           throw new NonRetryableError(error)
         }
         return this.createMessage(request)

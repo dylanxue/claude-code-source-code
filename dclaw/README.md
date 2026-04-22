@@ -2,7 +2,7 @@
 
 `dclaw` 是一个严格参考 Claude Code 通用能力边界设计的终端优先通用 agent 项目。
 
-当前仓库中的 `dclaw/` 目录正在从 `v0.1` 收尾切换到 `v0.2` 主线。当前重点不再是继续追 `v0.1` 的零散收口项，而是转向阶段 8-10：上下文管理 / 自动压缩、Plan / Task、以及 Memory；`v0.1` 剩余的工具与会话体验打磨统一转入 backlog，`CLAUDE.md` 深化、权限系统继续收口，以及更广的上下文压缩 / persistence 打磨已下调到 `v0.3`。
+当前仓库中的 `dclaw/` 目录正在从 `v0.1` 收尾切换到 `v0.2` 主线。当前重点不再是继续追 `v0.1` 的零散收口项，而是转向阶段 8-10：上下文管理 / 自动压缩、Plan / Task、以及 Memory；`v0.1` 剩余的工具与会话体验打磨统一转入 backlog，`DCLAW.md` 深化、权限系统继续收口，以及更广的上下文压缩 / persistence 打磨已下调到 `v0.3`。
 
 ## 当前范围
 
@@ -48,7 +48,7 @@ dclaw/
 1. CLI 与运行入口
 2. Query Engine 与消息协议
 3. System Prompt 与指令装配
-4. CLAUDE.md 指令系统
+4. DCLAW.md 指令系统
 5. Tool 协议与基础工具
 6. 权限模式与 Hooks
 7. Session 与恢复
@@ -65,7 +65,7 @@ dclaw/
 - 目录骨架已建立
 - TypeScript 基础工程已初始化
 - CLI 与最小 Query Engine 已可运行
-- Prompt / `CLAUDE.md` 基础链路已接入
+- Prompt / `DCLAW.md` 基础链路已接入
 - 已接入真实 `Anthropic / OpenAI` provider，并支持基础 streaming / SSE
 - Tool registry 与基础工具链路已接入，并进入语义收紧阶段
 - `Read / Edit / Write / Bash / Glob / Grep / WebFetch / AskUserQuestion` 已有最小可用实现

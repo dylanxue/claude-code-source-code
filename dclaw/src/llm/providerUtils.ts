@@ -19,6 +19,7 @@ export type SseEvent = {
 
 export type ReadSseEventsOptions = {
   idleTimeoutMs?: number
+  onChunk?: (chunk: Uint8Array) => void
 }
 
 export type SleepImpl = (ms: number) => Promise<void>
@@ -868,6 +869,7 @@ export async function readSseEvents(
         break
       }
 
+      options.onChunk?.(result.value)
       parser.feed(decoder.decode(result.value, { stream: true }))
     }
 

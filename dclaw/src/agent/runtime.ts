@@ -6,6 +6,17 @@ import {
   DEFAULT_SUBAGENT_MAX_TURNS,
 } from './types.js'
 
+const DISALLOWED_SUBAGENT_TOOL_NAMES = new Set([
+  'Agent',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'TaskCreate',
+  'TaskList',
+  'TaskGet',
+  'TaskUpdate',
+])
+
 function normalizePositiveInteger(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     return fallback
@@ -21,6 +32,18 @@ export type SubagentRuntimeLimits = {
 
 export type SubagentRuntime = SubagentRuntimeLimits & {
   engine: QueryEngine
+}
+
+export function filterSubagentAvailableTools(
+  availableTools: string[],
+): string[] {
+  return availableTools.filter(
+    (toolName, index, values): toolName is string =>
+      typeof toolName === 'string' &&
+      toolName.trim().length > 0 &&
+      !DISALLOWED_SUBAGENT_TOOL_NAMES.has(toolName) &&
+      values.indexOf(toolName) === index,
+  )
 }
 
 export function resolveSubagentRuntimeLimits(input: {
@@ -42,17 +65,20 @@ export function resolveSubagentRuntimeLimits(input: {
 export function createSubagentToolContext(
   input: CreateSubagentRuntimeInput,
 ): ToolContext {
+  const availableTools = filterSubagentAvailableTools(
+    input.agent.availableTools.length > 0
+      ? [...input.agent.availableTools]
+      : [...input.parent.availableTools],
+  )
+
   return {
-    sessionId: input.agent.agentId,
+    sessionId: undefined,
     planFilePath: input.parent.planFilePath,
     cwd: input.agent.cwd || input.parent.cwd,
-    availableTools:
-      input.agent.availableTools.length > 0
-        ? [...input.agent.availableTools]
-        : [...input.parent.availableTools],
+    availableTools,
     permissionMode: input.agent.permissionMode ?? input.parent.permissionMode,
     readState: new Map(),
-    askUserQuestions: input.parent.askUserQuestions,
+    skillRegistry: input.parent.skillRegistry,
   }
 }
 
@@ -63,7 +89,10 @@ export function createSubagentRuntime(
   const engine = new QueryEngine({
     client: input.parent.client,
     provider: input.parent.provider,
+    modelLimitsEnv: input.parent.modelLimitsEnv,
     model: input.agent.model ?? input.parent.model,
+    systemPromptResolver: input.parent.systemPromptResolver,
+    dclawMdEntries: input.parent.dclawMdEntries,
     toolRegistry: input.parent.toolRegistry,
     toolContext: createSubagentToolContext(input),
     initialMessages: input.initialMessages,

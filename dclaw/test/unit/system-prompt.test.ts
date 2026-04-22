@@ -43,6 +43,38 @@ test('buildSystemPrompt nudges complex work toward task tracking without globall
   assert.match(prompt, /TaskCreate and TaskUpdate/)
   assert.doesNotMatch(prompt, /EnterPlanMode/)
   assert.doesNotMatch(prompt, /Prefer direct execution for simple requests/)
+  assert.doesNotMatch(prompt, /# DCLAW\.md Instructions/)
+})
+
+test('buildSystemPrompt includes current date, environment, and git status context', () => {
+  const prompt = buildSystemPrompt(
+    assemblePromptContext({
+      cwd: '/tmp/project',
+      provider: 'stub',
+      model: 'stub-model',
+      mode: 'interactive',
+      permissionMode: 'accept-edits',
+      currentDate: '2026-04-22',
+      environment: {
+        platform: 'darwin',
+        shell: 'bash',
+        osVersion: 'Darwin 25.0.0',
+        isGitRepository: true,
+      },
+      gitStatus: '## main\n M src/app.ts',
+    }),
+  )
+
+  assert.match(prompt, /# Current Date/)
+  assert.match(prompt, /today: 2026-04-22/)
+  assert.match(prompt, /# Environment/)
+  assert.match(prompt, /is git repository: yes/)
+  assert.match(prompt, /platform: darwin/)
+  assert.match(prompt, /shell: bash/)
+  assert.match(prompt, /os version: Darwin 25.0.0/)
+  assert.match(prompt, /# Git Status/)
+  assert.match(prompt, /## main/)
+  assert.match(prompt, /M src\/app\.ts/)
 })
 
 test('buildSystemPrompt includes recalled memory content with observable source paths', () => {

@@ -198,12 +198,119 @@ function formatToolUseDetail(
       return typeof input.subject === 'string'
         ? truncateInlineText(input.subject, 80)
         : undefined
+    case 'Skill':
+      return typeof input.skill_name === 'string' &&
+        input.skill_name.trim().length > 0
+        ? input.skill_name.trim()
+        : undefined
+    case 'Agent': {
+      const action = typeof input.action === 'string' ? input.action : undefined
+      const agentId =
+        typeof input.agent_id === 'string' && input.agent_id.trim().length > 0
+          ? input.agent_id.trim()
+          : undefined
+      const task =
+        typeof input.task === 'string' && input.task.trim().length > 0
+          ? truncateInlineText(input.task, 80)
+          : undefined
+      const message =
+        typeof input.message === 'string' && input.message.trim().length > 0
+          ? truncateInlineText(input.message, 80)
+          : undefined
+
+      switch (action) {
+        case 'spawn':
+          if (agentId && task) {
+            return `${agentId} for ${quoteInline(task)}`
+          }
+          return agentId ?? task
+        case 'send':
+          if (agentId && message) {
+            return `${agentId} with ${quoteInline(message)}`
+          }
+          return agentId ?? message
+        case 'wait':
+        case 'stop':
+          return agentId
+        default:
+          return agentId ?? task ?? message
+      }
+    }
     default:
       return undefined
   }
 }
 
 function formatToolUseText(toolUse: {
+  name: string
+  input: Record<string, unknown>
+}): string {
+  const detail = formatToolUseDetail(toolUse.name, toolUse.input)
+  switch (toolUse.name) {
+    case 'Read':
+      return detail ? `Reading ${detail}` : 'Reading'
+    case 'Edit':
+      return detail ? `Editing ${detail}` : 'Editing'
+    case 'Write':
+      return detail ? `Writing ${detail}` : 'Writing'
+    case 'Bash':
+      return detail
+        ? toolUse.input.run_in_background === true
+          ? `Starting ${detail}`
+          : `Running ${detail}`
+        : 'Running command'
+    case 'Glob':
+      return detail ? `Searching files matching ${detail}` : 'Searching files'
+    case 'Grep':
+      return detail ? `Searching ${detail}` : 'Searching files'
+    case 'WebFetch':
+      return detail ? `Fetching ${detail}` : 'Fetching URL'
+    case 'AskUserQuestion':
+      return detail ? `Asking ${detail}` : 'Asking user question'
+    case 'Skill':
+      return detail ? `Applying skill ${detail}` : 'Applying skill'
+    case 'TaskGet':
+      return detail ? `Viewing task ${detail}` : 'Viewing task'
+    case 'TaskUpdate':
+      return detail ? `Updating task ${detail}` : 'Updating task'
+    case 'TaskCreate':
+      return detail ? `Creating task ${detail}` : 'Creating task'
+    case 'Agent': {
+      const action =
+        typeof toolUse.input.action === 'string' ? toolUse.input.action : undefined
+      switch (action) {
+        case 'spawn':
+          return detail
+            ? `Starting subagent ${detail}`
+            : 'Starting subagent'
+        case 'send':
+          return detail
+            ? `Sending follow-up to subagent ${detail}`
+            : 'Sending follow-up to subagent'
+        case 'wait':
+          return detail
+            ? `Waiting for subagent ${detail}`
+            : 'Waiting for subagent'
+        case 'stop':
+          return detail
+            ? `Stopping subagent ${detail}`
+            : 'Stopping subagent'
+        default:
+          return detail ? `Agent ${detail}` : 'Agent'
+      }
+    }
+    default: {
+      if (detail) {
+        return `Calling ${toolUse.name} ${detail}`
+      }
+
+      const fallback = stringifyInline(toolUse.input)
+      return fallback === '{}' ? `Calling ${toolUse.name}` : `Calling ${toolUse.name} ${fallback}`
+    }
+  }
+}
+
+function formatToolResultActionText(toolUse: {
   name: string
   input: Record<string, unknown>
 }): string {
@@ -229,12 +336,16 @@ function formatToolUseText(toolUse: {
       return detail ? `Fetched ${detail}` : 'Fetched URL'
     case 'AskUserQuestion':
       return detail ? `Asked ${detail}` : 'Asked user question'
+    case 'Skill':
+      return detail ? `Applied skill ${detail}` : 'Applied skill'
     case 'TaskGet':
       return detail ? `Viewed task ${detail}` : 'Viewed task'
     case 'TaskUpdate':
       return detail ? `Updated task ${detail}` : 'Updated task'
     case 'TaskCreate':
       return detail ? `Created task ${detail}` : 'Created task'
+    case 'Agent':
+      return formatToolUseText(toolUse)
     default: {
       if (detail) {
         return `${toolUse.name} ${detail}`
@@ -251,6 +362,11 @@ function firstNonEmptyLine(value: string): string | undefined {
     .split(/\r?\n/)
     .map(line => line.trim())
     .find(line => line.length > 0)
+}
+
+function normalizeProgressAssistantText(value: string): string | undefined {
+  const normalized = firstNonEmptyLine(value)?.replace(/\s+/g, ' ').trim()
+  return normalized && normalized.length > 0 ? normalized : undefined
 }
 
 function countLogicalLines(value: string): number {
@@ -471,6 +587,75 @@ function formatPersistedToolResultPreview(output: Record<string, unknown>): stri
   return preview ? truncateInlineText(preview) : undefined
 }
 
+function formatAgentPreview(output: Record<string, unknown>): string | undefined {
+  const agent = asRecord(output.agent)
+  const result = asRecord(output.result)
+  const status =
+    typeof agent?.status === 'string' && agent.status.trim().length > 0
+      ? agent.status.trim()
+      : undefined
+  const summary =
+    typeof result?.summary === 'string' && result.summary.trim().length > 0
+      ? result.summary.trim()
+      : undefined
+  const outputText =
+    typeof result?.output_text === 'string' && result.output_text.trim().length > 0
+      ? firstNonEmptyLine(result.output_text)
+      : undefined
+  const error =
+    typeof result?.error === 'string' && result.error.trim().length > 0
+      ? result.error.trim()
+      : undefined
+
+  const detail = error ?? summary ?? outputText
+  if (status && detail) {
+    return `${status}; ${truncateInlineText(detail)}`
+  }
+  if (detail) {
+    return truncateInlineText(detail)
+  }
+  return status
+}
+
+function formatAgentResultLine(
+  toolUse: ToolUseSummary | undefined,
+  output: unknown,
+): string | undefined {
+  const { payload } = getToolResultPayload(output)
+  const record = asRecord(payload)
+  if (!record) {
+    return undefined
+  }
+
+  const agent = asRecord(record.agent)
+  if (!agent) {
+    return undefined
+  }
+
+  const agentId =
+    typeof agent.agent_id === 'string' && agent.agent_id.trim().length > 0
+      ? agent.agent_id.trim()
+      : typeof toolUse?.input.agent_id === 'string' &&
+          toolUse.input.agent_id.trim().length > 0
+        ? toolUse.input.agent_id.trim()
+        : 'unknown'
+  const status =
+    typeof agent.status === 'string' && agent.status.trim().length > 0
+      ? agent.status.trim()
+      : 'updated'
+  const preview = formatAgentPreview(record)
+  const detail =
+    preview && preview !== status
+      ? preview.startsWith(`${status}; `)
+        ? preview.slice(status.length + 2)
+        : preview
+      : undefined
+
+  return detail
+    ? `Subagent ${agentId} ${status} (${detail})`
+    : `Subagent ${agentId} ${status}`
+}
+
 function getToolResultPayload(output: unknown): {
   summary?: string
   error?: string
@@ -510,6 +695,8 @@ function getToolResultPreview(
 
   return (
     formatPersistedToolResultPreview(record) ??
+    (toolName === 'Agent' ? formatAgentPreview(record) : undefined) ??
+    (toolName === 'Skill' ? formatSkillPreview(record) : undefined) ??
     formatReadPreview(record) ??
     formatBashPreview(record) ??
     (toolName === 'Edit' ? formatEditPreview(record) : undefined) ??
@@ -522,6 +709,27 @@ function getToolResultPreview(
       ? truncateInlineText(firstNonEmptyLine(record.content) ?? record.content)
       : undefined)
   )
+}
+
+function formatSkillPreview(record: Record<string, unknown>): string | undefined {
+  const skill = asRecord(record.skill)
+  if (!skill) {
+    return undefined
+  }
+
+  const source =
+    typeof skill.source === 'string' && skill.source.trim().length > 0
+      ? skill.source.trim()
+      : undefined
+  const description =
+    typeof skill.description === 'string' && skill.description.trim().length > 0
+      ? truncateInlineText(skill.description.trim())
+      : undefined
+
+  if (source && description) {
+    return `${source}; ${description}`
+  }
+  return source ?? description
 }
 
 function formatReasoningBlock(block: ContentBlock): string | null {
@@ -550,6 +758,24 @@ export function formatReasoningDeltaPrefix(
 export function formatProgressThinkingLine(summary?: string): string {
   const normalized = summary?.trim()
   return normalized && normalized.length > 0 ? normalized : 'Working on it...'
+}
+
+function formatProgressAssistantLine(text: string): string {
+  return `Assistant: ${truncateInlineText(text, 160)}`
+}
+
+export function formatProgressAssistantOutputLines(text: string): string[] {
+  const normalized = text.trimEnd()
+  if (normalized.length === 0) {
+    return []
+  }
+
+  const lines = normalized.split(/\r?\n/)
+  if (lines.length === 1) {
+    return [`Assistant: ${lines[0]}`]
+  }
+
+  return ['Assistant:', normalized]
 }
 
 function formatContentBlock(block: ContentBlock): string | null {
@@ -586,14 +812,27 @@ export function formatProgressToolUseLine(toolUse: {
   return formatToolUseText(toolUse)
 }
 
+export function formatProgressToolUseDisplayLine(toolUse: {
+  name: string
+  input: Record<string, unknown>
+}): string {
+  return `Tool: ${formatProgressToolUseLine(toolUse)}`
+}
+
 export function formatProgressToolResultLine(
   toolUse: ToolUseSummary | undefined,
   output: unknown,
 ): string {
   const toolName = toolUse?.name
+  if (toolName === 'Agent') {
+    const agentResultLine = formatAgentResultLine(toolUse, output)
+    if (agentResultLine) {
+      return agentResultLine
+    }
+  }
   const { summary, error } = getToolResultPayload(output)
   const action = toolUse
-    ? formatToolUseText(toolUse)
+    ? formatToolResultActionText(toolUse)
     : summary ?? (toolName ? `${toolName}` : 'Tool')
   if (error) {
     return `${action} failed: ${error}`
@@ -605,6 +844,13 @@ export function formatProgressToolResultLine(
   }
 
   return action
+}
+
+export function formatProgressToolResultDisplayLine(
+  toolUse: ToolUseSummary | undefined,
+  output: unknown,
+): string {
+  return `Tool result: ${formatProgressToolResultLine(toolUse, output)}`
 }
 
 export function formatVerboseToolResultLine(
@@ -808,6 +1054,62 @@ export function formatProgressReasoningLines(
   }
 
   return lines
+}
+
+export function formatProgressAssistantLines(
+  message: Pick<Message, 'role' | 'content'>,
+): string[] {
+  if (message.role !== 'assistant') {
+    return []
+  }
+
+  const hasToolUse = message.content.some(block => block.type === 'tool_use')
+  const textLines = message.content
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => firstNonEmptyLine(block.text))
+    .filter((line): line is string => Boolean(line && line.trim().length > 0))
+
+  if (hasToolUse && textLines.length > 0) {
+    return textLines.map(formatProgressAssistantLine)
+  }
+
+  const reasoningLines = formatProgressReasoningLines(message)
+  if (reasoningLines.length > 0) {
+    return reasoningLines.map(formatProgressAssistantLine)
+  }
+
+  return []
+}
+
+export function collectProgressAssistantTexts(
+  message: Pick<Message, 'role' | 'content'>,
+): string[] {
+  if (message.role !== 'assistant') {
+    return []
+  }
+
+  const hasToolUse = message.content.some(block => block.type === 'tool_use')
+  const textLines = message.content
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => normalizeProgressAssistantText(block.text))
+    .filter((line): line is string => Boolean(line))
+
+  if (hasToolUse && textLines.length > 0) {
+    return textLines
+  }
+
+  const reasoningLines = message.content
+    .filter(
+      (block): block is Extract<ContentBlock, { type: 'reasoning' }> =>
+        block.type === 'reasoning',
+    )
+    .flatMap(block =>
+      block.summary
+        .map(normalizeProgressAssistantText)
+        .filter((line): line is string => Boolean(line)),
+    )
+
+  return reasoningLines
 }
 
 export function getVerboseReasoningBlocks(

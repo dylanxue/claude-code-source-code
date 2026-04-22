@@ -5,6 +5,7 @@ import {
   createImageBlock,
   createMessage,
   createToolResultMessage,
+  createToolUseMessage,
 } from '../../src/types/message.js'
 
 test('formatTranscript surfaces plan-mode tool result summaries', () => {
@@ -134,12 +135,71 @@ test('formatTranscript renders generic tool use and results with natural phrasin
     },
   )
 
-  assert.ok(lines.some(line => line === 'Read /tmp/example.ts:1-2'))
+  assert.ok(lines.some(line => line === 'Reading /tmp/example.ts:1-2'))
   assert.ok(
     lines.some(
       line =>
         line ===
         'Read /tmp/example.ts:1-2 (lines 1-2 of 20; starts with "export const value = 1")',
+    ),
+  )
+})
+
+test('formatTranscript renders subagent wait results clearly', () => {
+  const toolUse = createToolUseMessage('assistant', 'Agent', {
+    action: 'wait',
+    agent_id: 'lesson-analyzer',
+  })
+  const toolUseId =
+    toolUse.content[0]?.type === 'tool_use' ? toolUse.content[0].id : ''
+
+  const lines = formatTranscript(
+    [
+      toolUse,
+      createToolResultMessage(
+        'user',
+        toolUseId,
+        {
+          action: 'wait',
+          agent: {
+            agent_id: 'lesson-analyzer',
+            status: 'completed',
+            task: 'Analyze lesson1',
+          },
+          result: {
+            summary: 'analyzed lesson1',
+            output_text: 'lesson1 matches requirements',
+          },
+        },
+        {
+          ok: true,
+          summary: 'Subagent lesson-analyzer completed: analyzed lesson1',
+          output: {
+            action: 'wait',
+            agent: {
+              agent_id: 'lesson-analyzer',
+              status: 'completed',
+              task: 'Analyze lesson1',
+            },
+            result: {
+              summary: 'analyzed lesson1',
+              output_text: 'lesson1 matches requirements',
+            },
+          },
+        },
+      ),
+    ],
+    {
+      includeThinking: false,
+    },
+  )
+
+  assert.ok(lines.some(line => line === 'Waiting for subagent lesson-analyzer'))
+  assert.ok(
+    lines.some(
+      line =>
+        line ===
+        'Subagent lesson-analyzer completed (analyzed lesson1)',
     ),
   )
 })

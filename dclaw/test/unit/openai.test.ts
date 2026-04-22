@@ -837,6 +837,71 @@ test('OpenAiLlmClient supports Responses API content_part streaming events', asy
   }
 })
 
+test('OpenAiLlmClient does not duplicate mixed Responses API text streaming events', async () => {
+  const deltas: string[] = []
+
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(
+      'event: response.content_part.added\ndata: {"type":"response.content_part.added","output_index":0,"part":{"type":"output_text","text":"hello "}}\n\n',
+    )
+    response.write(
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","output_index":0,"delta":"hello "}\n\n',
+    )
+    response.write(
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","output_index":0,"delta":"responses"}\n\n',
+    )
+    response.write(
+      'event: response.content_part.done\ndata: {"type":"response.content_part.done","output_index":0,"part":{"type":"output_text","text":"hello responses"}}\n\n',
+    )
+    response.write(
+      'event: response.output_text.done\ndata: {"type":"response.output_text.done","output_index":0,"text":"hello responses"}\n\n',
+    )
+    response.write(
+      'event: response.done\ndata: {"type":"response.done","response":{"output":[]}}\n\n',
+    )
+    response.write('data: [DONE]\n\n')
+    response.end()
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessageStream?.(
+      {
+        messages: [createTextMessage('user', 'hello')],
+      },
+      {
+        onTextDelta(text) {
+          deltas.push(text)
+        },
+      },
+    )
+
+    assert.ok(result)
+    assert.deepEqual(deltas, ['hello ', 'responses'])
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'hello responses' },
+    ])
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
 test('OpenAiLlmClient supports Responses API refusal streaming events', async () => {
   const deltas: string[] = []
 

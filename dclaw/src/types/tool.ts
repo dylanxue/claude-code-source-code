@@ -3,6 +3,8 @@ import type {
   Message,
   TextContentBlock,
 } from './message.js'
+import type { AgentToolRuntime } from '../agent/types.js'
+import type { SkillRegistry } from '../skills/registry.js'
 
 export type PermissionMode =
   | 'default'
@@ -69,11 +71,14 @@ export type ReadStateEntry = {
 
 export type ToolContext = {
   sessionId?: string
+  activeTurnId?: string
   planFilePath?: string
   cwd: string
   availableTools: string[]
   permissionMode: PermissionMode
   readState: Map<string, ReadStateEntry>
+  agentRuntime?: AgentToolRuntime
+  skillRegistry?: SkillRegistry
   setPermissionMode?: (permissionMode: PermissionMode) => void
   setPlanFilePath?: (planFilePath: string | undefined) => void
   askUserQuestions?: (

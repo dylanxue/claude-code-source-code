@@ -1,4 +1,8 @@
 import { readdir } from 'node:fs/promises'
+import {
+  loadSessionSubagentSummary,
+  type SessionSubagentSummary,
+} from '../agent/observability.js'
 import { formatToolUseLine } from '../cli/verboseEvents.js'
 import {
   getCompactBoundaryMessages,
@@ -32,6 +36,7 @@ export type SessionHistoryEntry = {
   compactBoundaryCount: number
   lastCompactBoundaryLabel?: string
   planningSummary: string[]
+  subagents: SessionSubagentSummary
 }
 
 function truncate(value: string, maxLength: number = 120): string {
@@ -200,6 +205,7 @@ export async function listSessionHistory(
         getPersistedToolResultInfo(messages)
       const board =
         meta.taskBoardId ? await loadTaskBoard(meta.taskBoardId, env) : null
+      const subagents = await loadSessionSubagentSummary(meta.sessionId, env)
       const lastUserMessage = [...messages]
         .reverse()
         .find(
@@ -232,6 +238,7 @@ export async function listSessionHistory(
           ? formatCompactBoundaryLabel(lastCompactBoundary)
           : undefined,
         planningSummary: board ? getTaskBoardObservationLines(board) : [],
+        subagents,
       }
     }),
   )

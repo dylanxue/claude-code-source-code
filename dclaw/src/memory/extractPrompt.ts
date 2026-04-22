@@ -28,7 +28,7 @@ const WHAT_NOT_TO_SAVE_SECTION = [
   '- Code patterns, conventions, architecture, file paths, or project structure. These are derivable from the current repository state.',
   '- Git history, recent changes, or who-changed-what. `git log` and `git blame` are the authoritative sources.',
   '- Debugging solutions or fix recipes. The fix belongs in the code and commit history, not in memory.',
-  '- Anything already documented in `CLAUDE.md` files.',
+  '- Anything already documented in `DCLAW.md` files.',
   '- Ephemeral task details: in-progress work, temporary state, current conversation context, step lists, or todo-style progress tracking.',
   '- Full activity summaries, PR lists, or transcript-like recaps. Only a surprising or non-obvious durable fact is worth keeping.',
   '',

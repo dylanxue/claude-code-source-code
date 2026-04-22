@@ -1,5 +1,9 @@
 import type { LlmClient } from '../llm/types.js'
 import type { LlmProviderName } from '../llm/providerNames.js'
+import type { QueryEngineOptions } from '../core/queryEngine.js'
+import type { QueryTraceSink } from '../core/queryTrace.js'
+import type { DclawMdEntry } from '../prompt/dclawMd.js'
+import type { SkillRegistry } from '../skills/registry.js'
 import type { Message } from '../types/message.js'
 import type { PermissionMode, ToolContext } from '../types/tool.js'
 import type { ToolRegistry } from '../tools/registry.js'
@@ -26,11 +30,15 @@ export type AgentRecord = {
   model?: string
   permissionMode: PermissionMode
   availableTools: string[]
+  pendingPrompts: string[]
   maxTurns: number
   maxIterations: number
   createdAt: string
   updatedAt: string
   completedAt?: string
+  summary?: string
+  outputText?: string
+  tracePath?: string
   lastError?: string
 }
 
@@ -55,6 +63,7 @@ export type CreateAgentInput = {
   model?: string
   permissionMode: PermissionMode
   availableTools: string[]
+  pendingPrompts?: string[]
   maxTurns?: number
   maxIterations?: number
   env?: NodeJS.ProcessEnv
@@ -77,6 +86,18 @@ export type ParentAgentRuntime = {
   planFilePath?: string
   askUserQuestions?: ToolContext['askUserQuestions']
   toolRegistry: ToolRegistry
+  skillRegistry?: SkillRegistry
+  modelLimitsEnv?: NodeJS.ProcessEnv
+  systemPromptResolver?: QueryEngineOptions['systemPromptResolver']
+  dclawMdEntries?: DclawMdEntry[]
+  createQueryTraceSink?: (
+    sessionId: string,
+    tracePath?: string,
+  ) => Promise<QueryTraceSink | undefined>
+}
+
+export type AgentToolRuntime = ParentAgentRuntime & {
+  env?: NodeJS.ProcessEnv
 }
 
 export type CreateSubagentRuntimeInput = {

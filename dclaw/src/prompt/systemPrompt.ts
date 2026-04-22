@@ -1,7 +1,9 @@
 import {
-  getClaudeMdSection,
+  getCurrentDateSection,
   getContextSection,
   getDoingTasksSection,
+  getEnvironmentSection,
+  getGitStatusSection,
   getIntroSection,
   getMemorySection,
   getPlanModeSection,
@@ -14,9 +16,11 @@ export function buildSystemPrompt(context: PromptContext): string {
     getIntroSection(),
     getDoingTasksSection(),
     getContextSection(context),
+    getCurrentDateSection(context),
+    getEnvironmentSection(context),
+    getGitStatusSection(context),
     getPlanModeSection(context),
     getMemorySection(context),
-    getClaudeMdSection(context),
     getUserOverrideSection(context),
   ].filter((section): section is string => Boolean(section))
 

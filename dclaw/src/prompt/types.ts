@@ -1,7 +1,7 @@
-import type { ClaudeMdEntry } from './claudeMd.js'
 import type { PermissionMode } from '../types/tool.js'
 import type { PlanModeStatus } from '../tasks/types.js'
 import type { PromptMemoryContext } from '../memory/prompt.js'
+import type { PromptEnvironmentContext } from './environment.js'
 
 export type PromptMode = 'interactive' | 'print'
 
@@ -20,8 +20,10 @@ export type PromptContext = {
   model?: string
   mode: PromptMode
   permissionMode?: PermissionMode
+  currentDate?: PromptEnvironmentContext['currentDate']
+  environment?: Omit<PromptEnvironmentContext, 'currentDate' | 'gitStatus'>
+  gitStatus?: PromptEnvironmentContext['gitStatus']
   plan?: PlanPromptContext
   memory?: PromptMemoryContext
   userSystemPrompt?: string
-  claudeMdEntries: ClaudeMdEntry[]
 }

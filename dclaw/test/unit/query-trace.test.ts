@@ -221,6 +221,7 @@ test('query trace summarizes reasoning and thinking blocks', async () => {
           },
         ],
         toolUses: [],
+        toolResults: [],
       },
     )
     assert.equal(

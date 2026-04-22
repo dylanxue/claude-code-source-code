@@ -19,7 +19,7 @@ MVP 应该满足：
 - CLI
 - Query Engine
 - System Prompt 装配
-- `CLAUDE.md` 基础加载
+- `DCLAW.md` 基础加载
 - 基础工具集
 - permission mode
 - session / resume
@@ -89,7 +89,7 @@ MVP 只需要重点实现这些目录：
 
 - 默认 system prompt
 - runtime context 注入
-- `CLAUDE.md` 注入
+- `DCLAW.md` 注入
 - 自定义 system prompt 追加
 
 ### 4.4 Tools
@@ -147,7 +147,7 @@ MVP 模式建议：
 1. 能跑通一次完整的 tool-use 循环。
 2. `--print` 模式可独立运行。
 3. 支持恢复 session，并在恢复后继续执行新的 prompt。
-4. 能读取项目级 `CLAUDE.md`。
+4. 能读取项目级 `DCLAW.md`。
 5. 危险工具可被权限系统拦截。
 
 ## 7. 详细参考
