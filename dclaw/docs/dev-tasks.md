@@ -103,41 +103,51 @@
 
 - [x] 验证标准：模型可调用一个 builtin skill 和一个 project skill，并继续当前对话
 
-- [ ] `P0 / 阶段 12-3a`：补 `invoked_skills` 持续约束链路
+- [x] `P0 / 阶段 12-3a`：补 `invoked_skills` 持续约束链路
 
-- [ ] `Skill` 成功调用后，不只注入单轮 reminder；应补最小“已调用 skill 持续生效”链路
+- [x] `Skill` 成功调用后，不只注入单轮 reminder；应补最小“已调用 skill 持续生效”链路
 
-- [ ] 首版优先对齐 Claude Code 的 `invoked_skills` 语义：
+- [x] 首版优先对齐 Claude Code 的 `invoked_skills` 语义：
   - 已调用 skill 的内容可在后续 turn 继续恢复
   - `compact / resume` 后仍可恢复这类约束
-  - 不提前扩成完整 attachment / delta 协议族
+  - 不提前扩成 `skill_discovery / skill_listing` 或完整 attachment / delta 协议族
 
-- [ ] 验证标准：一个已调用 skill 在后续对话、`compact` 与 `resume` 后仍可观察且继续生效
+- [x] 验证标准：一个已调用 skill 在后续对话、`compact` 与 `resume` 后仍可观察且继续生效
 
-- [ ] `P1 / 阶段 12-3b`：补 `skill_discovery` 提示链路
+- [x] `阶段决策`：`dclaw` 不实现 `skill_discovery`
 
-- [ ] 只注入“当前任务相关的 skills”，不广播全量 skill 列表
+- [x] 原因：当前仓库没有 Claude Code 对应的可见 discovery 实现体，无法在“不额外加戏”的前提下复刻真实相关性发现链路
 
-- [ ] 在 `dclaw` 尚未具备真实动态相关性发现前，只允许做条件式、阶段式的最小 runtime reminder 近似
+- [x] 约束：不做“当前任务相关 skills 自动 surfaced”的近似版，不伪装成 Claude Code 已具备的 `skill_discovery`
 
-- [ ] 避免把动态 skill 列表长期塞进 system prompt 或 tool prompt
+- [x] 结论：阶段 12 只保留 `invoked_skills` 持续约束与最小 `skill_listing`；不引入 `skill_discovery`
 
-- [ ] 验证标准：当前相关 skills 可被受控 surfaced，且不会伪装成 Claude Code 已具备的完整 `skill_discovery` delta 机制
+- [x] 验证标准：文档、状态与后续实现不再把 `skill_discovery` 作为计划项或验收项
 
-- [ ] `P1 / 阶段 12-3c`：谨慎补最小 `skill_listing`
+- [x] `P2 / 阶段 12-3c`：补最小 `skill_listing`
 
-- [ ] 若进入 `skill_listing`，只做受控增量或首轮 listing，不做每轮全量广播
+- [x] `skill_listing` 在 Claude Code 中属于 availability listing，不是相关性推荐，也不是常驻 prompt 内容
 
-- [ ] 若后续同时存在 discovery 与 listing，优先级应为：
+- [x] 首版 `skill_listing` 只做受控增量或首轮 listing，不做每轮全量广播
+
+- [x] 首版保持这些约束：
+  - 仅在 runtime 实际暴露 `Skill` tool 时注入
+  - 按 skill 名去重，只补“之前没发过的新 skill”
+  - `/resume` 后不要重复广播 transcript 里已经出现过的 listing
+  - `compact` 后不要为了“恢复 listing”而再次注入
+  - 只作为 availability 提示，不承担“当前任务相关 skills”职责
+
+- [x] 当前优先级保持为：
   - `invoked_skills`：持续约束
-  - `skill_discovery`：当前任务相关 skills
   - `skill_listing`：当前可用 skills 的受控补充，不抢主提示位
+
+- [x] 当前 `dclaw` 只有 `builtin/project skills`，没有 Claude Code 那种 `MCP / plugin / remote skill` 扩展面；因此首版 `skill_listing` 保持最小，不额外引入独立 budget / formatting pipeline
 
 - [ ] 保持范围克制：
   - `v0.3` 不做 plugin-provided skills
   - `v0.3` 不做 skill marketplace / install flow
 
-- [ ] 验证标准：skill 的动态发现、持续约束与最小 listing 可观察，且不会造成 prompt 膨胀
+- [x] 验证标准：skill 的持续约束与最小 listing 可观察，且 duplication / resume-suppression / compact-no-replay 边界受控
 
 - [ ] `P0 / 文档与测试`：补齐 `v0.3` 的 subagent / skills 文档口径与最小回归护栏
 
@@ -149,8 +159,8 @@
 - [ ] 为阶段 12 增加单测：
   - [x] skill loader / registry
   - [x] `SkillTool` invoke path
-  - `invoked_skills` persistence / recovery boundary
-  - `skill_discovery` relevance / prompt-budget boundary
+  - [x] `invoked_skills` persistence / recovery boundary
+  - [x] `skill_listing` duplication / resume-suppression / compact-no-replay boundary
 
 - [ ] 验证标准：`subagent / skills` 两条主线均有最小单测护栏
 
@@ -660,7 +670,7 @@
 - 阶段 9：Plan / Task `completed`
 - 阶段 10：Memory `completed`
 - 阶段 11：多代理、Worktree 与协作执行 `in progress`
-- 阶段 12：MCP、Skills、Plugins 与 Remote Bridge `not started`
+- 阶段 12：MCP、Skills、Plugins 与 Remote Bridge `in progress`
 - 阶段 13：Coding 场景增强 `not started`
 
 ## 使用约定

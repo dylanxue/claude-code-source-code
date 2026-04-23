@@ -101,7 +101,7 @@ Claude Code 当前源码中，除 `plan / task` 外，真正明确走 reminder /
   - deferred tools 的“当前有哪些可加载工具”通过 `deferred_tools_delta` 注入
   - `ToolSearch` 自身 prompt 只说明“如何加载 deferred tools”，不重复内嵌整份动态列表
 - `Skill`
-  - “当前任务相关的 skills”与“已调用 skill 的持续约束”通过 `skill_discovery` / `invoked_skills` 注入
+  - 已调用 skill 的持续约束通过 `invoked_skills` 注入
   - `Skill` tool prompt 只负责说明调用规则，不负责承载每轮动态 skill 清单
 - `MCP`
   - MCP server 自带 instructions 在 delta 模式下通过 `mcp_instructions_delta` 注入
@@ -119,7 +119,7 @@ Claude Code 当前源码中，除 `plan / task` 外，真正明确走 reminder /
 - 如果 `dclaw` 还没有实现某项能力背后的真实动态机制，就不要伪装成 Claude Code 那样已经有完整 delta 注入
 - 例如：
   - 没有 deferred tools，就不要提前模拟 `ToolSearch` reminder
-  - 没有动态 skill discovery，就不要伪装成每轮都能自动 surfaced skill list
+  - `dclaw` 明确不做动态 `skill_discovery`，不要伪装成每轮都能自动 surfaced 当前相关 skills
   - 没有 agent pool delta，就不要实现一套名不副实的 agent listing attachment
 
 在这些能力尚未完整落地前，`dclaw` 可以做的最小近似是：

@@ -44,7 +44,7 @@ skill 的目标：
 - `Skill` tool prompt 负责说明“如何调用 skill”
 - “当前与任务相关的 skills”应属于动态发现信息
 - 这类动态发现结果后续应优先走 reminder / attachment，而不是每轮把完整 skill 列表硬塞进主 prompt
-- 在 `dclaw` 尚未实现动态 skill discovery 前，可以做阶段性方案提醒，但不能伪装成 Claude Code 已有的 `skill_discovery` / `invoked_skills` 完整机制
+- `dclaw` 明确不实现动态 `skill_discovery`；不要用阶段性方案去伪装 Claude Code 已有的 `skill_discovery` 机制，skills 侧只对齐 `invoked_skills`
 
 建议模块：
 

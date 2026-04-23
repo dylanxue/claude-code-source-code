@@ -46,6 +46,23 @@ test('buildSystemPrompt nudges complex work toward task tracking without globall
   assert.doesNotMatch(prompt, /# DCLAW\.md Instructions/)
 })
 
+test('buildSystemPrompt asks the model to follow the user language for reasoning and progress text', () => {
+  const prompt = buildSystemPrompt(
+    assemblePromptContext({
+      cwd: '/tmp/project',
+      provider: 'stub',
+      model: 'stub-model',
+      mode: 'interactive',
+      permissionMode: 'accept-edits',
+    }),
+  )
+
+  assert.match(prompt, /# Language/)
+  assert.match(prompt, /Use the same language as the user's latest message/)
+  assert.match(prompt, /reasoning\/thinking summaries/)
+  assert.match(prompt, /pre-tool progress updates/)
+})
+
 test('buildSystemPrompt includes current date, environment, and git status context', () => {
   const prompt = buildSystemPrompt(
     assemblePromptContext({

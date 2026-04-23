@@ -1,4 +1,5 @@
 import type { PermissionMode, ToolContext } from '../../src/types/tool.js'
+import { createInvokedSkillState } from '../../src/skills/state.js'
 
 export function createToolContext(
   overrides: Partial<ToolContext> = {},
@@ -10,6 +11,7 @@ export function createToolContext(
     availableTools: [],
     permissionMode: 'default' satisfies PermissionMode,
     readState: new Map(),
+    invokedSkills: createInvokedSkillState(),
     ...overrides,
   }
 

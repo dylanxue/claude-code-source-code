@@ -3,6 +3,8 @@ import {
   findLastCompactBoundaryIndex,
   isFreshlyCompactedSession,
 } from '../compact/boundaryMessage.js'
+import { buildPersistedInvokedSkillsReminderText } from '../skills/prompt.js'
+import type { InvokedSkill } from '../skills/state.js'
 import type { TaskBoard } from '../tasks/types.js'
 import { createMessage, createTextMessage, type Message } from '../types/message.js'
 import type { ReadStateEntry } from '../types/tool.js'
@@ -135,6 +137,18 @@ function createPostCompactReadFileMessages(
   return messages
 }
 
+function createPostCompactInvokedSkillMessage(
+  invokedSkills: InvokedSkill[],
+): Message | null {
+  if (invokedSkills.length === 0) {
+    return null
+  }
+
+  return wrapSystemReminder(
+    buildPersistedInvokedSkillsReminderText(invokedSkills),
+  )
+}
+
 function createPostCompactImageMessages(messages: Message[]): Message[] {
   const boundaryIndex = findLastCompactBoundaryIndex(messages)
   if (boundaryIndex <= 0) {
@@ -210,6 +224,7 @@ export async function createPostCompactAttachmentMessages(
   messages: Message[],
   board: TaskBoard | null | undefined,
   readState: PostCompactReadStateSnapshot | undefined,
+  invokedSkills: InvokedSkill[],
   availableTools: string[],
 ): Promise<Message[]> {
   if (!isFreshlyCompactedSession(messages)) {
@@ -217,6 +232,7 @@ export async function createPostCompactAttachmentMessages(
   }
 
   const attachmentMessages = createPostCompactReadFileMessages(readState)
+  const invokedSkillMessage = createPostCompactInvokedSkillMessage(invokedSkills)
   const imageMessages = createPostCompactImageMessages(messages)
   const planFileMessage = board
     ? await createPostCompactPlanFileMessage(board)
@@ -228,6 +244,7 @@ export async function createPostCompactAttachmentMessages(
 
   return [
     ...attachmentMessages,
+    ...(invokedSkillMessage ? [invokedSkillMessage] : []),
     ...imageMessages,
     ...(planFileMessage ? [planFileMessage] : []),
     ...(taskReminderMessage ? [taskReminderMessage] : []),

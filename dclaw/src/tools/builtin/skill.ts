@@ -1,5 +1,6 @@
 import { createTextMessage } from '../../types/message.js'
 import type { ToolResult } from '../../types/tool.js'
+import { recordInvokedSkill } from '../../skills/state.js'
 import { buildInvokedSkillReminderText } from '../../skills/prompt.js'
 import type { LoadedSkill } from '../../skills/types.js'
 import { buildTool, type Tool } from '../types.js'
@@ -126,6 +127,8 @@ export const skillTool: Tool<SkillToolInput, SkillToolOutput> = buildTool({
         `Unknown skill: ${trimOrUndefined(input.skill_name) ?? '<empty>'}`,
       )
     }
+
+    recordInvokedSkill(context.invokedSkills, skill)
 
     return {
       ok: true,

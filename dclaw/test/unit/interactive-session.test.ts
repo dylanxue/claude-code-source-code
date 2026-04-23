@@ -444,6 +444,243 @@ test('runInteractiveSessionPrompt prefers assistant text over reasoning when exp
   assert.match(text, /Tool: Reading \/tmp\/example\.txt/)
 })
 
+test('runInteractiveSessionPrompt preserves full assistant text before tool use', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-full-text-'))
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    model: 'stub-model',
+    env,
+  })
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const progressText = [
+    '现在我来检查一下 invoked_skills 附件，',
+    '它在 compact 期间保留技能，',
+    '这样 resume 时也能看到完整上下文。',
+  ].join('\n')
+
+  const engine = {
+    messages: [] as ReturnType<typeof createTextMessage>[],
+    async submitUserPrompt() {
+      throw new Error('submitUserPrompt should not be used in default mode')
+    },
+    async submitUserPromptWithHandlers(
+      _prompt: string,
+      handlers?: {
+        onAssistantMessage?: (message: {
+          iteration: number
+          id: string
+          role: 'assistant'
+          content: Array<
+            | {
+                type: 'text'
+                text: string
+              }
+            | {
+                type: 'tool_use'
+                id: string
+                name: string
+                input: Record<string, unknown>
+              }
+          >
+        }) => void
+        onToolUse?: (toolUse: {
+          iteration: number
+          id: string
+          name: string
+          input: Record<string, unknown>
+        }) => void
+      },
+    ) {
+      handlers?.onAssistantMessage?.({
+        iteration: 1,
+        id: 'msg_tool_preface',
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: progressText,
+          },
+          {
+            type: 'tool_use',
+            id: 'tool_read_1',
+            name: 'Read',
+            input: { file_path: '/tmp/example.txt' },
+          },
+        ],
+      })
+      handlers?.onToolUse?.({
+        iteration: 1,
+        id: 'tool_read_1',
+        name: 'Read',
+        input: { file_path: '/tmp/example.txt' },
+      })
+
+      return {
+        appendedMessages: [
+          createTextMessage('user', 'continue'),
+          createTextMessage(
+            'assistant',
+            '检查完成。',
+          ),
+        ],
+        outputText: '检查完成。',
+      }
+    },
+    getSessionId() {
+      return session.sessionId
+    },
+    getMessages() {
+      return this.messages
+    },
+  }
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    await runInteractiveSessionPrompt({
+      engine: engine as never,
+      sessionId: session.sessionId,
+      prompt: 'continue',
+      stream: false,
+      verbose: false,
+      env,
+    })
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(
+    text,
+    /Assistant: 现在我来检查一下 invoked_skills 附件， 它在 compact 期间保留技能， 这样 resume 时也能看到完整上下文。\nTool: Reading \/tmp\/example\.txt/,
+  )
+})
+
+test('runInteractiveSessionPrompt falls back to thinking when a tool call has no visible text', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-thinking-'))
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    model: 'stub-model',
+    env,
+  })
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  const engine = {
+    messages: [] as ReturnType<typeof createTextMessage>[],
+    async submitUserPrompt() {
+      throw new Error('submitUserPrompt should not be used in default mode')
+    },
+    async submitUserPromptWithHandlers(
+      _prompt: string,
+      handlers?: {
+        onAssistantMessage?: (message: {
+          iteration: number
+          id: string
+          role: 'assistant'
+          content: Array<
+            | {
+                type: 'thinking'
+                thinking: string
+              }
+            | {
+                type: 'tool_use'
+                id: string
+                name: string
+                input: Record<string, unknown>
+              }
+          >
+        }) => void
+        onToolUse?: (toolUse: {
+          iteration: number
+          id: string
+          name: string
+          input: Record<string, unknown>
+        }) => void
+      },
+    ) {
+      handlers?.onAssistantMessage?.({
+        iteration: 1,
+        id: 'msg_thinking',
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'I will inspect the current skill implementation first.',
+          },
+          {
+            type: 'tool_use',
+            id: 'tool_read_1',
+            name: 'Read',
+            input: { file_path: '/tmp/example.txt' },
+          },
+        ],
+      })
+      handlers?.onToolUse?.({
+        iteration: 1,
+        id: 'tool_read_1',
+        name: 'Read',
+        input: { file_path: '/tmp/example.txt' },
+      })
+
+      return {
+        appendedMessages: [
+          createTextMessage('user', 'inspect the file'),
+          createTextMessage('assistant', 'Final answer'),
+        ],
+        outputText: 'Final answer',
+      }
+    },
+    getSessionId() {
+      return session.sessionId
+    },
+    getMessages() {
+      return this.messages
+    },
+  }
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    await runInteractiveSessionPrompt({
+      engine: engine as never,
+      sessionId: session.sessionId,
+      prompt: 'inspect the file',
+      stream: false,
+      verbose: false,
+      env,
+    })
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(
+    text,
+    /Assistant: I will inspect the current skill implementation first\./,
+  )
+  assert.match(text, /Tool: Reading \/tmp\/example\.txt/)
+})
+
 test('runInteractiveSessionPrompt persists partial turn messages before rethrowing errors', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-error-'))
   const env = { ...process.env, HOME: homeDir }

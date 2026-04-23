@@ -48,6 +48,18 @@ import {
 import { createToolResultAttachmentMessages } from './toolResultAttachments.js'
 import { createTaskToolReminderMessage } from './taskToolReminder.js'
 import type { ReadStateEntry } from '../types/tool.js'
+import {
+  createInvokedSkillState,
+  listInvokedSkills,
+  replaceInvokedSkills,
+  restoreInvokedSkillsFromMessages,
+  type InvokedSkill,
+} from '../skills/state.js'
+import { getLastCompactBoundary, isFreshlyCompactedSession } from '../compact/boundaryMessage.js'
+import {
+  buildSkillListingReminderText,
+  parseSkillListingReminderText,
+} from '../skills/prompt.js'
 
 export type QueryEngineOptions = {
   client: LlmClient
@@ -117,6 +129,16 @@ export class QueryEngine {
     boundaryId: string
     entries: PostCompactReadStateSnapshot
   }
+  private postCompactInvokedSkills?: {
+    boundaryId: string
+    skills: InvokedSkill[]
+  }
+  private sentSkillNames = new Set<string>()
+  private suppressNextSkillListing = false
+  private postCompactSentSkillNames?: {
+    boundaryId: string
+    names: string[]
+  }
 
   constructor(options: QueryEngineOptions) {
     this.client = options.client
@@ -141,6 +163,14 @@ export class QueryEngine {
     }
     this.maxIterations = options.maxIterations ?? DEFAULT_QUERY_MAX_ITERATIONS
     this.messages = [...(options.initialMessages ?? [])]
+    this.toolContext.invokedSkills ??= createInvokedSkillState()
+    if (this.messages.length > 0) {
+      restoreInvokedSkillsFromMessages(
+        this.messages,
+        this.toolContext.invokedSkills,
+      )
+    }
+    this.restoreSkillListingStateFromMessages(this.messages)
     this.queryTraceSink = options.queryTraceSink
     this.dclawMdEntries = [...(options.dclawMdEntries ?? [])]
   }
@@ -159,6 +189,29 @@ export class QueryEngine {
   resetMessages(messages: Message[] = []): void {
     this.messages.splice(0, this.messages.length, ...messages)
     this.toolContext.readState.clear()
+    const compactBoundary = getLastCompactBoundary(messages)
+    if (
+      compactBoundary &&
+      isFreshlyCompactedSession(messages) &&
+      this.postCompactInvokedSkills?.boundaryId === compactBoundary.boundaryId
+    ) {
+      replaceInvokedSkills(
+        this.toolContext.invokedSkills,
+        this.postCompactInvokedSkills.skills,
+      )
+      this.sentSkillNames = new Set(
+        this.postCompactSentSkillNames?.boundaryId === compactBoundary.boundaryId
+          ? this.postCompactSentSkillNames.names
+          : [],
+      )
+      this.suppressNextSkillListing = false
+      return
+    }
+
+    this.postCompactInvokedSkills = undefined
+    this.postCompactSentSkillNames = undefined
+    restoreInvokedSkillsFromMessages(messages, this.toolContext.invokedSkills)
+    this.restoreSkillListingStateFromMessages(messages)
   }
 
   setModel(model: string | undefined): void {
@@ -208,7 +261,83 @@ export class QueryEngine {
         this.toolContext.readState as Map<string, ReadStateEntry>,
       ),
     }
+    this.postCompactInvokedSkills = {
+      boundaryId,
+      skills: listInvokedSkills(this.toolContext.invokedSkills),
+    }
+    this.postCompactSentSkillNames = {
+      boundaryId,
+      names: [...this.sentSkillNames],
+    }
     this.toolContext.readState.clear()
+  }
+
+  private restoreSkillListingStateFromMessages(messages: Message[]): void {
+    const sent = new Set<string>()
+    let sawListing = false
+
+    for (const message of messages) {
+      const listing = parseSkillListingReminderText(
+        message.content
+          .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+          .map(block => block.text)
+          .join('\n'),
+      )
+      if (!listing) {
+        continue
+      }
+
+      sawListing = true
+      for (const skill of listing) {
+        sent.add(skill.name)
+      }
+    }
+
+    this.sentSkillNames = sent
+    this.suppressNextSkillListing = sawListing
+  }
+
+  private createSkillListingMessages(): Message[] {
+    if (
+      !this.toolRegistry.list().some(tool => tool.name === 'Skill') ||
+      !this.toolContext.availableTools.includes('Skill') ||
+      !this.toolContext.skillRegistry
+    ) {
+      return []
+    }
+
+    const currentSkills = [...this.toolContext.skillRegistry.list()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    )
+    if (currentSkills.length === 0) {
+      return []
+    }
+
+    if (this.suppressNextSkillListing) {
+      this.suppressNextSkillListing = false
+      currentSkills.forEach(skill => {
+        this.sentSkillNames.add(skill.name)
+      })
+      return []
+    }
+
+    const newSkills = currentSkills.filter(
+      skill => !this.sentSkillNames.has(skill.name),
+    )
+    if (newSkills.length === 0) {
+      return []
+    }
+
+    newSkills.forEach(skill => {
+      this.sentSkillNames.add(skill.name)
+    })
+
+    return [
+      createTextMessage(
+        'user',
+        `<system-reminder>\n${buildSkillListingReminderText(newSkills)}\n</system-reminder>`,
+      ),
+    ]
   }
 
   private async getResolvedSystemPrompt(
@@ -257,10 +386,12 @@ export class QueryEngine {
     const allMessages = baseMessages
     const messages = visibleMessages
     const recoveryReadState = this.postCompactReadState?.entries
+    const invokedSkills = listInvokedSkills(this.toolContext.invokedSkills)
     const postCompactAttachments = await createPostCompactAttachmentMessages(
       allMessages,
       board,
       recoveryReadState,
+      invokedSkills,
       this.toolContext.availableTools,
     )
     transientMessages.push(...postCompactAttachments)
@@ -425,8 +556,9 @@ export class QueryEngine {
       getModelVisibleMessages(persistedMessagesBeforeUser),
     )
     const userMessage = createTextMessage('user', prompt)
-    this.messages.push(userMessage)
-    const baseTurnMessages = [...priorMessages, userMessage]
+    const skillListingMessages = this.createSkillListingMessages()
+    this.messages.push(userMessage, ...skillListingMessages)
+    const baseTurnMessages = [...priorMessages, userMessage, ...skillListingMessages]
     const persistedMessagesWithUser = this.getMessages()
     const modelLimits = this.getResolvedModelLimits()
     const toolResultBudgetOptions = this.getResolvedToolResultBudgetOptions()
@@ -506,7 +638,12 @@ export class QueryEngine {
       userMessage,
       assistantMessage: response.assistantMessage,
       messages: this.getMessages(),
-      appendedMessages: [userMessage, ...response.addedMessages, ...hookMessages],
+      appendedMessages: [
+        userMessage,
+        ...skillListingMessages,
+        ...response.addedMessages,
+        ...hookMessages,
+      ],
       outputText: response.outputText,
       sessionId: this.getSessionId(),
       ...(autoCompact ? { autoCompact } : {}),

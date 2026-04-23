@@ -6,6 +6,7 @@ import test from 'node:test'
 import { executeSingleTurn } from '../../src/core/queryLoop.js'
 import { loadSkills } from '../../src/skills/loader.js'
 import { createSkillRegistry } from '../../src/skills/registry.js'
+import { listInvokedSkills } from '../../src/skills/state.js'
 import type {
   CreateMessageRequest,
   CreateMessageResponse,
@@ -142,6 +143,20 @@ test('Skill tool validates and applies a loaded skill in the current context', a
     /Apply the following skill while continuing the current task/,
   )
   assert.match(getTextContent(result.newMessages?.[0]!), /name: review/)
+  assert.deepEqual(
+    listInvokedSkills(context.invokedSkills).map(skill => ({
+      name: skill.name,
+      source: skill.source,
+      path: skill.path,
+    })),
+    [
+      {
+        name: 'review',
+        source: 'builtin',
+        path: '/tmp/review.md',
+      },
+    ],
+  )
 })
 
 test('query loop can invoke a builtin skill and continue the conversation', async () => {

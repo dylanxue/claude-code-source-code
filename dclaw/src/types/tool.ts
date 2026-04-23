@@ -5,6 +5,7 @@ import type {
 } from './message.js'
 import type { AgentToolRuntime } from '../agent/types.js'
 import type { SkillRegistry } from '../skills/registry.js'
+import type { InvokedSkillState } from '../skills/state.js'
 
 export type PermissionMode =
   | 'default'
@@ -79,6 +80,7 @@ export type ToolContext = {
   readState: Map<string, ReadStateEntry>
   agentRuntime?: AgentToolRuntime
   skillRegistry?: SkillRegistry
+  invokedSkills?: InvokedSkillState
   setPermissionMode?: (permissionMode: PermissionMode) => void
   setPlanFilePath?: (planFilePath: string | undefined) => void
   askUserQuestions?: (

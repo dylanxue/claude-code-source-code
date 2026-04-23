@@ -18,6 +18,14 @@ export function getDoingTasksSection(): string {
   ].join('\n')
 }
 
+export function getLanguageSection(): string {
+  return [
+    '# Language',
+    "- Use the same language as the user's latest message unless they explicitly ask for another language.",
+    '- Apply this to visible assistant responses, brief pre-tool progress updates, and any reasoning/thinking summaries when those are exposed.',
+  ].join('\n')
+}
+
 export function getContextSection(context: PromptContext): string {
   return [
     '# Runtime Context',

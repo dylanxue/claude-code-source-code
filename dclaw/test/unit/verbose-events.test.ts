@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  formatProgressAssistantLines,
   formatProgressToolResultLine,
   formatProgressToolUseLine,
   formatVerboseLines,
@@ -64,6 +65,32 @@ test('formatProgressToolResultLine includes a concise result preview', () => {
     ),
     'Read /tmp/example.ts (lines 1-2 of 20; starts with "export const value = 1")',
   )
+})
+
+test('formatProgressAssistantLines preserves full assistant explanations before tool use', () => {
+  const lines = formatProgressAssistantLines({
+    role: 'assistant',
+    content: [
+      {
+        type: 'text',
+        text: [
+          '现在我来检查一下 invoked_skills 附件，',
+          '它在 compact 期间保留技能，',
+          '这样 resume 时也能看到完整上下文。',
+        ].join('\n'),
+      },
+      {
+        type: 'tool_use',
+        id: 'tool_read_1',
+        name: 'Read',
+        input: { file_path: '/tmp/example.txt' },
+      },
+    ],
+  })
+
+  assert.deepEqual(lines, [
+    'Assistant: 现在我来检查一下 invoked_skills 附件， 它在 compact 期间保留技能， 这样 resume 时也能看到完整上下文。',
+  ])
 })
 
 test('formatVerboseLines includes tool result previews after tool calls', () => {

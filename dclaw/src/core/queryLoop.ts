@@ -34,6 +34,9 @@ import {
 import { QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
 
+const APPROX_ASCII_CHARS_PER_TOKEN = 4
+const STREAM_OUTPUT_GUARD_RATIO = 0.95
+
 export type QueryLoopRequest = {
   client: LlmClient
   model?: string
@@ -115,6 +118,39 @@ export type QueryLoopResult = {
 }
 
 export const DEFAULT_QUERY_MAX_ITERATIONS = 128
+
+function countAsciiChars(text: string): number {
+  let asciiChars = 0
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) <= 0x7f) {
+      asciiChars += 1
+    }
+  }
+  return asciiChars
+}
+
+function getApproxOutputTokens(
+  asciiChars: number,
+  nonAsciiChars: number,
+): number {
+  return Math.ceil(asciiChars / APPROX_ASCII_CHARS_PER_TOKEN) + nonAsciiChars
+}
+
+function getStreamOutputGuardThresholdTokens(
+  modelLimits: ModelLimits | undefined,
+): number | undefined {
+  if (!modelLimits || modelLimits.maxOutputTokens < 1) {
+    return undefined
+  }
+
+  return Math.max(
+    1,
+    Math.min(
+      modelLimits.maxOutputTokens,
+      Math.floor(modelLimits.maxOutputTokens * STREAM_OUTPUT_GUARD_RATIO),
+    ),
+  )
+}
 
 async function resolveIterationState(
   request: QueryLoopRequest,
@@ -503,6 +539,8 @@ export async function executeSingleTurn(
       )
       let streamedTextChars = 0
       let streamedReasoningChars = 0
+      let streamedAsciiChars = 0
+      let streamedNonAsciiChars = 0
       let lastTextDelta: string | undefined
       let lastReasoningDelta:
         | {
@@ -510,6 +548,38 @@ export async function executeSingleTurn(
             text: string
           }
         | undefined
+      const streamOutputGuardThresholdTokens =
+        getStreamOutputGuardThresholdTokens(request.modelLimits)
+      const throwIfStreamOutputGuardExceeded = (): void => {
+        if (streamOutputGuardThresholdTokens === undefined) {
+          return
+        }
+
+        const approxOutputTokens = getApproxOutputTokens(
+          streamedAsciiChars,
+          streamedNonAsciiChars,
+        )
+        if (approxOutputTokens < streamOutputGuardThresholdTokens) {
+          return
+        }
+
+        recordTrace(
+          request.queryTraceSink,
+          'llm.output_guard.triggered',
+          {
+            approxOutputTokens,
+            thresholdTokens: streamOutputGuardThresholdTokens,
+            maxOutputTokens: request.modelLimits?.maxOutputTokens,
+            streamedTextChars,
+            streamedReasoningChars,
+          },
+          iteration,
+        )
+
+        throw new Error(
+          `Aborted streaming response after estimated output reached ${approxOutputTokens} tokens (guard threshold ${streamOutputGuardThresholdTokens}/${request.modelLimits?.maxOutputTokens ?? 'unknown'}).`,
+        )
+      }
       recordTrace(
         request.queryTraceSink,
         'llm.request',
@@ -539,6 +609,9 @@ export async function executeSingleTurn(
                 {
                   onTextDelta: text => {
                     streamedTextChars += text.length
+                    const asciiChars = countAsciiChars(text)
+                    streamedAsciiChars += asciiChars
+                    streamedNonAsciiChars += text.length - asciiChars
                     lastTextDelta = text
                     recordTrace(
                       request.queryTraceSink,
@@ -547,9 +620,13 @@ export async function executeSingleTurn(
                       iteration,
                     )
                     request.streamHandlers?.onTextDelta?.(text)
+                    throwIfStreamOutputGuardExceeded()
                   },
                   onReasoningDelta: delta => {
                     streamedReasoningChars += delta.text.length
+                    const asciiChars = countAsciiChars(delta.text)
+                    streamedAsciiChars += asciiChars
+                    streamedNonAsciiChars += delta.text.length - asciiChars
                     lastReasoningDelta = delta
                     recordTrace(
                       request.queryTraceSink,
@@ -565,6 +642,7 @@ export async function executeSingleTurn(
                       kind: delta.kind,
                       text: delta.text,
                     })
+                    throwIfStreamOutputGuardExceeded()
                   },
                 },
               )

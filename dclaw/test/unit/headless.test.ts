@@ -78,6 +78,7 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
   const address = server.address()
 
   const originalEnv = {
+    DCLAW_HOME: process.env.DCLAW_HOME,
     DCLAW_OPENAI_API_KEY: process.env.DCLAW_OPENAI_API_KEY,
     DCLAW_OPENAI_BASE_URL: process.env.DCLAW_OPENAI_BASE_URL,
     DCLAW_OPENAI_API_STYLE: process.env.DCLAW_OPENAI_API_STYLE,
@@ -90,6 +91,7 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
       throw new Error('Expected IPv4 server address')
     }
 
+    process.env.DCLAW_HOME = join(dir, '.dclaw-home')
     process.env.DCLAW_OPENAI_API_KEY = 'test-key'
     process.env.DCLAW_OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`
     process.env.DCLAW_OPENAI_API_STYLE = 'responses'
@@ -116,6 +118,7 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
     })
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
+    process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
     process.env.DCLAW_OPENAI_API_KEY = originalEnv.DCLAW_OPENAI_API_KEY
     process.env.DCLAW_OPENAI_BASE_URL = originalEnv.DCLAW_OPENAI_BASE_URL
     process.env.DCLAW_OPENAI_API_STYLE = originalEnv.DCLAW_OPENAI_API_STYLE
@@ -218,6 +221,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
   const address = server.address()
 
   const originalEnv = {
+    DCLAW_HOME: process.env.DCLAW_HOME,
     DCLAW_OPENAI_API_KEY: process.env.DCLAW_OPENAI_API_KEY,
     DCLAW_OPENAI_BASE_URL: process.env.DCLAW_OPENAI_BASE_URL,
     DCLAW_OPENAI_API_STYLE: process.env.DCLAW_OPENAI_API_STYLE,
@@ -230,6 +234,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
       throw new Error('Expected IPv4 server address')
     }
 
+    process.env.DCLAW_HOME = join(dir, '.dclaw-home')
     process.env.DCLAW_OPENAI_API_KEY = 'test-key'
     process.env.DCLAW_OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`
     process.env.DCLAW_OPENAI_API_STYLE = 'responses'
@@ -256,6 +261,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
     })
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
+    process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
     process.env.DCLAW_OPENAI_API_KEY = originalEnv.DCLAW_OPENAI_API_KEY
     process.env.DCLAW_OPENAI_BASE_URL = originalEnv.DCLAW_OPENAI_BASE_URL
     process.env.DCLAW_OPENAI_API_STYLE = originalEnv.DCLAW_OPENAI_API_STYLE
@@ -292,7 +298,6 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
     stream: true,
     outputFormat: 'sse',
     sessionId: (events[0]?.data as { sessionId: string }).sessionId,
-    queryTracePath: (events[0]?.data as { queryTracePath: string }).queryTracePath,
   })
 
   assert.deepEqual(events[2]?.data, {
@@ -369,6 +374,7 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
   const address = server.address()
 
   const originalEnv = {
+    DCLAW_HOME: process.env.DCLAW_HOME,
     DCLAW_ANTHROPIC_API_KEY: process.env.DCLAW_ANTHROPIC_API_KEY,
     DCLAW_ANTHROPIC_BASE_URL: process.env.DCLAW_ANTHROPIC_BASE_URL,
     DCLAW_ANTHROPIC_MODEL: process.env.DCLAW_ANTHROPIC_MODEL,
@@ -381,6 +387,7 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
       throw new Error('Expected IPv4 server address')
     }
 
+    process.env.DCLAW_HOME = join(dir, '.dclaw-home')
     process.env.DCLAW_ANTHROPIC_API_KEY = 'test-key'
     process.env.DCLAW_ANTHROPIC_BASE_URL = `http://127.0.0.1:${address.port}`
     process.env.DCLAW_ANTHROPIC_MODEL = 'claude-test'
@@ -407,6 +414,7 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
     })
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
+    process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
     process.env.DCLAW_ANTHROPIC_API_KEY = originalEnv.DCLAW_ANTHROPIC_API_KEY
     process.env.DCLAW_ANTHROPIC_BASE_URL = originalEnv.DCLAW_ANTHROPIC_BASE_URL
     process.env.DCLAW_ANTHROPIC_MODEL = originalEnv.DCLAW_ANTHROPIC_MODEL
@@ -463,6 +471,7 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
   const address = server.address()
 
   const originalEnv = {
+    DCLAW_HOME: process.env.DCLAW_HOME,
     DCLAW_ANTHROPIC_API_KEY: process.env.DCLAW_ANTHROPIC_API_KEY,
     DCLAW_ANTHROPIC_BASE_URL: process.env.DCLAW_ANTHROPIC_BASE_URL,
     DCLAW_ANTHROPIC_MODEL: process.env.DCLAW_ANTHROPIC_MODEL,
@@ -475,6 +484,7 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
       throw new Error('Expected IPv4 server address')
     }
 
+    process.env.DCLAW_HOME = join(dir, '.dclaw-home')
     process.env.DCLAW_ANTHROPIC_API_KEY = 'test-key'
     process.env.DCLAW_ANTHROPIC_BASE_URL = `http://127.0.0.1:${address.port}`
     process.env.DCLAW_ANTHROPIC_MODEL = 'claude-test'
@@ -508,6 +518,7 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
     )
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
+    process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
     process.env.DCLAW_ANTHROPIC_API_KEY = originalEnv.DCLAW_ANTHROPIC_API_KEY
     process.env.DCLAW_ANTHROPIC_BASE_URL = originalEnv.DCLAW_ANTHROPIC_BASE_URL
     process.env.DCLAW_ANTHROPIC_MODEL = originalEnv.DCLAW_ANTHROPIC_MODEL

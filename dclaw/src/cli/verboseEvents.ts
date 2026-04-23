@@ -365,7 +365,7 @@ function firstNonEmptyLine(value: string): string | undefined {
 }
 
 function normalizeProgressAssistantText(value: string): string | undefined {
-  const normalized = firstNonEmptyLine(value)?.replace(/\s+/g, ' ').trim()
+  const normalized = value.replace(/\s+/g, ' ').trim()
   return normalized && normalized.length > 0 ? normalized : undefined
 }
 
@@ -761,7 +761,7 @@ export function formatProgressThinkingLine(summary?: string): string {
 }
 
 function formatProgressAssistantLine(text: string): string {
-  return `Assistant: ${truncateInlineText(text, 160)}`
+  return `Assistant: ${text}`
 }
 
 export function formatProgressAssistantOutputLines(text: string): string[] {
@@ -1056,6 +1056,36 @@ export function formatProgressReasoningLines(
   return lines
 }
 
+function collectProgressReasoningTexts(
+  message: Pick<Message, 'role' | 'content'>,
+): string[] {
+  if (message.role !== 'assistant') {
+    return []
+  }
+
+  const reasoningLines = message.content
+    .filter(
+      (block): block is Extract<ContentBlock, { type: 'reasoning' }> =>
+        block.type === 'reasoning',
+    )
+    .flatMap(block =>
+      block.summary
+        .map(normalizeProgressAssistantText)
+        .filter((line): line is string => Boolean(line)),
+    )
+  if (reasoningLines.length > 0) {
+    return reasoningLines
+  }
+
+  return message.content
+    .filter(
+      (block): block is Extract<ContentBlock, { type: 'thinking' }> =>
+        block.type === 'thinking',
+    )
+    .map(block => normalizeProgressAssistantText(block.thinking))
+    .filter((line): line is string => Boolean(line))
+}
+
 export function formatProgressAssistantLines(
   message: Pick<Message, 'role' | 'content'>,
 ): string[] {
@@ -1066,14 +1096,14 @@ export function formatProgressAssistantLines(
   const hasToolUse = message.content.some(block => block.type === 'tool_use')
   const textLines = message.content
     .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
-    .map(block => firstNonEmptyLine(block.text))
+    .map(block => normalizeProgressAssistantText(block.text))
     .filter((line): line is string => Boolean(line && line.trim().length > 0))
 
   if (hasToolUse && textLines.length > 0) {
     return textLines.map(formatProgressAssistantLine)
   }
 
-  const reasoningLines = formatProgressReasoningLines(message)
+  const reasoningLines = collectProgressReasoningTexts(message)
   if (reasoningLines.length > 0) {
     return reasoningLines.map(formatProgressAssistantLine)
   }
@@ -1098,18 +1128,7 @@ export function collectProgressAssistantTexts(
     return textLines
   }
 
-  const reasoningLines = message.content
-    .filter(
-      (block): block is Extract<ContentBlock, { type: 'reasoning' }> =>
-        block.type === 'reasoning',
-    )
-    .flatMap(block =>
-      block.summary
-        .map(normalizeProgressAssistantText)
-        .filter((line): line is string => Boolean(line)),
-    )
-
-  return reasoningLines
+  return collectProgressReasoningTexts(message)
 }
 
 export function getVerboseReasoningBlocks(

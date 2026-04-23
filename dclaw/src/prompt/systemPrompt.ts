@@ -5,6 +5,7 @@ import {
   getEnvironmentSection,
   getGitStatusSection,
   getIntroSection,
+  getLanguageSection,
   getMemorySection,
   getPlanModeSection,
   getUserOverrideSection,
@@ -15,6 +16,7 @@ export function buildSystemPrompt(context: PromptContext): string {
   const sections = [
     getIntroSection(),
     getDoingTasksSection(),
+    getLanguageSection(),
     getContextSection(context),
     getCurrentDateSection(context),
     getEnvironmentSection(context),

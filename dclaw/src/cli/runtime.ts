@@ -20,6 +20,10 @@ import { buildSystemPrompt } from '../prompt/systemPrompt.js'
 import type { PromptMode } from '../prompt/types.js'
 import { createSkillRegistry } from '../skills/registry.js'
 import { loadSkills } from '../skills/loader.js'
+import {
+  createInvokedSkillState,
+  restoreInvokedSkillsFromMessages,
+} from '../skills/state.js'
 import { summarizePendingTasks } from '../tasks/planAttachment.js'
 import { loadTaskBoardForSession } from '../tasks/store.js'
 import { getCurrentTask } from '../tasks/taskState.js'
@@ -73,6 +77,8 @@ export async function prepareCliRuntime(
       cwd: options.cwd,
     }),
   )
+  const invokedSkills = createInvokedSkillState()
+  restoreInvokedSkillsFromMessages(initialMessages, invokedSkills)
 
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
@@ -202,6 +208,7 @@ export async function prepareCliRuntime(
       planFilePath: undefined,
       readState: new Map(),
       skillRegistry,
+      invokedSkills,
       agentRuntime: {
         client,
         provider: runtime.provider,

@@ -1,4 +1,5 @@
 import { QueryEngine } from '../core/queryEngine.js'
+import { createInvokedSkillState } from '../skills/state.js'
 import type { ToolContext } from '../types/tool.js'
 import type { CreateSubagentRuntimeInput } from './types.js'
 import {
@@ -79,6 +80,7 @@ export function createSubagentToolContext(
     permissionMode: input.agent.permissionMode ?? input.parent.permissionMode,
     readState: new Map(),
     skillRegistry: input.parent.skillRegistry,
+    invokedSkills: createInvokedSkillState(),
   }
 }
 

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { executeSingleTurn } from '../../src/core/queryLoop.js'
+import { QueryLoopLlmError } from '../../src/core/queryErrors.js'
 import {
   createFileQueryTraceSink,
   createQueryTraceFilePath,
@@ -11,6 +12,7 @@ import {
 import type {
   CreateMessageRequest,
   CreateMessageResponse,
+  CreateMessageStreamCallbacks,
   LlmClient,
 } from '../../src/llm/types.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
@@ -82,6 +84,31 @@ class EmptyTwiceClient implements LlmClient {
           thinking: `Need to think more before answering (${this.requests.length}).`,
         },
       ]),
+    }
+  }
+}
+
+class RepeatingStreamClient implements LlmClient {
+  readonly providerName = 'repair-test'
+  readonly requests: CreateMessageRequest[] = []
+
+  async createMessage(
+    _request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    throw new Error('streaming path expected')
+  }
+
+  async createMessageStream(
+    request: CreateMessageRequest,
+    callbacks: CreateMessageStreamCallbacks,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    for (let index = 0; index < 32; index += 1) {
+      callbacks.onTextDelta?.('你')
+    }
+
+    return {
+      message: createTextMessage('assistant', 'should not complete'),
     }
   }
 }
@@ -217,6 +244,102 @@ test('query trace records empty-turn repair scheduling and failure', async () =>
       'llm.empty_turn.detected',
       'llm.empty_turn.repair_failed',
       'turn.complete',
+    ])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('query loop aborts streaming when estimated output approaches max tokens', async () => {
+  const registry = createDefaultToolRegistry()
+  const client = new RepeatingStreamClient()
+
+  await assert.rejects(
+    () =>
+      executeSingleTurn({
+        client,
+        messages: [createTextMessage('user', 'answer in a stream')],
+        toolRegistry: registry,
+        toolContext: createToolContext({
+          availableTools: registry.list().map(tool => tool.name),
+          permissionMode: 'default',
+        }),
+        modelLimits: {
+          contextWindow: 1_024,
+          maxOutputTokens: 10,
+          maxOutputTokensUpperLimit: 10,
+        },
+        streamHandlers: {},
+      }),
+    error => {
+      assert.ok(error instanceof QueryLoopLlmError)
+      assert.match(
+        error.llmError.message,
+        /estimated output reached .*guard threshold/i,
+      )
+      assert.equal(error.llmError.phase, 'during_stream')
+      assert.equal(error.llmError.streamedTextChars, 9)
+      return true
+    },
+  )
+})
+
+test('query trace records streaming output guard triggers', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-loop-output-guard-'))
+  const tracePath = createQueryTraceFilePath({
+    ...process.env,
+    DCLAW_HOME: join(dir, '.dclaw-home'),
+  })
+  const registry = createDefaultToolRegistry()
+  const client = new RepeatingStreamClient()
+
+  try {
+    const queryTraceSink = await createFileQueryTraceSink(tracePath)
+
+    await assert.rejects(
+      () =>
+        executeSingleTurn({
+          client,
+          messages: [createTextMessage('user', 'answer in a stream')],
+          toolRegistry: registry,
+          toolContext: createToolContext({
+            availableTools: registry.list().map(tool => tool.name),
+            permissionMode: 'default',
+          }),
+          modelLimits: {
+            contextWindow: 1_024,
+            maxOutputTokens: 10,
+            maxOutputTokensUpperLimit: 10,
+          },
+          queryTraceSink,
+          streamHandlers: {},
+        }),
+      error => error instanceof QueryLoopLlmError,
+    )
+
+    const events = (await readFile(tracePath, 'utf8'))
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => JSON.parse(line) as { event: string })
+      .map(line => line.event)
+
+    assert.deepEqual(events, [
+      'turn.start',
+      'iteration.start',
+      'compact.dry_run',
+      'llm.request',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.text.delta',
+      'llm.output_guard.triggered',
+      'llm.error',
     ])
   } finally {
     await rm(dir, { recursive: true, force: true })

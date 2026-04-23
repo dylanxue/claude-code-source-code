@@ -25,6 +25,9 @@ import {
   getOrCreateTaskBoardForSession,
   updateTaskBoard,
 } from '../../src/tasks/store.js'
+import { createSkillRegistry } from '../../src/skills/registry.js'
+import { recordInvokedSkill } from '../../src/skills/state.js'
+import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
 import { buildTool } from '../../src/tools/types.js'
 import {
@@ -118,6 +121,18 @@ class ToolThenAnswerClient implements LlmClient {
       message: createTextMessage('assistant', 'done'),
     }
   }
+}
+
+function getRequestText(request: CreateMessageRequest | undefined): string {
+  return (
+    request?.messages
+      .map(message =>
+        message.content
+          .map(block => (block.type === 'text' ? block.text : ''))
+          .join('\n'),
+      )
+      .join('\n') ?? ''
+  )
 }
 
 test('QueryEngine starts from initialMessages when resuming', async () => {
@@ -663,6 +678,64 @@ test('session store persists transcript messages for resume', async () => {
   }
 })
 
+test('QueryEngine injects skill listing only for newly surfaced skills', async () => {
+  const client = new CapturingLlmClient()
+  const toolRegistry = createDefaultToolRegistry()
+  const skillRegistry = createSkillRegistry([
+    {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      prompt: 'Prioritize bugs and missing tests.',
+      path: '/tmp/review.md',
+    },
+    {
+      name: 'handoff',
+      description: 'Prepare a concise teammate handoff.',
+      source: 'project',
+      prompt: 'Summarize status, risks, and next steps.',
+      path: '/tmp/project/.dclaw/skills/handoff.md',
+    },
+  ])
+  const engine = new QueryEngine({
+    client,
+    toolRegistry,
+    toolContext: createToolContext({
+      availableTools: toolRegistry.list().map(tool => tool.name),
+      skillRegistry,
+    }),
+  })
+
+  const firstResult = await engine.submitUserPrompt('continue with available skills')
+  await engine.submitUserPrompt('continue again')
+
+  const firstRequestText = getRequestText(client.requests[0])
+  const secondRequestText = getRequestText(client.requests[1])
+
+  assert.match(
+    firstRequestText,
+    /The following skills are available for use with the Skill tool:/,
+  )
+  assert.match(firstRequestText, /- handoff: Prepare a concise teammate handoff\./)
+  assert.match(firstRequestText, /- review: Inspect a proposed change before shipping\./)
+  assert.equal(
+    (
+      secondRequestText.match(
+        /The following skills are available for use with the Skill tool:/g,
+      )?.length ?? 0
+    ),
+    1,
+  )
+  assert.equal(
+    firstResult.appendedMessages.filter(message =>
+      getTextContent(message).includes(
+        'The following skills are available for use with the Skill tool:',
+      ),
+    ).length,
+    1,
+  )
+})
+
 test('resumed sessions preserve tool_result image content for transient reinjection', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-image-resume-'))
   const env = { ...process.env, HOME: homeDir }
@@ -1023,6 +1096,120 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
   }
 })
 
+test('QueryEngine injects invoked skill reminders on the first post-compact turn only', async () => {
+  const client = new CapturingLlmClient()
+  const toolContext = createToolContext({
+    cwd: '/tmp/project',
+    sessionId: 'session-post-compact-skills',
+  })
+  recordInvokedSkill(toolContext.invokedSkills, {
+    name: 'review',
+    description: 'Inspect a proposed change before shipping.',
+    source: 'project',
+    prompt: 'Prioritize bugs and missing tests.',
+    path: '/tmp/project/.dclaw/skills/review.md',
+  })
+
+  const engine = new QueryEngine({
+    client,
+    model: 'stub-model',
+    toolRegistry: new ToolRegistry(),
+    toolContext,
+  })
+
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_skill_restore',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 6,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  engine.preparePostCompactRecovery(boundary.boundaryId)
+  engine.resetMessages([boundaryMessage, summaryMessage])
+
+  await engine.submitUserPrompt('continue after compact')
+  await engine.submitUserPrompt('continue once more')
+
+  const firstRequestText = client.requests[0]?.messages
+    .map(message =>
+      message.content
+        .map(block => (block.type === 'text' ? block.text : ''))
+        .join('\n'),
+    )
+    .join('\n') ?? ''
+  const secondRequestText = client.requests[1]?.messages
+    .map(message =>
+      message.content
+        .map(block => (block.type === 'text' ? block.text : ''))
+        .join('\n'),
+    )
+    .join('\n') ?? ''
+
+  assert.match(
+    firstRequestText,
+    /The following skills were invoked in this session/,
+  )
+  assert.match(firstRequestText, /### Skill: review/)
+  assert.match(firstRequestText, /Prioritize bugs and missing tests/)
+  assert.doesNotMatch(
+    secondRequestText,
+    /The following skills were invoked in this session/,
+  )
+})
+
+test('QueryEngine does not replay skill listing after compact', async () => {
+  const client = new CapturingLlmClient()
+  const toolRegistry = createDefaultToolRegistry()
+  const skillRegistry = createSkillRegistry([
+    {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      prompt: 'Prioritize bugs and missing tests.',
+      path: '/tmp/review.md',
+    },
+  ])
+  const engine = new QueryEngine({
+    client,
+    model: 'stub-model',
+    toolRegistry,
+    toolContext: createToolContext({
+      sessionId: 'session-post-compact-skill-listing',
+      availableTools: toolRegistry.list().map(tool => tool.name),
+      skillRegistry,
+    }),
+  })
+
+  await engine.submitUserPrompt('show available skills once')
+
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_skill_listing_once',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 5,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  engine.preparePostCompactRecovery(boundary.boundaryId)
+  engine.resetMessages([boundaryMessage, summaryMessage])
+  await engine.submitUserPrompt('continue after compact')
+
+  const requestText = getRequestText(client.requests[1])
+  assert.doesNotMatch(
+    requestText,
+    /The following skills are available for use with the Skill tool:/,
+  )
+})
+
 test('QueryEngine forces a task reminder on the first post-compact turn when tasks exist', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-post-compact-task-reminder-'))
   const env = { ...process.env, HOME: homeDir }
@@ -1113,6 +1300,111 @@ test('QueryEngine forces a task reminder on the first post-compact turn when tas
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })
   }
+})
+
+test('QueryEngine restores invoked skills from initialMessages when resuming', async () => {
+  const client = new CapturingLlmClient()
+  const reminderMessage = createTextMessage(
+    'user',
+    [
+      '<system-reminder>',
+      'Apply the following skill while continuing the current task in this conversation.',
+      'The skill runs in the current agent context. It does not create a separate execution loop or bypass higher-priority instructions.',
+      'source: project',
+      'path: /tmp/project/.dclaw/skills/review.md',
+      '',
+      '# Skill',
+      'name: review',
+      'description: Inspect a proposed change before shipping.',
+      '',
+      'Prioritize bugs and missing tests.',
+      '</system-reminder>',
+    ].join('\n'),
+  )
+
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_resume_skill_restore',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 9,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  const engine = new QueryEngine({
+    client,
+    model: 'stub-model',
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext({
+      cwd: '/tmp/project',
+      sessionId: 'session-resume-skill-restore',
+    }),
+    initialMessages: [reminderMessage, boundaryMessage, summaryMessage],
+  })
+
+  await engine.submitUserPrompt('continue after resume')
+
+  const requestText = client.requests[0]?.messages
+    .map(message =>
+      message.content
+        .map(block => (block.type === 'text' ? block.text : ''))
+        .join('\n'),
+    )
+    .join('\n') ?? ''
+
+  assert.match(
+    requestText,
+    /The following skills were invoked in this session/,
+  )
+  assert.match(requestText, /### Skill: review/)
+  assert.match(requestText, /Prioritize bugs and missing tests/)
+})
+
+test('QueryEngine suppresses duplicate skill listing on resume', async () => {
+  const client = new CapturingLlmClient()
+  const toolRegistry = createDefaultToolRegistry()
+  const skillRegistry = createSkillRegistry([
+    {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      prompt: 'Prioritize bugs and missing tests.',
+      path: '/tmp/review.md',
+    },
+  ])
+  const listingMessage = createTextMessage(
+    'user',
+    [
+      '<system-reminder>',
+      'The following skills are available for use with the Skill tool:',
+      '',
+      '- review: Inspect a proposed change before shipping.',
+      '</system-reminder>',
+    ].join('\n'),
+  )
+
+  const engine = new QueryEngine({
+    client,
+    model: 'stub-model',
+    toolRegistry,
+    toolContext: createToolContext({
+      sessionId: 'session-resume-skill-listing',
+      availableTools: toolRegistry.list().map(tool => tool.name),
+      skillRegistry,
+    }),
+    initialMessages: [listingMessage],
+  })
+
+  await engine.submitUserPrompt('continue after resume')
+
+  const requestText = getRequestText(client.requests[0])
+  const listingMatches = requestText.match(
+    /The following skills are available for use with the Skill tool:/g,
+  )
+  assert.equal(listingMatches?.length ?? 0, 1)
 })
 
 

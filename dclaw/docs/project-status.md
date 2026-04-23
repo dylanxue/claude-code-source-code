@@ -246,8 +246,12 @@
   - `src/skills/` 已落地 `types.ts / loader.ts / registry.ts / prompt.ts`
   - 首版只支持 `builtin skills` 与 `project skills`，当前不引入 plugin-provided skills、marketplace 或 remote bridge
   - `Skill` tool 已接入统一主消息循环；技能调用会 resolve 已加载 skill，并把技能约束以最小 `<system-reminder>` 注回当前对话，而不是绕开 QueryEngine 自己执行
+  - 已调用 skill 现已进入最小 `invoked_skills` 持续约束链路：skill 调用会登记到 runtime state，`compact` 后首轮会重新注入持续提醒，`resume` 也会从 transcript 恢复这份状态
+  - 最小 `skill_listing` 也已落地：仅在 runtime 实际暴露 `Skill` tool 时注入，以 `<system-reminder>` 形式向模型广播当前可用 skills；只补“之前没发过的新 skill”，`/resume` 首轮抑制重复广播，`compact` 后不重放 listing
   - skill 首版默认运行在当前 agent 上下文中，不默认 fork；subagent 也会继承同一份 skill registry
-  - 已补齐阶段 12 的最小单测，覆盖 skill loader / registry 与 `SkillTool` invoke path；skill discovery / invoked-skill reminder 边界继续留在后续阶段
+  - 已确认 `dclaw` 不实现 `skill_discovery`：当前公开源码里看不到 Claude Code 对应的 discovery 实现体，因此不做近似版相关性发现，避免伪装成源码已有能力
+  - 当前 `dclaw` 只有 `builtin/project skills`，没有 Claude Code 那种 `MCP / plugin / remote skill` 扩展面；因此 `skill_listing` 继续保持最小，不额外引入独立 budget / formatting pipeline
+  - 已补齐阶段 12 的最小单测，覆盖 skill loader / registry、`SkillTool` invoke path、`invoked_skills` 的 persistence / recovery 边界，以及 `skill_listing` 的 duplication / resume-suppression / compact-no-replay 边界
 - `partial compact / reactive compact` 已按当前产品取舍主动舍弃：
   - `partial compact` 不会和 auto compact 联动，也没有 Claude Code 风格的 message selector / rewind 用户入口
   - `reactive compact` 在当前 Claude Code 外部源码里只有调用点与 feature gate，没有可直接对齐的实现本体，且明确是 ant-only
