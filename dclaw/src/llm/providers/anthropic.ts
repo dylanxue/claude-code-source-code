@@ -386,7 +386,7 @@ export class AnthropicLlmClient implements LlmClient {
         }
 
         return (await response.json()) as AnthropicResponse
-      })
+      }, request.signal)
     })
 
     const content = parseAnthropicContent(parsed)
@@ -427,7 +427,7 @@ export class AnthropicLlmClient implements LlmClient {
         }
 
         return response
-      })
+      }, request.signal)
 
       const blocks: StreamingAnthropicBlockState[] = []
       let sawStreamEvent = false
@@ -601,10 +601,12 @@ export class AnthropicLlmClient implements LlmClient {
 
   private withRequestTimeout<T>(
     operation: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return withTimeout(operation, {
       timeoutMs: this.requestTimeoutMs,
       timeoutMessage: `Anthropic request timed out after ${this.requestTimeoutMs}ms`,
+      signal,
     })
   }
 

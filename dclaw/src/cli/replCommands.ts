@@ -22,6 +22,10 @@ import {
   recoverTaskBoardPlanFile,
 } from '../tasks/planSnapshots.js'
 import {
+  getTaskBoardBriefObservationLines,
+  getTaskBoardObservationLines,
+} from '../tasks/observability.js'
+import {
   createTaskRecord,
   getCurrentTask,
   setTaskStatus,
@@ -47,6 +51,7 @@ import {
 } from './configFile.js'
 import {
   appendModelLimitLines,
+  appendVisionRuntimeLines,
   appendReliabilityConfigLines,
   getLimitsConfigStatus,
   statusLine,
@@ -83,6 +88,7 @@ type ReplCommandDefinition = {
   aliases?: string[]
   description: string
   argumentHint?: string
+  canRunWhileBusy?: boolean
   handle: (
     args: string[],
     context: ReplCommandContext,
@@ -159,12 +165,21 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
   const taskBoard = meta?.taskBoardId
     ? await loadTaskBoard(meta.taskBoardId)
     : null
+  const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
+  const runtime = resolveLlmRuntimeConfig(
+    {
+      provider: context.session.provider as LlmProviderName,
+      model: context.session.model,
+    },
+    configured.env,
+    key => configured.keySources[key],
+  )
   const compactRecommendation = context.engine.getCompactRecommendation()
   const messages = context.engine.getMessages()
   const compactBoundaries = getCompactBoundaryMessages(messages)
   const lastCompactBoundary = getLastCompactBoundary(messages)
 
-  printLines([
+  const lines = [
     'current session:',
     `session id: ${context.session.sessionId}`,
     `mode: ${context.session.mode}`,
@@ -190,8 +205,19 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     ...(lastCompactBoundary
       ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
       : []),
-    '',
-  ])
+  ]
+
+  if (
+    (runtime.providerConfig.provider === 'anthropic' ||
+      runtime.providerConfig.provider === 'openai') &&
+    runtime.model
+  ) {
+    appendModelLimitLines(lines, runtime.providerConfig.provider, runtime.model)
+  }
+  appendVisionRuntimeLines(lines, configured.env)
+  lines.push('')
+
+  printLines(lines)
 }
 
 async function printTranscript(
@@ -259,6 +285,7 @@ function formatTaskBoardSummary(board: TaskBoard): string[] {
 
   return [
     `task board: ${board.boardId}`,
+    ...getTaskBoardBriefObservationLines(board),
     `plan mode: ${board.mode}`,
     `workspace: ${board.workspaceId}`,
     `root session: ${board.rootSessionId}`,
@@ -601,6 +628,7 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     if (runtime.model) {
       appendModelLimitLines(lines, 'anthropic', runtime.model)
     }
+    appendVisionRuntimeLines(lines, configured.env)
   } else if (runtime.providerConfig.provider === 'openai') {
     const config = runtime.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
@@ -612,9 +640,11 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     if (runtime.model) {
       appendModelLimitLines(lines, 'openai', runtime.model)
     }
+    appendVisionRuntimeLines(lines, configured.env)
   } else {
     lines.push(statusLine('resolved model', runtime.model ?? 'none'))
     lines.push(statusLine('model source', context.session.modelSource))
+    appendVisionRuntimeLines(lines, configured.env)
   }
 
   appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])
@@ -778,8 +808,6 @@ async function resumeConversation(
     context.session.model = resumed.meta.model
     context.session.modelSource = 'resumed_session'
   }
-  const currentTask = taskBoard ? getCurrentTask(taskBoard) : undefined
-
   const transcriptLines = formatTranscript(resumed.messages, {
     includeThinking: false,
     maxMessages: 10,
@@ -801,10 +829,7 @@ async function resumeConversation(
     ...(lastCompactBoundary
       ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
       : []),
-    ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
-    ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
-    ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
-    ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...(taskBoard ? getTaskBoardObservationLines(taskBoard) : []),
     ...(resumed.subagents.count > 0
       ? [
           `subagents: ${resumed.subagents.count}`,
@@ -830,6 +855,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
     name: '/help',
     description: 'Show available REPL commands.',
+    canRunWhileBusy: true,
     handle() {
       printLines([
         'REPL commands:',
@@ -859,6 +885,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/session',
     aliases: ['/info'],
     description: 'Show current session info.',
+    canRunWhileBusy: true,
     async handle(_args, context) {
       await printSessionInfo(context)
     },
@@ -866,6 +893,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
     name: '/history',
     description: 'Show recent saved sessions.',
+    canRunWhileBusy: true,
     async handle(_args, context) {
       await runHistory({
         mode: 'history',
@@ -876,6 +904,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
     name: '/doctor',
     description: 'Show diagnostics for the current REPL session.',
+    canRunWhileBusy: true,
     async handle(_args, context) {
       await printDoctor(context)
     },
@@ -900,6 +929,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
     name: '/config',
     description: 'Show loaded dclaw config files and config-backed env keys.',
+    canRunWhileBusy: true,
     async handle(_args, context) {
       await printConfig(context)
     },
@@ -909,6 +939,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[N]',
     description:
       'Show the current conversation transcript, optionally limited to the latest N messages.',
+    canRunWhileBusy: true,
     async handle(args, context) {
       if (args.length === 0) {
         await printTranscript(context)
@@ -956,8 +987,21 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
     name: '/cls',
     description: 'Clear the terminal screen.',
+    canRunWhileBusy: true,
     handle() {
       clearTerminal()
+    },
+  },
+  {
+    name: '/interrupt',
+    aliases: ['/cancel'],
+    description: 'Interrupt the active response.',
+    canRunWhileBusy: true,
+    handle() {
+      printLines([
+        'No active response to interrupt.',
+        '',
+      ])
     },
   },
   {
@@ -982,6 +1026,9 @@ function findReplCommand(name: string): ReplCommandDefinition | undefined {
 export async function maybeHandleReplCommand(
   prompt: string,
   context: ReplCommandContext,
+  options: {
+    allowDuringActivePrompt?: boolean
+  } = {},
 ): Promise<boolean> {
   const trimmedPrompt = prompt.trim()
   const [commandName, ...args] = trimmedPrompt.split(/\s+/)
@@ -989,6 +1036,14 @@ export async function maybeHandleReplCommand(
 
   if (!command) {
     return false
+  }
+
+  if (options.allowDuringActivePrompt && !command.canRunWhileBusy) {
+    printLines([
+      `${command.name} cannot run while a response is active. Use /interrupt to stop the response, or wait for it to finish.`,
+      '',
+    ])
+    return true
   }
 
   await command.handle(args, context)

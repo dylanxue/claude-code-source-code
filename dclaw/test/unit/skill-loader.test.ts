@@ -15,6 +15,7 @@ async function writeSkill(
   input: {
     name?: string
     description?: string
+    context?: 'inline' | 'fork'
     prompt: string
   },
 ): Promise<void> {
@@ -26,6 +27,9 @@ async function writeSkill(
   }
   if (input.description) {
     lines.push(`description: ${JSON.stringify(input.description)}`)
+  }
+  if (input.context) {
+    lines.push(`context: ${JSON.stringify(input.context)}`)
   }
 
   lines.push('---', '', input.prompt, '')
@@ -42,6 +46,7 @@ test('loadSkills discovers builtin and project skills from the expected director
     await writeSkill(join(builtinDir, 'review.md'), {
       name: 'review',
       description: 'Inspect a change before shipping.',
+      context: 'fork',
       prompt: 'Review the proposed change carefully.',
     })
     await writeSkill(join(workspaceDir, '.dclaw', 'skills', 'deploy.md'), {
@@ -71,22 +76,26 @@ test('loadSkills discovers builtin and project skills from the expected director
       skills.map(skill => ({
         name: skill.name,
         source: skill.source,
+        context: skill.context,
         prompt: skill.prompt,
       })),
       [
         {
           name: 'review',
           source: 'builtin',
+          context: 'fork',
           prompt: 'Review the proposed change carefully.',
         },
         {
           name: 'deploy-check',
           source: 'project',
+          context: undefined,
           prompt: 'Check release notes, migrations, and rollback safety.',
         },
         {
           name: 'handoff',
           source: 'project',
+          context: undefined,
           prompt: 'Summarize status, risks, and next steps.',
         },
       ],
@@ -148,6 +157,7 @@ test('SkillRegistry resolves later project skills over earlier builtin skills', 
       description: 'Project-specific review flow.',
       source: 'project',
       prompt: 'Use the project-specific review checklist.',
+      context: undefined,
       path: join(workspaceDir, '.dclaw', 'skills', 'review.md'),
     })
   } finally {

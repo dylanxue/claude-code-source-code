@@ -19,7 +19,7 @@
 | 6 | 权限模式与 Hooks | in progress | 已接入最小 permission evaluator；hooks 与细粒度规则下调到 `v0.4` |
 | 7 | Session、历史与恢复 | in progress | `v0.1` 范围已基本可用，剩余体验打磨转入 backlog |
 | 8 | 上下文管理与自动压缩 | completed | 已完成 manual compact、消息级 boundary、共享 context stats、模型生成 compact summary、dry-run recommendation、最小 autocompact 触发/回退链路，以及首轮 post-compact 文件/plan/task 恢复；当前范围按 `full compact + autocompact + post-compact 恢复` 收口。`partial compact / reactive compact` 已作为非主线路径主动舍弃 |
-| 9 | Plan / Task | completed | 已落地 task board、`/plan`、plan file、`Task*`、`EnterPlanMode / ExitPlanMode`、plan-mode reminders、prompt runtime planning context，以及 `resume/history/transcript` planning 观察面；阶段 9-2 的 `ExitPlanMode` 审批正文展示、approved-plan -> 初始 task list materialize，与阶段 9-3 的 plan 真值恢复 / planning 生命周期规则均已收口，并补齐了 Claude Code 风格的“completed task board 5 秒后自动 retire/reset” |
+| 9 | Plan / Task | completed | 已落地 task board、`/plan`、plan file、`Task*`、`EnterPlanMode / ExitPlanMode`、plan-mode reminders、prompt runtime planning context，以及 `resume/history/transcript` planning 观察面；当前已开始 plan-centered 改造，`ExitPlanMode` 已从交互式审批入口收缩为 plan 交付入口，不再自动 materialize 执行任务；阶段 9-3 的 plan 真值恢复 / planning 生命周期规则均已收口，并补齐了 Claude Code 风格的“completed task board 5 秒后自动 retire/reset” |
 | 10 | Memory | completed | 已完成 `10-1` memory 文件系统骨架、`10-2` 的 `MEMORY.md` 常驻注入 / side-query recall / 来源可观察性，以及 `10-3` 的写回边界、去重 / 升级护栏、`WHAT_NOT_TO_SAVE_SECTION` 约束；同时完成 `10-5` 的非阻塞 memory 写回与退出软 drain，按当前 `v0.2` 范围收口 |
 | 11 | 多代理、Worktree 与协作执行 | in progress | `v0.3` 只聚焦 subagent 主路径；`src/agent/` 最小运行时骨架、独立 child transcript、parent turn links、`Agent` tool 的 `spawn/send/wait/stop` 主路径，以及 `resume/history/transcript/trace` 的最小观察面已落地；`worktree / coordinator / 多 worker` 继续后置到 `v0.4` |
 | 12 | MCP、Skills、Plugins 与 Remote Bridge | in progress | `v0.3` 只聚焦 skills 主路径；`src/skills/` 最小 loader / registry / prompt 骨架与统一 `Skill` tool 主路径已落地；`MCP / plugins / remote bridge` 继续后置到 `v0.4` |
@@ -167,7 +167,7 @@
 - 建立共享 `contextStats` 与 Claude Code 风格的 compact threshold / percent-left recommendation
 - 将 compact dry-run recommendation 接到 REPL `/session / info / doctor`、verbose 与 query trace
 - 将最小 autocompact 接到 `QueryEngine` 提交链路，并补上 same-session boundary 追加、trace 记录与失败回退
-- 明确阶段 9 的产品规则：`plan mode` 由模型可建议/发起，`EnterPlanMode` 负责直接进入 planning，`ExitPlanMode` 负责请求计划批准，并在切换后改变 LLM 的工作节奏而不只是限制工具
+- 明确阶段 9 的产品规则：`plan mode` 由模型可建议/发起，`EnterPlanMode` 负责直接进入高约束 planning，`ExitPlanMode` 负责交付计划并等待用户下一步；planning 会改变 LLM 的工作节奏而不只是限制工具
 - 为阶段 9 建立最小 `task board` 内核，并通过 session meta 挂接 `taskBoardId`
 - 为阶段 9 接通首批 REPL 入口：`/plan`、`/plan start`、`/plan exit`
 - 重新评估 Claude Code 源码后，明确阶段 9 主线应对齐 `plan mode + plan file + Task*`
@@ -179,18 +179,18 @@
 - 当前已完成 Query Engine 最小链路和基础 prompt/`DCLAW.md` 注入，已进入基础多轮 tool loop
 - 当前 tool loop 已有基础多轮 assistant->tool->assistant 闭环，并已补上最小 permission evaluator；更细粒度规则与 hooks 已下调到 `v0.4`
 - 当前 `permission mode` 已不再只是 CLI 临时参数，也支持用户级与 workspace 级默认配置
-- 当前阶段 9 已不再是纯文档设计：task board、最小 REPL 入口、plan file、`EnterPlanMode / ExitPlanMode`、prompt runtime 摘要、`Task*` tool、Claude Code 风格的 task tool prompt，以及最小 runtime task reminder / `TaskUpdate` 完成态引导都已接通；其中 task reminder 已从 system prompt 拼接收敛为临时 `<system-reminder>` user meta message，plan mode 也已补上 `plan_mode / plan_mode_exit / plan_mode_reentry` 的最小 attachment-style 提醒，并覆盖了 compact 后第一轮的强制 full reminder。当前 `resume / history / transcript` 已具备统一的 planning 观察面；其中 transcript 收敛为记录 `EnterPlanMode / ExitPlanMode` 工具事件与 plan 真值，不再额外持久化这些 runtime reminder。阶段 9-2 的 `ExitPlanMode` 审批正文展示与阶段 9-3 的 plan 真值恢复 / `/clear` `/resume` 生命周期规则均已完成；swarm / teammate 仍属后续扩展
+- 当前阶段 9 已不再是纯文档设计：task board、最小 REPL 入口、plan file、`EnterPlanMode / ExitPlanMode`、prompt runtime 摘要、`Task*` tool、task tool prompt，以及最小 runtime task reminder / `TaskUpdate` 完成态引导都已接通；其中 task reminder 已从 system prompt 拼接收敛为临时 `<system-reminder>` user meta message，plan mode 也已补上 `plan_mode / plan_mode_exit / plan_mode_reentry` 的最小 attachment-style 提醒，并覆盖了 compact 后第一轮的强制 full reminder。当前 `resume / history / transcript` 已具备统一的 planning 观察面；其中 transcript 收敛为记录 `EnterPlanMode / ExitPlanMode` 工具事件与 plan 真值，不再额外持久化这些 runtime reminder。plan-centered 改造后，`ExitPlanMode` 不再触发交互式审批或自动开工，而是展示 plan 并等待用户下一步；swarm / teammate 仍属后续扩展
 - 当前阶段 9 已接通 `Task*` 主路径的最小版本，但 swarm / teammate 相关 hook、mailbox、owner 自动派发等 Claude Code 扩展仍未实现
 - 当前已确认 Claude Code 源码里有两层不同能力：V1 `TodoWrite` 与 V2 `TaskCreate / TaskList / TaskGet / TaskUpdate`；`dclaw` 已明确收敛到 V2 主路径，不再保留 V1 对外能力
-- 当前已具备 Claude Code 阶段 9 的最小 plan file 主线：进入 planning 后会创建/绑定 plan file，plan file 已作为当前 planning 真值，并接入 prompt runtime context、compact 后首轮恢复，以及 `resume / history / transcript / /session` 的观察面；其中阶段 9-2 的退出审批正文展示与阶段 9-3 的 plan 真值恢复路径 / planning 生命周期规则都已补齐
-- 当前阶段 9 也已补齐一个关键执行态体验缺口：`ExitPlanMode` 获批后，如果 task board 仍为空，会立即从 approved plan materialize 首版 task list，避免进入实施后再边做边创建主任务
-- 当前 `TaskCreate / TaskList / TaskUpdate` 的提示语义已收紧：执行阶段默认应继续消费已批准的 task list；若发现重大新增工作，应在当前轮结束时向用户说明，而不是静默扩张当前计划
+- 当前已具备阶段 9 的最小 plan file 主线：进入 planning 后会创建/绑定 plan file，plan file 已作为当前 planning 真值，并接入 prompt runtime context、compact 后首轮恢复，以及 `resume / history / transcript / /session` 的观察面；plan-centered 改造后，退出 plan mode 时会交付 plan 正文/摘要并等待用户下一步
+- 当前阶段 9 已取消 `ExitPlanMode` 自动从 plan materialize 首版 task list；若用户明确要求开始实施，执行流再创建或更新 task list
+- 当前 `TaskCreate / TaskList / TaskUpdate` 的提示语义已收紧：执行阶段默认应继续消费当前 task list；若发现重大新增工作，应在当前轮结束时向用户说明，而不是静默扩张当前计划
 - 当前阶段 9 又补齐了一个与 Claude Code 对齐的生命周期规则：当执行板处于 `inactive` 且可见 task 全部 `completed` 超过 `5s`，当前 session 会自动 retire 这块旧 board；后续新任务会起 fresh board，而不是继续把新工作拼在旧列表后面
 - 当前 `dclaw` 已不再保留 `/todo` 与 `TodoWrite`；`TaskBoard` 也已去除内部 `todos` 字段，主路径统一收敛到 `plan file + Task*`
-- 当前已修复一个阶段 9 的关键对齐缺口：
+- 当前已修复一个阶段 9 的关键体验缺口：
   - `EnterPlanMode` 已不再要求用户批准进入，而是直接切换到 planning
-  - `ExitPlanMode` 仍是唯一的 plan approval step
-  - 用户拒绝 plan 时，模型现在会收到更接近 Claude Code 的 rejection 语义，而不只是弱语义 `status: rejected`
+  - `ExitPlanMode` 已不再是 plan approval step，而是 plan 交付 step
+  - 退出 plan mode 后模型会收到“展示计划并等待用户下一步”的 runtime reminder，避免同轮直接开工
 - 当前这条 bugfix 仍保持严格边界：
   - 没有额外引入本地 cooldown / plan hash 去重 / “必须先改 plan 才能再次批准” 之类 heuristic
   - 若后续仍发现重复请求问题，应继续回到 Claude Code 源码找主线路径，而不是先补本地规则
@@ -246,12 +246,19 @@
   - `src/skills/` 已落地 `types.ts / loader.ts / registry.ts / prompt.ts`
   - 首版只支持 `builtin skills` 与 `project skills`，当前不引入 plugin-provided skills、marketplace 或 remote bridge
   - `Skill` tool 已接入统一主消息循环；技能调用会 resolve 已加载 skill，并把技能约束以最小 `<system-reminder>` 注回当前对话，而不是绕开 QueryEngine 自己执行
-  - 已调用 skill 现已进入最小 `invoked_skills` 持续约束链路：skill 调用会登记到 runtime state，`compact` 后首轮会重新注入持续提醒，`resume` 也会从 transcript 恢复这份状态
+  - 已调用 skill 现已进入最小 `invoked_skills` 持续约束链路：skill 调用会登记到 runtime state，`compact` 后首轮会重新注入持续提醒，`resume` 也会从 transcript 恢复这份状态；post-compact 恢复已补上最小 token 保护，对单个 skill 和整组 skills 做预算裁剪
   - 最小 `skill_listing` 也已落地：仅在 runtime 实际暴露 `Skill` tool 时注入，以 `<system-reminder>` 形式向模型广播当前可用 skills；只补“之前没发过的新 skill”，`/resume` 首轮抑制重复广播，`compact` 后不重放 listing
-  - skill 首版默认运行在当前 agent 上下文中，不默认 fork；subagent 也会继承同一份 skill registry
+  - skill 现已具备最小 `inline / fork` 双模式：默认 inline，只有 skill 元数据显式声明 `context: fork` 时主线程才会复用现有 subagent 运行时执行；subagent 内调用 `Skill` 时会显式忽略 `fork` 并统一按 inline 执行；fork skill 不会把自己的持续约束写回父 agent 的 `invoked_skills`
   - 已确认 `dclaw` 不实现 `skill_discovery`：当前公开源码里看不到 Claude Code 对应的 discovery 实现体，因此不做近似版相关性发现，避免伪装成源码已有能力
   - 当前 `dclaw` 只有 `builtin/project skills`，没有 Claude Code 那种 `MCP / plugin / remote skill` 扩展面；因此 `skill_listing` 继续保持最小，不额外引入独立 budget / formatting pipeline
-  - 已补齐阶段 12 的最小单测，覆盖 skill loader / registry、`SkillTool` invoke path、`invoked_skills` 的 persistence / recovery 边界，以及 `skill_listing` 的 duplication / resume-suppression / compact-no-replay 边界
+  - 已补齐阶段 12 的最小单测，覆盖 skill loader / registry、`SkillTool` invoke path、`invoked_skills` 的 persistence / recovery 边界、`skill_listing` 的 duplication / resume-suppression / compact-no-replay 边界，以及 `Skill` 的 `inline / fork` execution-context 主路径
+  - 当前剩余差距主要收敛为：fork skill 的 agent-type 元数据尚未落地，先继续复用现有 generic subagent runtime，不额外发明 skill 专属 agent 协议
+- 当前多模态链路又补了一层受控降级：
+  - 当当前主 runtime 不支持 image input、但额外配置了 vision runtime 时，`Read` 与 `WebFetch` 的图片路径不再继续向主模型返回 image block，而会改走最小 `vision side query`
+  - 这条 side query 仍保持单独的辅助模型请求，不会把主会话 provider 动态切走，也不会让主 query loop 中途换 provider
+  - side query 当前只吃两类最小上下文：当前用户请求，以及当前这次 tool use 的局部意图
+  - 当前 `toolUseIntent` 的回退顺序已固定为：最近 assistant 可见文本 -> 同轮 reasoning/thinking -> 最近用户请求
+  - 当前范围只覆盖 `Read(image)` 与 `WebFetch(image)`；还没有扩到用户直接附图、interactive 图片输入或通用多模态路由
 - `partial compact / reactive compact` 已按当前产品取舍主动舍弃：
   - `partial compact` 不会和 auto compact 联动，也没有 Claude Code 风格的 message selector / rewind 用户入口
   - `reactive compact` 在当前 Claude Code 外部源码里只有调用点与 feature gate，没有可直接对齐的实现本体，且明确是 ant-only
@@ -267,16 +274,11 @@
 
 ## 下一步
 
-下一步进入：
+当前 `v0.3` 主线已经从“进入阶段 11/12”推进到“subagent / skills 两条最小主路径均已落地”。接下来更准确的焦点是：
 
-- `v0.3`：只聚焦 `subagent` 与 `skills`
-
-第一批目标：
-
-- 阶段 11：从已落地的 runtime skeleton 继续接通 `Agent` tool 主路径与最小观察面
-- 阶段 12：先进入 skills 主路径
-- `worktree / coordinator / 多 worker / MCP / plugins / remote bridge` 统一下调到 `v0.4`
-- 前序阶段的深化项也统一下调到 `v0.4`，本阶段暂不继续处理：
+- 阶段 12：继续补 `fork skill` 的 agent-type 元数据与剩余 nested skill 边界
+- `worktree / coordinator / 多 worker / MCP / plugins / remote bridge` 继续维持在 `v0.4`
+- 前序阶段的深化项也继续维持在 `v0.4`，当前不再回头扩张 `v0.3` 范围
   - `tool result budget / persistence` 的进一步参数化，以及更深层的上下文级 compact / 多层调度接线
   - 权限模式与 hooks 的继续收口，包括更细粒度规则和 evaluator 深化
   - `DCLAW.md` 的完整 include 语义、优先级细节、frontmatter / managed memory / instruction hooks
@@ -285,3 +287,7 @@
   - `OpenAI Responses API` 更多 request 参数、更多 output 类型与更广流式事件覆盖
   - 将 `text` 内容块上的 annotation 继续接到 transcript / verbose / headless 输出层，而不只是保留在消息模型里
 - 其余 backlog 中的工具契约、provider 错误提示、`session / resume` 体验收口项与多模态剩余项统一排入 `v0.4`
+- 多模态后续推进也继续收口在 `v0.4`：
+  - `QueryEngine` 公开结构化输入
+  - interactive 图片输入与 `--print --image`
+  - 是否继续把 `vision side query` 扩到更多图片来源与更完整的恢复链路

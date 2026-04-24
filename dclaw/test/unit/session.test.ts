@@ -42,7 +42,10 @@ import type {
   CreateMessageResponse,
   LlmClient,
 } from '../../src/llm/types.js'
-import { QueryLoopLlmError } from '../../src/core/queryErrors.js'
+import {
+  QueryLoopAbortError,
+  QueryLoopLlmError,
+} from '../../src/core/queryErrors.js'
 
 class CapturingLlmClient implements LlmClient {
   readonly providerName = 'capture'
@@ -66,6 +69,32 @@ class FailingLlmClient implements LlmClient {
 
   async createMessage(): Promise<CreateMessageResponse> {
     throw new Error('compact summarize failed')
+  }
+}
+
+class HangingAbortAwareLlmClient implements LlmClient {
+  readonly providerName = 'capture'
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    if (request.signal?.aborted) {
+      const error = new Error('Request aborted')
+      error.name = 'AbortError'
+      throw error
+    }
+
+    return new Promise((_resolve, reject) => {
+      request.signal?.addEventListener(
+        'abort',
+        () => {
+          const error = new Error('Request aborted')
+          error.name = 'AbortError'
+          reject(error)
+        },
+        { once: true },
+      )
+    })
   }
 }
 
@@ -154,6 +183,32 @@ test('QueryEngine starts from initialMessages when resuming', async () => {
   assert.equal(result.messages[0]?.content[0]?.type, 'text')
   assert.equal(result.messages[2]?.role, 'user')
   assert.match(result.outputText, /follow up prompt/)
+})
+
+test('QueryEngine aborts an in-flight prompt through AbortSignal', async () => {
+  const controller = new AbortController()
+  const engine = new QueryEngine({
+    client: new HangingAbortAwareLlmClient(),
+    model: 'stub-model',
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext({
+      cwd: '/tmp/project',
+      sessionId: 'session-abort-prompt',
+    }),
+  })
+
+  const pending = engine.submitUserPrompt('stop this response', {
+    signal: controller.signal,
+  })
+  controller.abort()
+
+  await assert.rejects(pending, QueryLoopAbortError)
+  assert.equal(
+    engine.getMessages().some(message =>
+      getTextContent(message).includes('stop this response'),
+    ),
+    true,
+  )
 })
 
 test('QueryEngine resolves the system prompt from current runtime state', async () => {
@@ -1026,6 +1081,20 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
       '# Plan\n\n- Preserve the current migration sequence.\n',
       'utf8',
     )
+    await updateTaskBoard(
+      board.boardId,
+      current => ({
+        ...current,
+        title: 'Auth migration hardening',
+        purpose: 'Keep the post-compact work batch recoverable.',
+        background: 'The session was compacted while a migration was in flight.',
+        plan: 'Restore the board brief before continuing implementation.',
+        scope: 'Compact recovery only.',
+        verification: 'Inspect the first post-compact LLM request.',
+        updatedAt: new Date().toISOString(),
+      }),
+      env,
+    )
 
     const client = new CapturingLlmClient()
     const toolContext = createToolContext({
@@ -1087,9 +1156,20 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
     assert.match(firstRequestText, /export const restored = true/)
     assert.match(firstRequestText, /# Post-Compact Plan File/)
     assert.match(firstRequestText, /Preserve the current migration sequence/)
+    assert.match(firstRequestText, /# Post-Compact Task Board/)
+    assert.match(firstRequestText, /board title: Auth migration hardening/)
+    assert.match(
+      firstRequestText,
+      /board purpose: Keep the post-compact work batch recoverable\./,
+    )
+    assert.match(
+      firstRequestText,
+      /board plan: Restore the board brief before continuing implementation\./,
+    )
 
     assert.doesNotMatch(secondRequestText, /# Post-Compact Read File/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Plan File/)
+    assert.doesNotMatch(secondRequestText, /# Post-Compact Task Board/)
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })
@@ -1160,6 +1240,105 @@ test('QueryEngine injects invoked skill reminders on the first post-compact turn
     secondRequestText,
     /The following skills were invoked in this session/,
   )
+})
+
+test('QueryEngine truncates oversized invoked skill content after compact', async () => {
+  const client = new CapturingLlmClient()
+  const toolContext = createToolContext({
+    cwd: '/tmp/project',
+    sessionId: 'session-post-compact-skill-truncation',
+  })
+  recordInvokedSkill(toolContext.invokedSkills, {
+    name: 'review',
+    description: 'Inspect a proposed change before shipping.',
+    source: 'project',
+    prompt: `${'A'.repeat(25_000)}\nTAIL_SHOULD_NOT_SURVIVE`,
+    path: '/tmp/project/.dclaw/skills/review.md',
+  })
+
+  const engine = new QueryEngine({
+    client,
+    model: 'stub-model',
+    toolRegistry: new ToolRegistry(),
+    toolContext,
+  })
+
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_skill_truncation',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 6,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  engine.preparePostCompactRecovery(boundary.boundaryId)
+  engine.resetMessages([boundaryMessage, summaryMessage])
+  await engine.submitUserPrompt('continue after compact')
+
+  const requestText = getRequestText(client.requests[0])
+  assert.match(
+    requestText,
+    /The following skills were invoked in this session/,
+  )
+  assert.match(requestText, /\.\.\.\[truncated after ~5000 tokens\]/)
+  assert.doesNotMatch(requestText, /TAIL_SHOULD_NOT_SURVIVE/)
+})
+
+test('QueryEngine limits post-compact invoked skills to the total skill budget', async () => {
+  const client = new CapturingLlmClient()
+  const toolContext = createToolContext({
+    cwd: '/tmp/project',
+    sessionId: 'session-post-compact-skill-budget',
+  })
+
+  for (let index = 1; index <= 6; index += 1) {
+    recordInvokedSkill(
+      toolContext.invokedSkills,
+      {
+        name: `skill-${index}`,
+        description: `Budgeted skill ${index}`,
+        source: 'project',
+        prompt: `${String(index).repeat(19_000)}\nTAIL_SKILL_${index}`,
+        path: `/tmp/project/.dclaw/skills/skill-${index}.md`,
+      },
+      index,
+    )
+  }
+
+  const engine = new QueryEngine({
+    client,
+    model: 'stub-model',
+    toolRegistry: new ToolRegistry(),
+    toolContext,
+  })
+
+  const { boundary, summaryMessage } = createCompactSummaryMessage({
+    boundary: {
+      boundaryId: 'compact_skill_budget',
+      createdAt: new Date().toISOString(),
+      trigger: 'manual',
+      messageCountBefore: 6,
+      reason: 'user requested /compact',
+    },
+    summaryText: 'generated compact summary',
+  })
+  const boundaryMessage = createCompactBoundaryMessage(boundary)
+
+  engine.preparePostCompactRecovery(boundary.boundaryId)
+  engine.resetMessages([boundaryMessage, summaryMessage])
+  await engine.submitUserPrompt('continue after compact')
+
+  const requestText = getRequestText(client.requests[0])
+  assert.match(requestText, /### Skill: skill-6/)
+  assert.match(requestText, /### Skill: skill-5/)
+  assert.match(requestText, /### Skill: skill-4/)
+  assert.match(requestText, /### Skill: skill-3/)
+  assert.match(requestText, /### Skill: skill-2/)
+  assert.doesNotMatch(requestText, /### Skill: skill-1/)
 })
 
 test('QueryEngine does not replay skill listing after compact', async () => {

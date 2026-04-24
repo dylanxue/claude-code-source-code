@@ -102,6 +102,7 @@ Claude Code 当前源码中，除 `plan / task` 外，真正明确走 reminder /
   - `ToolSearch` 自身 prompt 只说明“如何加载 deferred tools”，不重复内嵌整份动态列表
 - `Skill`
   - 已调用 skill 的持续约束通过 `invoked_skills` 注入
+  - `compact` 后恢复 `invoked_skills` 时，需要像 Claude Code 一样做最小预算保护，避免把全部 skill 正文无上限重放回上下文
   - `Skill` tool prompt 只负责说明调用规则，不负责承载每轮动态 skill 清单
 - `MCP`
   - MCP server 自带 instructions 在 delta 模式下通过 `mcp_instructions_delta` 注入

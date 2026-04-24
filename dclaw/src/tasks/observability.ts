@@ -64,8 +64,8 @@ export function describePlanModeToolUse(
 
   if (toolName === 'ExitPlanMode') {
     return note
-      ? `[plan mode] exit requested: ${note}`
-      : '[plan mode] exit requested'
+      ? `[plan mode] exit: ${note}`
+      : '[plan mode] exit'
   }
 
   return undefined
@@ -95,42 +95,51 @@ export function describePlanModeToolResult(
       : undefined
 
   if (toolName === 'EnterPlanMode') {
-    if (status === 'approved') {
+    if (status === 'entered') {
       return planFilePath
-        ? `[plan mode] entered: ${planFilePath}`
-        : '[plan mode] entered'
-    }
-    if (status === 'rejected') {
-      return '[plan mode] entry rejected'
+        ? `[planning lock] entered: ${planFilePath}`
+        : '[planning lock] entered'
     }
     if (status === 'already_active') {
       return planFilePath
-        ? `[plan mode] already active: ${planFilePath}`
-        : '[plan mode] already active'
+        ? `[planning lock] already active: ${planFilePath}`
+        : '[planning lock] already active'
     }
   }
 
   if (toolName === 'ExitPlanMode') {
-    if (status === 'approved') {
+    if (status === 'exited') {
       return resumedPermissionMode
-        ? `[plan mode] exited with approval: ${resumedPermissionMode}`
-        : '[plan mode] exited with approval'
-    }
-    if (status === 'rejected') {
-      return '[plan mode] exit rejected'
+        ? `[planning lock] exited: ${resumedPermissionMode}`
+        : '[planning lock] exited'
     }
     if (status === 'already_inactive') {
-      return '[plan mode] already inactive'
+      return '[planning lock] already inactive'
     }
   }
 
   return summary
 }
 
+export function getTaskBoardBriefObservationLines(board: TaskBoard): string[] {
+  return [
+    ...(board.title ? [`board title: ${board.title}`] : []),
+    ...(board.purpose ? [`board purpose: ${board.purpose}`] : []),
+    ...(board.background ? [`board background: ${board.background}`] : []),
+    ...(board.plan ? [`board plan: ${board.plan}`] : []),
+    ...(board.scope ? [`board scope: ${board.scope}`] : []),
+    ...(board.verification
+      ? [`board verification: ${board.verification}`]
+      : []),
+  ]
+}
+
 export function getTaskBoardObservationLines(board: TaskBoard): string[] {
   const currentTask = getCurrentTask(board)
 
   return [
+    `task board: ${board.boardId}`,
+    ...getTaskBoardBriefObservationLines(board),
     `plan mode state: ${board.mode}`,
     ...(board.planFilePath ? [`plan file: ${board.planFilePath}`] : []),
     ...(currentTask ? [`current task: ${currentTask.subject}`] : []),

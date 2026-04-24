@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createSession } from '../../src/session/store.js'
 import {
   extractInitialTasksFromPlan,
-  materializeInitialTasksFromApprovedPlan,
+  materializeInitialTasksFromPlan,
 } from '../../src/tasks/materialize.js'
 import { listSessionTasks } from '../../src/tasks/store.js'
 
@@ -69,7 +69,7 @@ test('extractInitialTasksFromPlan falls back to implementation-step list items w
   ])
 })
 
-test('materializeInitialTasksFromApprovedPlan seeds the task board only when it is still empty', async () => {
+test('materializeInitialTasksFromPlan seeds the task board only when it is still empty', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-materialize-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -85,7 +85,7 @@ test('materializeInitialTasksFromApprovedPlan seeds the task board only when it 
       env,
     })
 
-    const first = await materializeInitialTasksFromApprovedPlan(
+    const first = await materializeInitialTasksFromPlan(
       session.sessionId,
       '/tmp/project',
       [
@@ -129,7 +129,7 @@ test('materializeInitialTasksFromApprovedPlan seeds the task board only when it 
       ],
     )
 
-    const second = await materializeInitialTasksFromApprovedPlan(
+    const second = await materializeInitialTasksFromPlan(
       session.sessionId,
       '/tmp/project',
       [

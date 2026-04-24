@@ -1,10 +1,16 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import sharp from 'sharp'
+import { createFileQueryTraceSink, createQueryTraceFilePath } from '../../src/core/queryTrace.js'
 import { getMaxRawBytesForImageTokens } from '../../src/llm/imageProcessing.js'
+import type {
+  CreateMessageRequest,
+  CreateMessageResponse,
+  LlmClient,
+} from '../../src/llm/types.js'
 import {
   readFileTool,
   type ReadTextToolOutput,
@@ -42,6 +48,32 @@ function expectTextOutput(
   output: { type: string },
 ): asserts output is ReadTextToolOutput {
   assert.equal(output.type, 'text')
+}
+
+class VisionSideQueryClient implements LlmClient {
+  readonly providerName = 'vision-test'
+  readonly requests: CreateMessageRequest[] = []
+
+  constructor(private readonly responseText: string) {}
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    return {
+      message: {
+        id: 'msg_vision_response',
+        role: 'assistant',
+        createdAt: new Date().toISOString(),
+        content: [
+          {
+            type: 'text',
+            text: this.responseText,
+          },
+        ],
+      },
+    }
+  }
 }
 
 test('Read description and schema nudge callers toward targeted large-file reads', () => {
@@ -99,6 +131,138 @@ test('Read returns structured image content for supported local images', async (
     assert.equal(context.readState.has(filePath), false)
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Read falls back to a vision side query when the active runtime does not support image input', async () => {
+  const dir = await createTempDir('dclaw-read-image-vision-fallback-')
+  const filePath = join(dir, 'pixel.png')
+  const visionClient = new VisionSideQueryClient(
+    [
+      'Visual findings',
+      '- Visible text: none',
+      '- Style / mood: soft gradient reference',
+      '- Layout / composition: centered focal point',
+      '- UI elements / state cues: none',
+      '- Colors / typography / effects: blue glow',
+      '- Uncertainties: none',
+    ].join('\n'),
+  )
+  const pngBase64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQ0AAAAASUVORK5CYII='
+
+  try {
+    await writeFile(filePath, Buffer.from(pngBase64, 'base64'))
+    const result = await readFileTool.call(
+      { file_path: filePath },
+      createToolContext({
+        supportsVisionInput: false,
+        currentUserRequest: '参考这张图的风格做一个 hero section',
+        toolUseIntent: {
+          source: 'assistant_text',
+          text: '我先看下这张参考图的配色和光效细节。',
+        },
+        visionRuntime: {
+          client: visionClient,
+          provider: 'openai',
+          model: 'vision-model',
+        },
+      }),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.type, 'image')
+    assert.equal(result.output.analysisSource, 'vision_side_query')
+    assert.match(result.output.analysisText ?? '', /Style \/ mood: soft gradient reference/)
+    assert.equal(result.content?.length, 1)
+    assert.equal(result.content?.[0]?.type, 'text')
+    assert.match((result.content?.[0] as { type: 'text'; text: string }).text, /vision side query/i)
+    assert.equal(result.newMessages?.length ?? 0, 0)
+    assert.equal(visionClient.requests.length, 1)
+    const visionPrompt = visionClient.requests[0]?.messages[0]
+    assert.ok(visionPrompt)
+    assert.equal(visionPrompt?.content[1]?.type, 'image')
+    assert.match(
+      (visionPrompt?.content[0] as { type: 'text'; text: string }).text,
+      /Why this image is being read now \(assistant_text\):/,
+    )
+    assert.match(
+      (visionPrompt?.content[0] as { type: 'text'; text: string }).text,
+      /配色和光效细节/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Read records vision side query events in the query trace sink', async () => {
+  const dir = await createTempDir('dclaw-read-image-vision-trace-')
+  const filePath = join(dir, 'pixel.png')
+  const tracePath = createQueryTraceFilePath()
+  const queryTraceSink = await createFileQueryTraceSink(tracePath)
+  const visionClient = new VisionSideQueryClient(
+    [
+      'Visual findings',
+      '- Visible text: SALE',
+      '- Style / mood: bright promo banner',
+      '- Layout / composition: centered headline',
+      '- UI elements / state cues: none',
+      '- Colors / typography / effects: red accent',
+      '- Uncertainties: none',
+    ].join('\n'),
+  )
+  const pngBase64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQ0AAAAASUVORK5CYII='
+
+  try {
+    await writeFile(filePath, Buffer.from(pngBase64, 'base64'))
+    const result = await readFileTool.call(
+      { file_path: filePath },
+      createToolContext({
+        currentIteration: 3,
+        queryTraceSink,
+        supportsVisionInput: false,
+        currentUserRequest: '参考这张图做一个促销 banner',
+        toolUseIntent: {
+          source: 'assistant_text',
+          text: '我先提取这张图里的主视觉风格和文案线索。',
+        },
+        visionRuntime: {
+          client: visionClient,
+          provider: 'openai',
+          model: 'vision-model',
+        },
+      }),
+    )
+
+    assert.equal(result.ok, true)
+    await queryTraceSink.flush()
+
+    const traceText = await readFile(tracePath, 'utf8')
+    const traceEvents = traceText
+      .trim()
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as {
+        event: string
+        iteration?: number
+        data?: Record<string, unknown>
+      })
+
+    assert.deepEqual(
+      traceEvents.map((event) => event.event),
+      ['vision_side_query.start', 'vision_side_query.complete'],
+    )
+    assert.equal(traceEvents[0]?.iteration, 3)
+    assert.equal(traceEvents[0]?.data?.provider, 'openai')
+    assert.equal(traceEvents[0]?.data?.model, 'vision-model')
+    assert.equal(traceEvents[0]?.data?.intentSource, 'assistant_text')
+    assert.match(String(traceEvents[0]?.data?.intentPreview ?? ''), /主视觉风格和文案线索/)
+    assert.equal(traceEvents[1]?.iteration, 3)
+    assert.match(String(traceEvents[1]?.data?.outputPreview ?? ''), /Visual findings/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+    await rm(tracePath, { force: true })
   }
 })
 

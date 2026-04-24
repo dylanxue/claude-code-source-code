@@ -38,6 +38,12 @@ export type TaskBoard = {
   rootSessionId: string
   latestSessionId: string
   planFilePath?: string
+  title?: string
+  purpose?: string
+  background?: string
+  plan?: string
+  scope?: string
+  verification?: string
   mode: PlanModeStatus
   resumePermissionMode?: PermissionMode
   createdAt: string

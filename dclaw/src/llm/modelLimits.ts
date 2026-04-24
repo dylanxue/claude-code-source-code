@@ -11,10 +11,16 @@ export type ModelLimits = {
   maxOutputTokensUpperLimit: number
 }
 
-type PartialModelLimits = Partial<ModelLimits>
+export type ModelCapabilities = {
+  supportsVisionInput: boolean
+}
+
+type PartialModelMetadata = Partial<ModelLimits> & {
+  supportsVisionInput?: boolean
+}
 
 type UserModelLimitsConfig = {
-  providers?: Partial<Record<LlmProviderName, Record<string, PartialModelLimits>>>
+  providers?: Partial<Record<LlmProviderName, Record<string, PartialModelMetadata>>>
 }
 
 type ModelLimitRule = {
@@ -22,11 +28,23 @@ type ModelLimitRule = {
   limits: ModelLimits
 }
 
+type ModelCapabilityRule = {
+  match: string
+  capabilities: ModelCapabilities
+}
+
 function buildAliasRules(
   matches: string[],
   limits: ModelLimits,
 ): ModelLimitRule[] {
   return matches.map((match) => ({ match, limits }))
+}
+
+function buildCapabilityAliasRules(
+  matches: string[],
+  capabilities: ModelCapabilities,
+): ModelCapabilityRule[] {
+  return matches.map((match) => ({ match, capabilities }))
 }
 
 const DEFAULT_ANTHROPIC_LIMITS: ModelLimits = {
@@ -39,6 +57,26 @@ const DEFAULT_OPENAI_LIMITS: ModelLimits = {
   contextWindow: 400_000,
   maxOutputTokens: 128_000,
   maxOutputTokensUpperLimit: 128_000,
+}
+
+const DEFAULT_ANTHROPIC_CAPABILITIES: ModelCapabilities = {
+  supportsVisionInput: true,
+}
+
+const DEFAULT_OPENAI_CAPABILITIES: ModelCapabilities = {
+  supportsVisionInput: true,
+}
+
+const DEFAULT_STUB_CAPABILITIES: ModelCapabilities = {
+  supportsVisionInput: false,
+}
+
+const VISION_INPUT_SUPPORTED: ModelCapabilities = {
+  supportsVisionInput: true,
+}
+
+const VISION_INPUT_NOT_SUPPORTED: ModelCapabilities = {
+  supportsVisionInput: false,
 }
 
 const DOUBAO_SEED_CODE_LIMITS: ModelLimits = {
@@ -262,6 +300,43 @@ const COMPAT_MODEL_LIMIT_RULES: ModelLimitRule[] = [
   },
 ]
 
+const COMPAT_MODEL_CAPABILITY_RULES: ModelCapabilityRule[] = [
+  ...buildCapabilityAliasRules(
+    ['doubao-seed-code', 'bytedance-seed-code'],
+    VISION_INPUT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(
+    ['doubao-seed-2.0', 'seed-2.0', 'seed-2-0', 'dola-seed-2.0'],
+    VISION_INPUT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(
+    ['doubao-seed-1.8', 'seed-1.8', 'seed-1-8'],
+    VISION_INPUT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(
+    ['doubao-seed-1.6', 'seed-1.6', 'seed-1-6'],
+    VISION_INPUT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(['kimi-k2.5'], VISION_INPUT_SUPPORTED),
+  ...buildCapabilityAliasRules(['kimi-k2'], VISION_INPUT_NOT_SUPPORTED),
+  ...buildCapabilityAliasRules(
+    ['glm-4.5v', 'glm-5v', 'glm-5v-turbo', 'glm-4.1v', 'glm-ocr'],
+    VISION_INPUT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(
+    ['glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5'],
+    VISION_INPUT_NOT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(
+    ['deepseek-chat', 'deepseek-v3.2', 'deepseek-reasoner'],
+    VISION_INPUT_NOT_SUPPORTED,
+  ),
+  ...buildCapabilityAliasRules(
+    ['minimax-m2.7', 'minimax-m2.5', 'minimax-m2.1', 'minimax-m2'],
+    VISION_INPUT_NOT_SUPPORTED,
+  ),
+]
+
 const ANTHROPIC_LIMIT_RULES: ModelLimitRule[] = [
   ...COMPAT_MODEL_LIMIT_RULES,
   {
@@ -360,6 +435,11 @@ const ANTHROPIC_LIMIT_RULES: ModelLimitRule[] = [
       maxOutputTokensUpperLimit: 4_096,
     },
   },
+]
+
+const ANTHROPIC_CAPABILITY_RULES: ModelCapabilityRule[] = [
+  ...COMPAT_MODEL_CAPABILITY_RULES,
+  ...buildCapabilityAliasRules(['claude-'], VISION_INPUT_SUPPORTED),
 ]
 
 const OPENAI_LIMIT_RULES: ModelLimitRule[] = [
@@ -494,6 +574,25 @@ const OPENAI_LIMIT_RULES: ModelLimitRule[] = [
   },
 ]
 
+const OPENAI_CAPABILITY_RULES: ModelCapabilityRule[] = [
+  ...COMPAT_MODEL_CAPABILITY_RULES,
+  ...buildCapabilityAliasRules(
+    [
+      'gpt-4.1',
+      'gpt-5',
+      'gpt-5.1',
+      'gpt-5.2',
+      'gpt-5.3',
+      'gpt-5.4',
+      'gpt-5-codex',
+      'gpt-5.1-codex',
+      'codex-mini-latest',
+      'o4-mini',
+    ],
+    VISION_INPUT_SUPPORTED,
+  ),
+]
+
 function parsePositiveInt(value: string | undefined): number | undefined {
   const trimmed = trimOrUndefined(value)
   if (!trimmed) {
@@ -536,13 +635,45 @@ function getProviderRules(provider: LlmProviderName): ModelLimitRule[] {
   throw new Error(`Unsupported provider: ${unsupportedProvider}`)
 }
 
+function getProviderCapabilityRules(
+  provider: LlmProviderName,
+): ModelCapabilityRule[] {
+  switch (provider) {
+    case 'anthropic':
+      return ANTHROPIC_CAPABILITY_RULES
+    case 'openai':
+      return OPENAI_CAPABILITY_RULES
+    case 'stub':
+      return []
+  }
+
+  const unsupportedProvider: never = provider
+  throw new Error(`Unsupported provider: ${unsupportedProvider}`)
+}
+
+function getProviderDefaultCapabilities(
+  provider: LlmProviderName,
+): ModelCapabilities {
+  switch (provider) {
+    case 'anthropic':
+      return DEFAULT_ANTHROPIC_CAPABILITIES
+    case 'openai':
+      return DEFAULT_OPENAI_CAPABILITIES
+    case 'stub':
+      return DEFAULT_STUB_CAPABILITIES
+  }
+
+  const unsupportedProvider: never = provider
+  throw new Error(`Unsupported provider: ${unsupportedProvider}`)
+}
+
 function normalizeModelName(model: string | undefined): string {
   return model?.trim().toLowerCase() ?? ''
 }
 
 function mergeModelLimits(
   base: ModelLimits,
-  override: PartialModelLimits | undefined,
+  override: Partial<ModelLimits> | undefined,
 ): ModelLimits {
   if (!override) {
     return base
@@ -582,16 +713,16 @@ function sanitizeModelLimits(limits: ModelLimits): ModelLimits {
   }
 }
 
-function getBestMatchingRule(
+function getBestMatchingRule<T>(
   model: string,
-  rules: Record<string, PartialModelLimits> | undefined,
-): PartialModelLimits | undefined {
+  rules: Record<string, T> | undefined,
+): T | undefined {
   if (!rules) {
     return undefined
   }
 
   let bestMatchKey: string | undefined
-  let bestMatchValue: PartialModelLimits | undefined
+  let bestMatchValue: T | undefined
 
   for (const [rawKey, value] of Object.entries(rules)) {
     const key = normalizeModelName(rawKey)
@@ -683,6 +814,26 @@ export function getBuiltInModelLimits(
   return defaults
 }
 
+export function getBuiltInModelCapabilities(
+  provider: LlmProviderName,
+  model: string | undefined,
+): ModelCapabilities {
+  const normalizedModel = normalizeModelName(model)
+  const defaults = getProviderDefaultCapabilities(provider)
+
+  if (normalizedModel.length === 0) {
+    return defaults
+  }
+
+  for (const rule of getProviderCapabilityRules(provider)) {
+    if (normalizedModel.startsWith(rule.match)) {
+      return rule.capabilities
+    }
+  }
+
+  return defaults
+}
+
 export function resolveModelLimits(
   provider: LlmProviderName,
   model: string | undefined,
@@ -709,4 +860,21 @@ export function resolveModelLimits(
   })
 
   return limits
+}
+
+export function resolveModelCapabilities(
+  provider: LlmProviderName,
+  model: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): ModelCapabilities {
+  const normalizedModel = normalizeModelName(model)
+  const builtIn = getBuiltInModelCapabilities(provider, normalizedModel)
+  const userConfig = loadUserModelLimitsConfig(env)
+  const providerRules = userConfig?.providers?.[provider]
+  const userOverride = getBestMatchingRule(normalizedModel, providerRules)
+
+  return {
+    supportsVisionInput:
+      userOverride?.supportsVisionInput ?? builtIn.supportsVisionInput,
+  }
 }

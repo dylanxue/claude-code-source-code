@@ -39,7 +39,7 @@ function buildPlanModeReminderText(
       'Do not start implementation yet.',
       'Only read-only tools and edits to the plan file are allowed.',
       'Explore the codebase, interview the user when needed, and keep refining the plan file.',
-      'When the plan is ready, call ExitPlanMode.',
+      'When the plan is ready to present, call ExitPlanMode.',
     ].join('\n')
   }
 
@@ -52,12 +52,12 @@ function buildPlanModeReminderText(
     '1. Explore the codebase with read-only tools',
     '2. Clarify ambiguities or open questions',
     '3. Write or refine the plan in the plan file',
-    '4. Stay in planning until the plan is ready for approval',
+    '4. Stay in planning until the plan is ready to present to the user',
     '',
     'Important constraints:',
     '- Do not start implementation yet',
     '- The plan file is the only file you may edit while plan mode remains active',
-    '- When the plan is ready, call ExitPlanMode to request approval',
+    '- When the plan is ready, call ExitPlanMode to present it and wait for the user',
   ].join('\n')
 }
 
@@ -85,7 +85,8 @@ function buildPlanModeExitText(board: TaskBoard): string {
   return [
     '## Exited Plan Mode',
     '',
-    `You have exited plan mode. You can now make edits, run tools, and take implementation actions.${planReference}`,
+    `You have exited plan mode.${planReference}`,
+    'Present the plan to the user now. Do not start implementation until the user asks you to proceed or gives follow-up changes.',
   ].join('\n')
 }
 

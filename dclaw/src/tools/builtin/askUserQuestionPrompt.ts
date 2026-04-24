@@ -21,6 +21,6 @@ Usage notes:
 Plan mode note:
 
 - In plan mode, use this tool to clarify requirements or choose between approaches before finalizing the plan
-- Do NOT use this tool to ask "Is the plan okay?" or "Should I proceed?"; use ExitPlanMode for plan approval instead
-- IMPORTANT: Do not reference "the plan" in your questions because the user cannot see the full plan until ExitPlanMode is called
+- Do NOT use this tool to ask "Is the plan okay?" or "Should I proceed?"; use ExitPlanMode to present the finished plan instead
+- IMPORTANT: Do not reference "the plan" in your questions as if the user has already reviewed it; the full plan is shown when ExitPlanMode is called
 `

@@ -31,7 +31,7 @@ import {
   type ToolResultBudgetMetadata,
   type ToolResultBudgetOptions,
 } from './toolResultBudget.js'
-import { QueryLoopLlmError } from './queryErrors.js'
+import { QueryLoopAbortError, QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
 
 const APPROX_ASCII_CHARS_PER_TOKEN = 4
@@ -53,6 +53,7 @@ export type QueryLoopRequest = {
   maxIterations?: number
   toolResultBudgetOptions?: ToolResultBudgetOptions
   queryTraceSink?: QueryTraceSink
+  abortSignal?: AbortSignal
   streamHandlers?: {
     onTextDelta?: (text: string) => void
     onReasoningDelta?: (delta: {
@@ -118,6 +119,23 @@ export type QueryLoopResult = {
 }
 
 export const DEFAULT_QUERY_MAX_ITERATIONS = 128
+
+function throwIfAborted(
+  request: QueryLoopRequest,
+  options: {
+    addedMessages?: Message[]
+    usedPostCompactAttachments?: boolean
+  } = {},
+): void {
+  if (!request.abortSignal?.aborted) {
+    return
+  }
+
+  recordTrace(request.queryTraceSink, 'turn.abort', {
+    addedMessageCount: options.addedMessages?.length ?? 0,
+  })
+  throw new QueryLoopAbortError(options)
+}
 
 function countAsciiChars(text: string): number {
   let asciiChars = 0
@@ -193,6 +211,135 @@ function stringifyOutput(value: unknown): string {
 
 function createSystemReminderMessage(text: string): Message {
   return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
+}
+
+function normalizeToolUseIntentText(value: string): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized.length <= 800
+    ? normalized
+    : `${normalized.slice(0, 800).trimEnd()}...`
+}
+
+function isSystemReminderText(text: string): boolean {
+  return text.trimStart().startsWith('<system-reminder>')
+}
+
+function getLatestUserRequestEntry(messages: Message[]): {
+  index: number
+  text: string
+} | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message || message.role !== 'user' || message.transcriptOnly === true) {
+      continue
+    }
+
+    const text = getTextContent(message).trim()
+    if (text.length > 0 && !isSystemReminderText(text)) {
+      return {
+        index,
+        text,
+      }
+    }
+  }
+
+  return undefined
+}
+
+function getReasoningText(block: ContentBlock): string | undefined {
+  if (block.type === 'thinking') {
+    return block.thinking
+  }
+  if (block.type === 'reasoning') {
+    return block.summary.join(' ')
+  }
+  return undefined
+}
+
+function buildToolUseIntentFromBlocks(
+  relevantBlocks: ContentBlock[],
+): ToolContext['toolUseIntent'] {
+  const assistantText = relevantBlocks
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+    .trim()
+  if (assistantText.length > 0) {
+    return {
+      source: 'assistant_text',
+      text: normalizeToolUseIntentText(assistantText),
+    }
+  }
+
+  const reasoningText = relevantBlocks
+    .map(getReasoningText)
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join('\n')
+    .trim()
+  if (reasoningText.length > 0) {
+    return {
+      source: 'reasoning',
+      text: normalizeToolUseIntentText(reasoningText),
+    }
+  }
+
+  return undefined
+}
+
+function getLatestAssistantIntentAfter(
+  messages: Message[],
+  afterIndex: number,
+): ToolContext['toolUseIntent'] {
+  for (let index = messages.length - 1; index > afterIndex; index -= 1) {
+    const message = messages[index]
+    if (
+      !message ||
+      message.role !== 'assistant' ||
+      message.transcriptOnly === true
+    ) {
+      continue
+    }
+
+    const intent = buildToolUseIntentFromBlocks(message.content)
+    if (intent) {
+      return intent
+    }
+  }
+
+  return undefined
+}
+
+function buildToolUseIntent(
+  assistantMessage: Message,
+  toolUseId: string,
+  fallbackAssistantIntent: ToolContext['toolUseIntent'],
+  fallbackUserRequest: string | undefined,
+): ToolContext['toolUseIntent'] {
+  const toolUseIndex = assistantMessage.content.findIndex(
+    block => block.type === 'tool_use' && block.id === toolUseId,
+  )
+  const relevantBlocks =
+    toolUseIndex >= 0
+      ? assistantMessage.content.slice(0, toolUseIndex)
+      : assistantMessage.content
+
+  const localIntent = buildToolUseIntentFromBlocks(relevantBlocks)
+  if (localIntent) {
+    return localIntent
+  }
+
+  if (fallbackAssistantIntent) {
+    return fallbackAssistantIntent
+  }
+
+  if (fallbackUserRequest && fallbackUserRequest.trim().length > 0) {
+    return {
+      source: 'user_request',
+      text: normalizeToolUseIntentText(fallbackUserRequest),
+    }
+  }
+
+  return undefined
 }
 
 function hasRepairableEmptyAssistantResponse(message: Message): boolean {
@@ -449,6 +596,7 @@ function getAvailableTools(
 export async function executeSingleTurn(
   request: QueryLoopRequest,
 ): Promise<QueryLoopResult> {
+  throwIfAborted(request)
   const maxIterations = request.maxIterations ?? DEFAULT_QUERY_MAX_ITERATIONS
   const workingMessages = [...request.messages]
   const addedMessages: Message[] = []
@@ -495,6 +643,10 @@ export async function executeSingleTurn(
 
   try {
     for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      throwIfAborted(request, {
+        addedMessages,
+        usedPostCompactAttachments,
+      })
       const baseIterationState =
         iteration === 1
           ? initialIterationState
@@ -596,6 +748,10 @@ export async function executeSingleTurn(
 
       let streamedResponse
       try {
+        throwIfAborted(request, {
+          addedMessages,
+          usedPostCompactAttachments,
+        })
         streamedResponse =
           useStreaming
             ? await request.client.createMessageStream!.call(
@@ -605,6 +761,7 @@ export async function executeSingleTurn(
                   systemPrompt: iterationState.systemPrompt,
                   messages: iterationState.messages,
                   tools: iterationState.toolDefinitions,
+                  signal: request.abortSignal,
                 },
                 {
                   onTextDelta: text => {
@@ -651,8 +808,16 @@ export async function executeSingleTurn(
                 systemPrompt: iterationState.systemPrompt,
                 messages: iterationState.messages,
                 tools: iterationState.toolDefinitions,
+                signal: request.abortSignal,
               })
       } catch (error) {
+        if (request.abortSignal?.aborted) {
+          throw new QueryLoopAbortError({
+            addedMessages,
+            usedPostCompactAttachments,
+          })
+        }
+
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown LLM error'
         const llmError = {
@@ -815,7 +980,25 @@ export async function executeSingleTurn(
       const toolResultMessages: Message[] = []
       const toolGeneratedMessages: Message[] = []
       const toolResultMetadata = new Map<string, ToolResultBudgetMetadata>()
+      const latestUserRequestEntry = getLatestUserRequestEntry(workingMessages)
+      const latestUserRequest = latestUserRequestEntry?.text
+      const fallbackAssistantIntent = getLatestAssistantIntentAfter(
+        workingMessages.slice(0, -1),
+        latestUserRequestEntry?.index ?? -1,
+      )
+      request.toolContext.currentIteration = iteration
+      request.toolContext.currentUserRequest = latestUserRequest
       for (const block of toolUseBlocks) {
+        throwIfAborted(request, {
+          addedMessages,
+          usedPostCompactAttachments,
+        })
+        request.toolContext.toolUseIntent = buildToolUseIntent(
+          assistantMessage,
+          block.id,
+          fallbackAssistantIntent,
+          latestUserRequest,
+        )
         const tool = request.toolRegistry.get(block.name)
         if (!tool) {
           recordTrace(

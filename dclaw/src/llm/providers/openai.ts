@@ -1395,7 +1395,7 @@ export class OpenAiLlmClient implements LlmClient {
           }
 
           return (await response.json()) as OpenAiChatCompletionResponse
-        })
+        }, request.signal)
       })
       const content = parseChatCompletionResponse(parsed)
       if (content.length === 0) {
@@ -1432,7 +1432,7 @@ export class OpenAiLlmClient implements LlmClient {
         }
 
         return (await response.json()) as OpenAiResponsesResponse
-      })
+      }, request.signal)
     })
     const content = parseResponsesResponse(parsed)
     if (content.length === 0) {
@@ -1477,7 +1477,7 @@ export class OpenAiLlmClient implements LlmClient {
           }
 
           return response
-        })
+        }, request.signal)
 
         const streamState: StreamingResponsesState = {
           textByOutputIndex: new Map(),
@@ -1570,7 +1570,7 @@ export class OpenAiLlmClient implements LlmClient {
         }
 
         return response
-      })
+      }, request.signal)
 
       let text = ''
       let reasoning = ''
@@ -1724,10 +1724,12 @@ export class OpenAiLlmClient implements LlmClient {
 
   private withRequestTimeout<T>(
     operation: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return withTimeout(operation, {
       timeoutMs: this.requestTimeoutMs,
       timeoutMessage: `OpenAI request timed out after ${this.requestTimeoutMs}ms`,
+      signal,
     })
   }
 }

@@ -353,9 +353,9 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   assert.match(taskUpdate?.description ?? '', /## Examples/i)
 
   const enterPlanMode = tools.find(tool => tool.name === 'EnterPlanMode')
-  assert.match(enterPlanMode?.description ?? '', /Prefer using EnterPlanMode/i)
-  assert.match(enterPlanMode?.description ?? '', /Multi-file changes/i)
-  assert.match(enterPlanMode?.description ?? '', /err on the side of planning/i)
+  assert.match(enterPlanMode?.description ?? '', /no-implementation planning lock/i)
+  assert.match(enterPlanMode?.description ?? '', /Do not enter plan mode merely because a task is non-trivial/i)
+  assert.match(enterPlanMode?.description ?? '', /Task boards are the runtime execution state/i)
 })
 
 test('query loop stores model-facing tool results separately from raw tool results', async () => {

@@ -5,7 +5,11 @@ import type { QueryTraceSink } from '../core/queryTrace.js'
 import type { DclawMdEntry } from '../prompt/dclawMd.js'
 import type { SkillRegistry } from '../skills/registry.js'
 import type { Message } from '../types/message.js'
-import type { PermissionMode, ToolContext } from '../types/tool.js'
+import type {
+  PermissionMode,
+  ToolContext,
+  VisionRuntime,
+} from '../types/tool.js'
 import type { ToolRegistry } from '../tools/registry.js'
 
 export const DEFAULT_SUBAGENT_MAX_TURNS = 16
@@ -81,9 +85,14 @@ export type ParentAgentRuntime = {
   provider?: LlmProviderName
   model?: string
   cwd: string
+  env?: NodeJS.ProcessEnv
   permissionMode: PermissionMode
   availableTools: string[]
   planFilePath?: string
+  parentSessionId?: string
+  currentAgentId?: string
+  supportsVisionInput?: boolean
+  visionRuntime?: VisionRuntime
   askUserQuestions?: ToolContext['askUserQuestions']
   toolRegistry: ToolRegistry
   skillRegistry?: SkillRegistry
@@ -96,9 +105,7 @@ export type ParentAgentRuntime = {
   ) => Promise<QueryTraceSink | undefined>
 }
 
-export type AgentToolRuntime = ParentAgentRuntime & {
-  env?: NodeJS.ProcessEnv
-}
+export type AgentToolRuntime = ParentAgentRuntime
 
 export type CreateSubagentRuntimeInput = {
   agent: AgentRecord

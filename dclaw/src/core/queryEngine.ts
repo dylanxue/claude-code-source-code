@@ -34,7 +34,7 @@ import {
   executeSingleTurn,
   type QueryLoopRequest,
 } from './queryLoop.js'
-import { QueryLoopLlmError } from './queryErrors.js'
+import { QueryLoopAbortError, QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
 import {
   createPlanModeReminderMessages,
@@ -110,6 +110,10 @@ export type QueryResult = {
 
 export type QueryStreamHandlers = NonNullable<QueryLoopRequest['streamHandlers']>
 
+export type QuerySubmitOptions = {
+  signal?: AbortSignal
+}
+
 export class QueryEngine {
   private readonly client: LlmClient
   private readonly provider?: LlmProviderName
@@ -172,6 +176,7 @@ export class QueryEngine {
     }
     this.restoreSkillListingStateFromMessages(this.messages)
     this.queryTraceSink = options.queryTraceSink
+    this.toolContext.queryTraceSink = this.queryTraceSink
     this.dclawMdEntries = [...(options.dclawMdEntries ?? [])]
   }
 
@@ -236,6 +241,7 @@ export class QueryEngine {
 
   setQueryTraceSink(queryTraceSink: QueryTraceSink | undefined): void {
     this.queryTraceSink = queryTraceSink
+    this.toolContext.queryTraceSink = queryTraceSink
   }
 
   getSessionId(): string | undefined {
@@ -465,7 +471,14 @@ export class QueryEngine {
 
   private async autoCompactIfNeeded(
     streamHandlers?: QueryStreamHandlers,
+    options: QuerySubmitOptions = {},
   ): Promise<QueryResult['autoCompact'] | undefined> {
+    if (options.signal?.aborted) {
+      throw new QueryLoopAbortError({
+        usedPostCompactAttachments: false,
+      })
+    }
+
     const sourceSessionId = this.toolContext.sessionId
     if (!sourceSessionId || !this.provider) {
       return undefined
@@ -542,15 +555,19 @@ export class QueryEngine {
     }
   }
 
-  async submitUserPrompt(prompt: string): Promise<QueryResult> {
-    return this.submitUserPromptWithHandlers(prompt)
+  async submitUserPrompt(
+    prompt: string,
+    options: QuerySubmitOptions = {},
+  ): Promise<QueryResult> {
+    return this.submitUserPromptWithHandlers(prompt, undefined, options)
   }
 
   async submitUserPromptWithHandlers(
     prompt: string,
     streamHandlers?: QueryStreamHandlers,
+    options: QuerySubmitOptions = {},
   ): Promise<QueryResult> {
-    const autoCompact = await this.autoCompactIfNeeded(streamHandlers)
+    const autoCompact = await this.autoCompactIfNeeded(streamHandlers, options)
     const persistedMessagesBeforeUser = this.getMessages()
     const priorMessages = getMessagesAfterCompactBoundary(
       getModelVisibleMessages(persistedMessagesBeforeUser),
@@ -593,10 +610,14 @@ export class QueryEngine {
         maxIterations: this.maxIterations,
         toolResultBudgetOptions,
         streamHandlers,
+        abortSignal: options.signal,
         queryTraceSink: this.queryTraceSink,
       })
     } catch (error) {
-      if (error instanceof QueryLoopLlmError) {
+      if (
+        error instanceof QueryLoopLlmError ||
+        error instanceof QueryLoopAbortError
+      ) {
         if (error.addedMessages.length > 0) {
           this.messages.push(...error.addedMessages)
         }

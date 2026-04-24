@@ -80,30 +80,30 @@ test('askUserQuestionsInteractively prints option previews inline', async () => 
     const result = await askUserQuestionsInteractively([
       {
         id: 'decision',
-        header: 'Plan Ready',
-        question: 'Exit plan mode?',
+        header: 'Plan Choice',
+        question: 'Choose plan direction?',
         options: [
           {
-            label: 'Approve',
-            description: 'Leave plan mode and implement the approved plan.',
-            preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+            label: 'Looks Good',
+            description: 'Continue with this direction.',
+            preview: '# Plan\n\n- Inspect existing flow\n- Update plan handoff UI',
           },
           {
-            label: 'Keep Planning',
-            description: 'Stay in plan mode and keep refining the plan.',
+            label: 'Revise Plan',
+            description: 'Adjust the plan before continuing.',
           },
         ],
       },
     ])
 
-    assert.deepEqual(result, { decision: 'Approve' })
+    assert.deepEqual(result, { decision: 'Looks Good' })
     const text = output.join('')
-    assert.match(text, /\[Plan Ready\] Exit plan mode\?/)
-    assert.match(text, /1\. Approve - Leave plan mode and implement the approved plan\./)
+    assert.match(text, /\[Plan Choice\] Choose plan direction\?/)
+    assert.match(text, /1\. Looks Good - Continue with this direction\./)
     assert.doesNotMatch(text, /3\. Other - Provide a custom answer in your own words\./)
     assert.doesNotMatch(text, /Chat about this/)
     assert.match(text, /# Plan/)
-    assert.match(text, /- Update approval UI/)
+    assert.match(text, /- Update plan handoff UI/)
     assert.deepEqual(prompts, ['选择一个编号: '])
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
@@ -130,17 +130,17 @@ test('askUserQuestionsInteractively can return the preview question chat exit', 
       [
         {
           id: 'decision',
-          header: 'Plan Ready',
-          question: 'Exit plan mode?',
+          header: 'Plan Choice',
+          question: 'Choose plan direction?',
           options: [
             {
-              label: 'Approve',
-              description: 'Leave plan mode and implement the approved plan.',
-              preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+              label: 'Looks Good',
+              description: 'Continue with this direction.',
+              preview: '# Plan\n\n- Inspect existing flow\n- Update plan handoff UI',
             },
             {
-              label: 'Keep Planning',
-              description: 'Stay in plan mode and keep refining the plan.',
+              label: 'Revise Plan',
+              description: 'Adjust the plan before continuing.',
             },
           ],
         },
@@ -152,10 +152,10 @@ test('askUserQuestionsInteractively can return the preview question chat exit', 
     )
 
     assert.deepEqual(result, {
-      answers: { decision: 'Approve' },
+      answers: { decision: 'Looks Good' },
       annotations: {
         decision: {
-          preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+          preview: '# Plan\n\n- Inspect existing flow\n- Update plan handoff UI',
           notes: 'Please compare both options first',
         },
       },
@@ -190,17 +190,17 @@ test('askUserQuestionsInteractively only enables preview exits when requested', 
       [
         {
           id: 'decision',
-          header: 'Plan Ready',
-          question: 'Exit plan mode?',
+          header: 'Plan Choice',
+          question: 'Choose plan direction?',
           options: [
             {
-              label: 'Approve',
-              description: 'Leave plan mode and implement the approved plan.',
-              preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+              label: 'Looks Good',
+              description: 'Continue with this direction.',
+              preview: '# Plan\n\n- Inspect existing flow\n- Update plan handoff UI',
             },
             {
-              label: 'Keep Planning',
-              description: 'Stay in plan mode and keep refining the plan.',
+              label: 'Revise Plan',
+              description: 'Adjust the plan before continuing.',
             },
           ],
         },
@@ -212,10 +212,10 @@ test('askUserQuestionsInteractively only enables preview exits when requested', 
     )
 
     assert.deepEqual(result, {
-      answers: { decision: 'Approve' },
+      answers: { decision: 'Looks Good' },
       annotations: {
         decision: {
-          preview: '# Plan\n\n- Inspect existing flow\n- Update approval UI',
+          preview: '# Plan\n\n- Inspect existing flow\n- Update plan handoff UI',
           notes: 'Keep the current structure',
         },
       },

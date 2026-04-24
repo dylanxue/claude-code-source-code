@@ -38,6 +38,17 @@
    - runtime 将其中的图片内容提升为下一轮临时 `user image message`
    - 两家 provider 都按相同方式继续推理
 
+另外，当前又补了一条受控降级链路：
+
+3. 当前主 runtime 不支持视觉输入，但额外配置了 vision runtime：
+   - `Read/WebFetch` 读到图片后，不再把 image block 直接交给当前主模型
+   - 工具内部会触发一次最小 `vision side query`
+   - side query 只吃：
+     - 当前用户请求
+     - 当前这次 tool use 的局部意图
+   - side query 返回纯文本视觉观察结果
+   - 主模型继续消费这段文本，而不是中途切换整个主会话 provider
+
 ## 3. 设计结论
 
 根据当前代码与 Claude Code 对齐方向，真正的一等公民不是“附件”，而是统一消息模型：
@@ -85,6 +96,8 @@
 - provider 文件上传中转
 - 终端内图片预览 UI
 - 在当前 `readline` REPL 上伪装 Claude Code 级粘贴体验
+- 主 query loop 中途动态切换 provider
+- 把 `vision side query` 扩写成通用多模态路由器
 
 另外，下面这些不是“不做”，而是当前尚未进入已完成主线：
 
@@ -276,7 +289,42 @@
 - 所以下一步不应是“把图片塞进现有文本型 budget 做持久化替换”
 - 下一步更值得评估的是“是否要继续把这条一次性图片恢复扩展成更完整的 multimodal attachment restore”
 
-### 5.9 P2：QueryEngine 输入面支持结构化用户消息
+### 5.9 P1：text-only 主 runtime 的 `vision side query` 降级路径
+
+这一阶段已落最小主路径。
+
+- [x] 不引入“主会话中途切 provider”的 failover 方案
+- [x] 当前主 runtime 不支持视觉输入时，允许额外配置独立 `vision runtime`
+- [x] 首版只覆盖：
+  - `Read(image)`
+  - `WebFetch(image)`
+- [x] side query 只吃最小上下文：
+  - 当前用户请求
+  - 当前这次 tool use 的局部意图
+- [x] 当前 `toolUseIntent` 已按固定顺序提取：
+  - 最近 assistant 可见文本
+  - 若无，则同轮 reasoning/thinking
+  - 若再无，则最近用户请求
+- [x] side query 返回纯文本视觉观察结果，再作为普通文本 tool result 继续喂回主流程
+- [x] 当前主 runtime 不支持视觉输入、且也未配置 vision runtime 时，会在 `Read/WebFetch(image)` 上显式报错，而不是静默返回主模型无法消费的 image block
+
+当前结果：
+
+- 主 query loop 仍保持单 provider 主线，不会因为某一次读图就把整段会话切到另一个 provider
+- 图片降级分析发生在工具层，而不是让模型自己猜“现在要不要切视觉模型”
+- side query prompt 当前只做最小事实提取，不做代码生成、实现决策或全局会话摘要
+- `Read/WebFetch(image)` 的图片路径现在具备两种受控模式：
+  - 主 runtime 支持视觉：继续返回结构化 image content
+  - 主 runtime 不支持视觉，但配置了 vision runtime：改走 side query，返回文本观察结果
+
+当前边界：
+
+- 还没有扩到用户直接附图、interactive 图片输入、`--print --image`
+- 还没有扩成通用“任何图片来源都自动 side query”的全局机制
+- 还没有为 side query 引入更复杂的任务分类器；当前只保留最小 intent fallback
+- 还没有像 Claude Code 那样提供一套“主模型天然多模态”的统一假设；这条链路本质上是 `dclaw` 针对 text-only runtime 的受控降级
+
+### 5.10 P2：QueryEngine 输入面支持结构化用户消息
 
 这一阶段仍未开工。
 
@@ -296,7 +344,7 @@
 - 消息持久化与恢复后，图片块顺序不丢失
 - 不需要为多模态单独开一套 query loop
 
-### 5.10 P2：REPL 多模态输入重构准备
+### 5.11 P2：REPL 多模态输入重构准备
 
 这一阶段仍未开工。
 
@@ -308,7 +356,7 @@
   - macOS 剪贴板图片读取
 - [ ] 在真实输入层改造完成前，不对外宣称 interactive 已支持 Claude Code 级图片输入
 
-### 5.11 P3：headless 模式显式图片输入入口
+### 5.12 P3：headless 模式显式图片输入入口
 
 这条能力保留，但当前不进入近期主线。
 
@@ -332,7 +380,7 @@
 5. 已完成：`WebFetch` 远程图片读取链路
 6. 已完成：session / resume / compact / transcript 收口
 7. 已完成：本地图片读取链路收敛到扩展现有 `Read`
-8. 待做：tool result budget 与图片结果的融合评估
+8. 已完成：text-only 主 runtime 的 `vision side query` 降级路径
 9. 待做：`QueryEngine` 公开结构化用户输入
 10. 待做：interactive 输入层重构准备
 11. 待做：`--print --image`
@@ -358,6 +406,9 @@
 - [x] `WebFetch`：
   - 支持的远程图片可成功下载并返回结构化内容
   - 非支持 image-like media type 会明确失败
+- [x] `Read / WebFetch` 的 `vision side query`：
+  - 当前主 runtime 不支持视觉输入时，可改走 side query
+  - `toolUseIntent` 会按 `assistant text -> reasoning/thinking -> user request` 顺序回退
 - [x] `QueryEngine`：
   - 工具图片结果会被注入为临时图片消息
   - `compact` 后仍可恢复
@@ -387,6 +438,7 @@
 - runtime 已能把工具图片结果转成下一轮临时图片消息
 - 模型可以通过 `WebFetch` 路径读取远程图片并继续分析
 - 模型可以通过现有 `Read` 工具读取本地图片并继续分析
+- 当主 runtime 不支持视觉输入、但存在独立 vision runtime 时，`Read/WebFetch(image)` 已可通过 `vision side query` 降级为文本视觉观察
 - `session / compact / resume / transcript` 不丢结构、不泄露 base64
 
 当前尚未完成的第二阶段：

@@ -15,6 +15,9 @@ test('buildSystemPrompt includes plan mode instructions and plan file context', 
         boardId: 'board_123',
         status: 'active',
         planFilePath: '/tmp/.dclaw/plans/plan_board_123.md',
+        boardTitle: 'Planning state work',
+        boardPurpose: 'Refine the short-lived implementation batch.',
+        boardPlan: 'Inspect current code, write a plan file, then wait.',
         currentTaskTitle: 'Implement planning state',
         currentStep: 'Writing the plan file scaffold',
         taskSummary: ['- [in_progress] Implement planning state'],
@@ -24,8 +27,13 @@ test('buildSystemPrompt includes plan mode instructions and plan file context', 
 
   assert.match(prompt, /# Planning State/)
   assert.match(prompt, /plan mode: active/)
+  assert.match(prompt, /task board: board_123/)
+  assert.match(prompt, /board title: Planning state work/)
+  assert.match(prompt, /board purpose: Refine the short-lived implementation batch/)
+  assert.match(prompt, /board plan: Inspect current code/)
   assert.match(prompt, /plan file: \/tmp\/.dclaw\/plans\/plan_board_123\.md/)
   assert.match(prompt, /only file you may edit during planning/)
+  assert.match(prompt, /call ExitPlanMode to present it and wait for the user/)
   assert.match(prompt, /pending work summary:/)
 })
 
@@ -41,7 +49,11 @@ test('buildSystemPrompt nudges complex work toward task tracking without globall
   )
 
   assert.match(prompt, /TaskCreate and TaskUpdate/)
-  assert.doesNotMatch(prompt, /EnterPlanMode/)
+  assert.match(prompt, /# Task-Board Workflow/)
+  assert.match(prompt, /plan_only requests/)
+  assert.match(prompt, /implementation_with_planning requests/)
+  assert.match(prompt, /EnterPlanMode is only for high_constraint_planning/)
+  assert.match(prompt, /start execution without entering plan mode/)
   assert.doesNotMatch(prompt, /Prefer direct execution for simple requests/)
   assert.doesNotMatch(prompt, /# DCLAW\.md Instructions/)
 })

@@ -10,7 +10,7 @@
   - 阶段 6 已接入最小 permission evaluator
   - 阶段 7 已接入 session store、`resume`、history 与基础 REPL commands
   - 阶段 8 已按当前范围收口：主路径为 manual compact、共享 `contextStats`、模型生成 compact summary、最小 autocompact 与 post-compact 恢复
-  - 阶段 9 已按当前范围收口：task board、plan file、`Task*`、plan-mode runtime 提醒、审批展示、plan 真值恢复、approved-plan task materialization 与 completed board retire 均已完成
+  - 阶段 9 已按当前范围收口并开始 plan-centered 改造：task board、plan file、`Task*`、plan-mode runtime 提醒、plan 交付、plan 真值恢复与 completed board retire 均已完成；`ExitPlanMode` 已不再作为交互式 approval / 立即开工入口
   - 阶段 10 已按当前范围收口：`MEMORY.md` 常驻注入、side-query recall、自动 extraction、去重/升级、写回边界与非阻塞 drain 均已完成
 
 ## 核心 12 阶段
@@ -199,13 +199,13 @@
   - `TaskGet`
   - `TaskUpdate`
 - 当前 `Task*` 已按源码接入核心字段和按 id 更新语义；`TaskBoard` 也已收敛为 `plan mode + plan file + task/current step` 主路径，不再保留 `todos` 字段
-- 当前 `ExitPlanMode` 获批后，若 task board 仍为空，会立刻按 approved plan materialize 首版 task list，避免把“拆 task”拖到实施阶段临时进行
+- 当前 plan-centered 改造后，`ExitPlanMode` 会交付 plan 并等待用户下一步，不再自动按 plan materialize 首版 task list；用户明确要求开始实施时，再进入执行流并维护 task list
 - 当前已补齐 Claude Code 风格的 completed task list 生命周期：当执行板 `inactive` 且可见 task 全部 `completed` 超过 `5s`，当前 session 会自动 retire 该 board，避免后续新请求继续追加到旧列表
 - 当前 `Task*` 也已按 Claude Code 方式接入 tool prompt：
   - `Tool` 支持 `prompt()`
   - `queryLoop` 向模型发送长版 task tool prompt
   - `TaskCreate / TaskList / TaskGet / TaskUpdate` 已有独立 prompt 文件
-  - 执行态提示已额外收紧到“优先消费 approved plan 的既有 task list”；若发现重大新增工作，应在当前轮结束时回到用户对齐，而不是静默扩张当前计划
+  - 执行态提示已额外收紧到“优先消费当前既有 task list”；若发现重大新增工作，应在当前轮结束时回到用户对齐，而不是静默扩张当前计划
 - 当前也已接入最小 runtime task reminder：
   - 当 task board 已存在且最近几轮未使用 `TaskCreate / TaskUpdate` 时
   - 当前轮会临时注入 Claude Code 风格的 task-tool reminder
@@ -230,8 +230,8 @@
   - 先探索代码库
   - 必要时澄清问题
   - 产出结构化 plan / task breakdown
-  - 等待批准后再退出并实施
-- `EnterPlanMode` 直接进入 planning；进入 planning 本身不是审批点。`ExitPlanMode` 才是唯一的计划审批点；用户显式 `/plan` 也可直接进入
+  - 交付 plan 后等待用户下一步
+- `EnterPlanMode` 直接进入 planning；进入 planning 本身不是审批点。`ExitPlanMode` 负责展示 plan 并结束高约束 planning，不再触发交互式审批或立即实施；用户显式 `/plan` 也可直接进入
 - `plan mode` 需要有专门的 plan file 作为计划真值，而不只是靠聊天文本或结构化状态
 - `task / current step` 必须是可恢复的会话状态，并在 `resume / history / /session` 中可观察
 - `compact` 后如果仍在 `plan mode`，模型必须继续收到 plan-mode 指令，避免压缩后丢失 planning 语义

@@ -29,6 +29,8 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
       PATH: originalEnv.PATH,
       DCLAW_LLM_TIMEOUT_MS: '12345',
       DCLAW_STREAM_IDLE_TIMEOUT_MS: '45678',
+      DCLAW_VISION_PROVIDER: 'openai',
+      DCLAW_VISION_MODEL: 'gpt-4.1-mini',
     }
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -64,4 +66,7 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
   assert.match(text, /memory dir\s+.*\/projects\/.*\/memory/)
   assert.match(text, /memory entrypoint\s+.*\/MEMORY\.md/)
   assert.match(text, /memory entrypoint exists\s+no/)
+  assert.match(text, /vision side query\s+configured/)
+  assert.match(text, /vision provider\s+openai/)
+  assert.match(text, /vision model\s+gpt-4\.1-mini/)
 })

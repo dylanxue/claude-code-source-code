@@ -1,15 +1,11 @@
-import { randomUUID } from 'node:crypto'
 import { readPlanFile } from '../../tasks/planFiles.js'
 import {
   ensureTaskBoardPlanFile,
   loadTaskBoardForSession,
   updateTaskBoard,
 } from '../../tasks/store.js'
-import { materializeInitialTasksFromApprovedPlan } from '../../tasks/materialize.js'
 import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
-import type { PlanModeRequest } from '../../tasks/types.js'
 import type {
-  AskUserQuestionHostResult,
   PermissionMode,
   ToolResult,
 } from '../../types/tool.js'
@@ -21,24 +17,13 @@ export type ExitPlanModeInput = {
 }
 
 export type ExitPlanModeOutput = {
-  status: 'approved' | 'rejected' | 'already_inactive'
+  status: 'exited' | 'already_inactive'
   boardId: string
   planFilePath?: string
   resumedPermissionMode?: PermissionMode
   planPreview?: string
   plan?: string
   message?: string
-}
-
-function createRequest(note?: string): PlanModeRequest {
-  return {
-    requestId: `plan_exit_${randomUUID()}`,
-    requestedBy: 'model',
-    createdAt: new Date().toISOString(),
-    ...(typeof note === 'string' && note.trim().length > 0
-      ? { note: note.trim() }
-      : {}),
-  }
 }
 
 function extractPlanPreview(content: string | null): string | undefined {
@@ -52,29 +37,15 @@ function extractPlanPreview(content: string | null): string | undefined {
     .find(line => line.length > 0 && !line.startsWith('#'))
 }
 
-function extractAnswers(
-  value: Record<string, string> | AskUserQuestionHostResult,
-): Record<string, string> {
-  if (
-    'answers' in value &&
-    typeof value.answers === 'object' &&
-    value.answers !== null
-  ) {
-    return value.answers
-  }
-
-  return value as Record<string, string>
-}
-
-function buildPlanRejectionMessage(planContent: string | null): string {
-  const prefix =
-    'The agent proposed a plan that was rejected by the user. The user chose to stay in plan mode rather than proceed with implementation.'
+function buildPlanDeliveryMessage(planContent: string | null): string {
+  const guidance =
+    'I have organized the plan. If this direction looks good, I can start implementation; if you want changes, tell me what you would like adjusted.'
 
   if (!planContent || planContent.trim().length === 0) {
-    return prefix
+    return guidance
   }
 
-  return `${prefix}\n\nRejected plan:\n${planContent}`
+  return `Plan:\n${planContent}\n\n${guidance}`
 }
 
 export const exitPlanModeTool: Tool<
@@ -92,7 +63,7 @@ export const exitPlanModeTool: Tool<
       note: {
         type: 'string',
         description:
-          'Optional short summary of why the plan is ready to implement.',
+          'Optional short summary of why the plan is ready to present.',
       },
     },
     additionalProperties: false,
@@ -102,7 +73,7 @@ export const exitPlanModeTool: Tool<
     properties: {
       status: {
         type: 'string',
-        enum: ['approved', 'rejected', 'already_inactive'],
+        enum: ['exited', 'already_inactive'],
       },
       boardId: {
         type: 'string',
@@ -131,21 +102,10 @@ export const exitPlanModeTool: Tool<
     return true
   },
   isEnabled(context) {
-    return Boolean(context.askUserQuestions)
+    return Boolean(context.sessionId)
   },
   mapToolResult(result) {
-    const output = result.output
-
-    if (output.status === 'rejected' && output.message) {
-      return {
-        status: output.status,
-        message: output.message,
-        ...(output.plan ? { plan: output.plan } : {}),
-        ...(output.planFilePath ? { planFilePath: output.planFilePath } : {}),
-      }
-    }
-
-    return output
+    return result.output
   },
   validate(_input, context) {
     if (!context.sessionId) {
@@ -155,18 +115,11 @@ export const exitPlanModeTool: Tool<
       }
     }
 
-    if (!context.askUserQuestions) {
-      return {
-        ok: false,
-        error: 'ExitPlanMode requires interactive user approval support',
-      }
-    }
-
     return { ok: true }
   },
-  async call(input, context): Promise<ToolResult<ExitPlanModeOutput>> {
-    if (!context.sessionId || !context.askUserQuestions) {
-      throw new Error('ExitPlanMode requires an interactive session context')
+  async call(_input, context): Promise<ToolResult<ExitPlanModeOutput>> {
+    if (!context.sessionId) {
+      throw new Error('ExitPlanMode requires an active session context')
     }
 
     const loadedBoard = await loadTaskBoardForSession(context.sessionId)
@@ -180,81 +133,21 @@ export const exitPlanModeTool: Tool<
     const planPreview = extractPlanPreview(planContent)
 
     if (board.mode !== 'active') {
-      const resumedPermissionMode = board.resumePermissionMode ?? context.permissionMode
+      const resumedPermissionMode =
+        board.resumePermissionMode ?? context.permissionMode
+      const message = buildPlanDeliveryMessage(planContent)
       return {
         ok: true,
         output: {
           status: 'already_inactive',
           boardId: board.boardId,
           ...(board.planFilePath ? { planFilePath: board.planFilePath } : {}),
-          ...(resumedPermissionMode
-            ? { resumedPermissionMode }
-            : {}),
-          ...(planPreview ? { planPreview } : {}),
-        },
-        summary: 'Plan mode is already inactive.',
-      }
-    }
-
-    const request = createRequest(input.note)
-    await updateTaskBoard(board.boardId, current => ({
-      ...current,
-      mode: 'exit_requested',
-      exitRequest: request,
-      latestSessionId: context.sessionId!,
-      updatedAt: request.createdAt,
-    }))
-
-    const rawAnswers = await context.askUserQuestions([
-      {
-        id: 'decision',
-        header: 'Plan Ready',
-        question:
-          typeof input.note === 'string' && input.note.trim().length > 0
-            ? `The model wants to exit plan mode and start implementation: ${input.note.trim()}`
-            : 'The model says the plan is ready and wants to exit plan mode.',
-        options: [
-          {
-            label: 'Approve',
-            description: 'Leave plan mode and allow implementation to begin.',
-            preview: planContent ?? undefined,
-          },
-          {
-            label: 'Keep Planning',
-            description: 'Stay in plan mode and keep refining the plan.',
-          },
-        ],
-      },
-    ])
-    const answers = extractAnswers(rawAnswers)
-
-    if (answers.decision !== 'Approve') {
-      const restored =
-        (await updateTaskBoard(board.boardId, current => ({
-          ...current,
-          mode: 'active',
-          exitRequest: undefined,
-          latestSessionId: context.sessionId!,
-          updatedAt: new Date().toISOString(),
-        }))) ?? board
-
-      context.setPermissionMode?.('plan')
-      context.setPlanFilePath?.(restored.planFilePath)
-
-      return {
-        ok: true,
-        output: {
-          status: 'rejected',
-          boardId: restored.boardId,
-          ...(restored.planFilePath ? { planFilePath: restored.planFilePath } : {}),
-          ...(restored.resumePermissionMode
-            ? { resumedPermissionMode: restored.resumePermissionMode }
-            : {}),
+          ...(resumedPermissionMode ? { resumedPermissionMode } : {}),
           ...(planPreview ? { planPreview } : {}),
           ...(planContent ? { plan: planContent } : {}),
-          message: buildPlanRejectionMessage(planContent),
+          message,
         },
-        summary: 'Plan mode exit request was rejected. Continue planning.',
+        summary: 'Plan mode is already inactive.',
       }
     }
 
@@ -275,34 +168,25 @@ export const exitPlanModeTool: Tool<
 
     context.setPermissionMode?.(resumedPermissionMode)
     context.setPlanFilePath?.(undefined)
-    const materializedTasks =
-      planContent && planContent.trim().length > 0
-        ? await materializeInitialTasksFromApprovedPlan(
-            context.sessionId,
-            context.cwd,
-            planContent,
-          )
-        : { createdCount: 0, skippedBecauseTasksExist: false }
     await appendPlanSnapshotForFile(
       context.sessionId,
       updated.planFilePath,
       'exit-plan-mode',
     )
+    const message = buildPlanDeliveryMessage(planContent)
 
     return {
       ok: true,
       output: {
-        status: 'approved',
+        status: 'exited',
         boardId: updated.boardId,
         ...(updated.planFilePath ? { planFilePath: updated.planFilePath } : {}),
         resumedPermissionMode,
         ...(planPreview ? { planPreview } : {}),
         ...(planContent ? { plan: planContent } : {}),
+        message,
       },
-      summary:
-        materializedTasks.createdCount > 0
-          ? `Plan mode exited with approval. Created ${materializedTasks.createdCount} initial task(s) from the approved plan and resumed implementation in ${resumedPermissionMode} mode.`
-          : `Plan mode exited with approval. Resume implementation in ${resumedPermissionMode} mode.`,
+      summary: `Plan mode exited. Present the plan to the user and wait for the next instruction before starting implementation. Permission mode resumed as ${resumedPermissionMode}.`,
     }
   },
 })

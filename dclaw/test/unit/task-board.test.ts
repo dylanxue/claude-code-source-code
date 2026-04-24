@@ -73,10 +73,52 @@ test('ensurePlanFileForTaskBoard creates a reusable plan scaffold', async () => 
 
     assert.equal(result.created, true)
     assert.equal(result.filePath, getDefaultPlanFilePath(board.boardId, env))
+    assert.equal(result.filePath.endsWith(`plan_${board.boardId}.md`), true)
     assert.ok(content)
-    assert.match(content, /# Plan/)
-    assert.match(content, /## Goal/)
+    assert.match(content, /# Task Board Plan/)
+    assert.match(content, /## Purpose/)
     assert.match(content, /## Verification/)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('createSessionTask initializes a short-lived task board brief', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-brief-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-brief-board',
+      env,
+    })
+
+    const created = await createSessionTask(
+      session.sessionId,
+      '/tmp/project',
+      {
+        subject: 'Initialize project skeleton',
+        description: 'Create the current implementation batch scaffolding.',
+        board: {
+          title: 'Project skeleton batch',
+          purpose: 'Prepare the repository for implementation.',
+          plan: 'Create directories, dependency files, and starter modules.',
+        },
+      },
+      env,
+    )
+
+    assert.equal(created.board.title, 'Project skeleton batch')
+    assert.equal(created.board.purpose, 'Prepare the repository for implementation.')
+    assert.equal(
+      created.board.plan,
+      'Create directories, dependency files, and starter modules.',
+    )
+    assert.equal(created.board.tasks.length, 1)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }
@@ -246,7 +288,7 @@ test('loadTaskBoardForSession retires inactive completed task boards after 5 sec
       '/tmp/project',
       {
         subject: 'Ship the current plan',
-        description: 'Finish the approved implementation work.',
+        description: 'Finish the current implementation work.',
       },
       env,
     )
@@ -296,7 +338,7 @@ test('createSessionTask creates a fresh board after the previous completed board
       '/tmp/project',
       {
         subject: 'Finish the current workstream',
-        description: 'Close the existing approved task list.',
+        description: 'Close the existing task list.',
       },
       env,
     )

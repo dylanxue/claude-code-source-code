@@ -18,6 +18,18 @@ export function getDoingTasksSection(): string {
   ].join('\n')
 }
 
+export function getPlanCenteredWorkflowSection(): string {
+  return [
+    '# Task-Board Workflow',
+    '- Treat task boards as short-lived execution state for the current multi-step work batch.',
+    '- A task board should include both a brief work summary and concrete tasks; long-term plans belong in project documents that the user can inspect and co-edit.',
+    '- For plan_only requests, such as "give me a plan" or "only discuss the approach", provide the plan in the response and do not enter plan mode or start implementation.',
+    '- For implementation_with_planning requests, such as "make a task list and do it", create or update the task board when useful and start execution without entering plan mode.',
+    '- EnterPlanMode is only for high_constraint_planning: the user explicitly asks to plan first, avoid code changes, wait for review, or produce a plan before implementation.',
+    '- After ExitPlanMode, present the plan and wait for the user to ask for implementation or revisions before taking implementation actions.',
+  ].join('\n')
+}
+
 export function getLanguageSection(): string {
   return [
     '# Language',
@@ -82,6 +94,24 @@ export function getPlanModeSection(context: PromptContext): string | null {
   if (plan?.boardId) {
     lines.push(`- task board: ${plan.boardId}`)
   }
+  if (plan?.boardTitle) {
+    lines.push(`- board title: ${plan.boardTitle}`)
+  }
+  if (plan?.boardPurpose) {
+    lines.push(`- board purpose: ${plan.boardPurpose}`)
+  }
+  if (plan?.boardBackground) {
+    lines.push(`- board background: ${plan.boardBackground}`)
+  }
+  if (plan?.boardPlan) {
+    lines.push(`- board plan: ${plan.boardPlan}`)
+  }
+  if (plan?.boardScope) {
+    lines.push(`- board scope: ${plan.boardScope}`)
+  }
+  if (plan?.boardVerification) {
+    lines.push(`- board verification: ${plan.boardVerification}`)
+  }
   if (plan?.planFilePath) {
     lines.push(`- plan file: ${plan.planFilePath}`)
   }
@@ -99,6 +129,7 @@ export function getPlanModeSection(context: PromptContext): string | null {
       lines.push('- the plan file is the only file you may edit during planning')
     }
     lines.push('- focus on exploring the codebase, refining the plan, and clarifying ambiguities')
+    lines.push('- when the plan is ready, call ExitPlanMode to present it and wait for the user')
   }
 
   if (plan?.taskSummary && plan.taskSummary.length > 0) {
@@ -122,7 +153,7 @@ export function getMemorySection(context: PromptContext): string | null {
     `- memory dir: ${memory.memoryDir}`,
     '- memory stores durable context that may be useful in future conversations',
     '- do not use memory for the current conversation plan, step tracking, or transient execution state',
-    '- use plans and tasks for current execution state; use memory for durable user, project, and reference knowledge',
+    '- use task boards for current execution state; use memory for durable user, project, and reference knowledge',
   ]
 
   const entrypointBlock = [

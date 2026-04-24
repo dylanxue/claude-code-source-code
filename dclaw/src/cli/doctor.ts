@@ -5,6 +5,7 @@ import { getMemoryDir, getMemoryEntrypointPath } from '../memory/paths.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import {
   appendModelLimitLines,
+  appendVisionRuntimeLines,
   appendReliabilityConfigLines,
   getLimitsConfigStatus,
   statusLine,
@@ -79,6 +80,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     if (runtime.model) {
       appendModelLimitLines(lines, 'anthropic', runtime.model)
     }
+    appendVisionRuntimeLines(lines, configured.env)
   }
 
   if (runtime.providerConfig.provider === 'openai') {
@@ -93,6 +95,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     if (runtime.model) {
       appendModelLimitLines(lines, 'openai', runtime.model)
     }
+    appendVisionRuntimeLines(lines, configured.env)
   }
 
   appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])

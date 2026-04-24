@@ -41,3 +41,22 @@ export class QueryLoopLlmError extends Error {
       options.usedPostCompactAttachments === true
   }
 }
+
+export class QueryLoopAbortError extends Error {
+  readonly addedMessages: Message[]
+  readonly usedPostCompactAttachments: boolean
+
+  constructor(
+    options: {
+      addedMessages?: Message[]
+      usedPostCompactAttachments?: boolean
+      message?: string
+    } = {},
+  ) {
+    super(options.message ?? 'Query interrupted by user')
+    this.name = 'QueryLoopAbortError'
+    this.addedMessages = [...(options.addedMessages ?? [])]
+    this.usedPostCompactAttachments =
+      options.usedPostCompactAttachments === true
+  }
+}

@@ -32,6 +32,7 @@ export type CreateMessageRequest = {
   systemPrompt?: string
   messages: Message[]
   tools?: LlmToolDefinition[]
+  signal?: AbortSignal
   providerOptions?: {
     openai?: OpenAiResponsesRequestOptions
   }

@@ -391,14 +391,25 @@ export async function withTimeout<T>(
   options: {
     timeoutMs: number
     timeoutMessage: string
+    signal?: AbortSignal
   },
 ): Promise<T> {
   const controller = new AbortController()
   let timedOut = false
+  const abortFromExternalSignal = (): void => {
+    controller.abort()
+  }
   const timeoutId = setTimeout(() => {
     timedOut = true
     controller.abort()
   }, options.timeoutMs)
+  if (options.signal?.aborted) {
+    controller.abort()
+  } else {
+    options.signal?.addEventListener('abort', abortFromExternalSignal, {
+      once: true,
+    })
+  }
 
   try {
     return await operation(controller.signal)
@@ -413,6 +424,7 @@ export async function withTimeout<T>(
     throw error
   } finally {
     clearTimeout(timeoutId)
+    options.signal?.removeEventListener('abort', abortFromExternalSignal)
   }
 }
 

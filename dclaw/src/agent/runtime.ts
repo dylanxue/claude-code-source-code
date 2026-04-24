@@ -79,6 +79,13 @@ export function createSubagentToolContext(
     availableTools,
     permissionMode: input.agent.permissionMode ?? input.parent.permissionMode,
     readState: new Map(),
+    agentRuntime: {
+      ...input.parent,
+      parentSessionId: input.agent.parentSessionId,
+      currentAgentId: input.agent.agentId,
+    },
+    supportsVisionInput: input.parent.supportsVisionInput,
+    visionRuntime: input.parent.visionRuntime,
     skillRegistry: input.parent.skillRegistry,
     invokedSkills: createInvokedSkillState(),
   }

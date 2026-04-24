@@ -13,7 +13,7 @@ export type EnterPlanModeInput = {
 }
 
 export type EnterPlanModeOutput = {
-  status: 'approved' | 'already_active'
+  status: 'entered' | 'already_active'
   boardId: string
   planFilePath?: string
   resumedPermissionMode?: PermissionMode
@@ -44,7 +44,7 @@ export const enterPlanModeTool: Tool<
     properties: {
       status: {
         type: 'string',
-        enum: ['approved', 'already_active'],
+        enum: ['entered', 'already_active'],
       },
       boardId: {
         type: 'string',
@@ -130,12 +130,12 @@ export const enterPlanModeTool: Tool<
     return {
       ok: true,
       output: {
-        status: 'approved',
+        status: 'entered',
         boardId: updated.boardId,
         ...(updated.planFilePath ? { planFilePath: updated.planFilePath } : {}),
         resumedPermissionMode,
       },
-      summary: `Plan mode entered. Use ${updated.planFilePath ?? 'the plan file'} as the source of truth and continue planning instead of implementation.`,
+      summary: `Planning lock entered. Use ${updated.planFilePath ?? 'the plan file'} as the source of truth and continue planning instead of implementation.`,
     }
   },
 })

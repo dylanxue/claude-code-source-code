@@ -117,6 +117,7 @@ test('plan mode allows mutating only the plan file', async () => {
       ],
       toolRegistry: registry,
       toolContext: createToolContext({
+        sessionId: undefined,
         availableTools: registry.list().map(tool => tool.name),
         permissionMode: 'plan',
         planFilePath,

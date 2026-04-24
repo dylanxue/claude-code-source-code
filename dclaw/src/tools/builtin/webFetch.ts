@@ -4,6 +4,7 @@ import {
   IMAGE_TARGET_RAW_SIZE,
   optimizeImageForModel,
 } from '../../llm/imageProcessing.js'
+import { runVisionSideQuery } from '../../llm/visionSideQuery.js'
 import { buildTool, type Tool } from '../types.js'
 import { getDefaultReadLimits } from './readLimits.js'
 import { DESCRIPTION, PROMPT } from './webFetchPrompt.js'
@@ -122,6 +123,13 @@ function isSupportedRemoteImageMediaType(contentType: string): boolean {
 
 function isImageLikeContentType(contentType: string): boolean {
   return parseMediaType(contentType).startsWith('image/')
+}
+
+function shouldUseVisionSideQuery(context: {
+  supportsVisionInput?: boolean
+  visionRuntime?: unknown
+}): boolean {
+  return context.supportsVisionInput === false && Boolean(context.visionRuntime)
 }
 
 function extractHtmlMetadata(rawHtml: string): {
@@ -685,7 +693,7 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
   isReadOnly() {
     return true
   },
-  async call(input): Promise<ToolResult<WebFetchToolOutput>> {
+  async call(input, context): Promise<ToolResult<WebFetchToolOutput>> {
     const start = Date.now()
     const normalizedUrl = normalizeUrl(input.url)
     const limits = getDefaultReadLimits()
@@ -737,6 +745,54 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
           image.wasOptimized,
           image.estimatedTokens,
         )
+
+        if (context.supportsVisionInput === false && !context.visionRuntime) {
+          throw new Error(
+            'WebFetch image requires either a vision-capable active runtime or a configured vision side query runtime.',
+          )
+        }
+
+        if (shouldUseVisionSideQuery(context)) {
+          const analysisText = await runVisionSideQuery({
+            runtime: context.visionRuntime!,
+            mediaType: image.mediaType,
+            data: image.data,
+            sourceLabel: `WebFetch ${fetched.url}`,
+            currentUserRequest: context.currentUserRequest,
+            toolUseIntent: context.toolUseIntent,
+            queryTraceSink: context.queryTraceSink,
+            iteration: context.currentIteration,
+          })
+          const fallbackResult = [
+            resultText,
+            '',
+            'Vision side query analysis:',
+            analysisText,
+          ].join('\n')
+
+          return {
+            ok: true,
+            output: {
+              bytes: image.bytes,
+              code: fetched.status,
+              codeText: fetched.statusText,
+              result: fallbackResult,
+              durationMs: Date.now() - start,
+              url: fetched.url,
+              contentType,
+              contentKind: 'image',
+              mediaType: image.mediaType,
+              wasTruncated: false,
+            },
+            content: [
+              {
+                type: 'text',
+                text: fallbackResult,
+              },
+            ],
+            summary: `Fetched image ${fetched.url} via vision side query`,
+          }
+        }
 
         return {
           ok: true,

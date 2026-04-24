@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  getBuiltInModelCapabilities,
   getBuiltInModelLimits,
   getModelLimitsConfigPath,
+  resolveModelCapabilities,
   resolveModelLimits,
 } from '../../src/llm/modelLimits.js'
 
@@ -148,6 +150,51 @@ test('built-in openai model limits support modern responses models', () => {
   })
 })
 
+test('built-in model capabilities expose default vision support by provider', () => {
+  assert.deepEqual(getBuiltInModelCapabilities('anthropic', 'claude-sonnet-4-6'), {
+    supportsVisionInput: true,
+  })
+
+  assert.deepEqual(getBuiltInModelCapabilities('openai', 'gpt-4.1-mini'), {
+    supportsVisionInput: true,
+  })
+
+  assert.deepEqual(getBuiltInModelCapabilities('stub', 'stub'), {
+    supportsVisionInput: false,
+  })
+})
+
+test('built-in model capabilities distinguish multimodal and text-only compatibility families', () => {
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'deepseek-chat'),
+    { supportsVisionInput: false },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'glm-5.1'),
+    { supportsVisionInput: false },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'minimax-m2.7'),
+    { supportsVisionInput: false },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'kimi-k2'),
+    { supportsVisionInput: false },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'kimi-k2.5'),
+    { supportsVisionInput: true },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'doubao-seed-2.0-pro'),
+    { supportsVisionInput: true },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('anthropic', 'bytedance-seed-code'),
+    { supportsVisionInput: true },
+  )
+})
+
 test('built-in anthropic model limits support compatibility models', () => {
   assert.deepEqual(getBuiltInModelLimits('anthropic', 'bytedance-seed-code'), {
     contextWindow: 256_000,
@@ -246,6 +293,56 @@ test('resolveModelLimits applies config json overrides by provider and prefix', 
     maxOutputTokens: 90_000,
     maxOutputTokensUpperLimit: 120_000,
   })
+})
+
+test('resolveModelCapabilities supports model-specific overrides within the same provider', () => {
+  assert.deepEqual(
+    resolveModelCapabilities(
+      'openai',
+      'gpt-4.1-mini',
+      {
+        DCLAW_MODEL_LIMITS_JSON: JSON.stringify({
+          providers: {
+            openai: {
+              'gpt-4.1-mini': {
+                supportsVisionInput: true,
+              },
+              'gpt-5-mini-text': {
+                supportsVisionInput: false,
+              },
+            },
+          },
+        }),
+      },
+    ),
+    {
+      supportsVisionInput: true,
+    },
+  )
+
+  assert.deepEqual(
+    resolveModelCapabilities(
+      'openai',
+      'gpt-5-mini-text',
+      {
+        DCLAW_MODEL_LIMITS_JSON: JSON.stringify({
+          providers: {
+            openai: {
+              'gpt-4.1-mini': {
+                supportsVisionInput: true,
+              },
+              'gpt-5-mini-text': {
+                supportsVisionInput: false,
+              },
+            },
+          },
+        }),
+      },
+    ),
+    {
+      supportsVisionInput: false,
+    },
+  )
 })
 
 test('resolveModelLimits applies environment overrides last', () => {

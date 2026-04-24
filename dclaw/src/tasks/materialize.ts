@@ -198,7 +198,7 @@ export function extractInitialTasksFromPlan(planContent: string): PlannedTaskDra
   return drafts
 }
 
-export async function materializeInitialTasksFromApprovedPlan(
+export async function materializeInitialTasksFromPlan(
   sessionId: string,
   workspaceId: string,
   planContent: string,
@@ -229,7 +229,7 @@ export async function materializeInitialTasksFromApprovedPlan(
     drafts.map(task => ({
       ...task,
       metadata: {
-        source: 'approved_plan',
+        source: 'plan_file',
       },
     })),
     env,

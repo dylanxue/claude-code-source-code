@@ -220,6 +220,12 @@ test('runResume prints planning summary for sessions with an attached task board
       board.boardId,
       current => ({
         ...current,
+        title: 'Auth flow migration',
+        purpose: 'Make the auth work batch visible after resume.',
+        background: 'The session has an attached task board.',
+        plan: 'Review the auth flow before implementation.',
+        scope: 'Auth flow planning only.',
+        verification: 'Resume output includes the task board brief.',
         mode: 'active',
         currentTaskId: '1',
         currentStep: 'Reviewing auth flow',
@@ -263,6 +269,10 @@ test('runResume prints planning summary for sessions with an attached task board
   }
 
   const text = output.join('')
+  assert.match(text, /task board:/)
+  assert.match(text, /board title: Auth flow migration/)
+  assert.match(text, /board purpose: Make the auth work batch visible after resume\./)
+  assert.match(text, /board plan: Review the auth flow before implementation\./)
   assert.match(text, /plan mode state: active/)
   assert.match(text, /plan file:/)
   assert.match(text, /current task: Review auth flow/)
