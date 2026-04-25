@@ -258,7 +258,7 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
         }
 
         return {
-          message: createTextMessage('assistant', 'implementation can continue'),
+          message: createTextMessage('assistant', 'the plan is ready for review'),
         }
       }
     })()
@@ -300,7 +300,7 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
 
           return {
             ok: true,
-            output: { status: 'approved' },
+            output: { status: 'exited' },
           }
         },
       }),
@@ -323,7 +323,7 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
 
     const result = await engine.submitUserPrompt('finish the plan and continue')
 
-    assert.equal(result.outputText, 'implementation can continue')
+    assert.equal(result.outputText, 'the plan is ready for review')
     assert.equal(client.requests.length, 2)
     assert.equal(client.requests[0]?.systemPrompt, 'permission mode: plan')
     assert.equal(client.requests[1]?.systemPrompt, 'permission mode: default')
@@ -503,10 +503,12 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
     const result = await engine.submitUserPrompt('continue after compact')
 
     const reminders = findReminderMessages(client.requests[0])
-    assert.equal(reminders.length, 2)
+    assert.equal(reminders.length, 3)
     const reminderTexts = reminders.map(message => getTextContent(message))
     assert.ok(reminderTexts.some(text => /## Plan Mode/.test(text)))
     assert.ok(reminderTexts.some(text => /Do not start implementation yet/.test(text)))
+    assert.ok(reminderTexts.some(text => /# Post-Compact Task Board/.test(text)))
+    assert.ok(reminderTexts.some(text => /task board:/.test(text)))
     assert.ok(reminderTexts.some(text => /Current task: Review auth flow/.test(text)))
     assert.ok(reminderTexts.some(text => /Current step: Reviewing auth flow/.test(text)))
     assert.ok(reminderTexts.some(text => /# Task Tool Reminder/.test(text)))

@@ -8,6 +8,7 @@ import {
   createTextMessage,
 } from '../../types/message.js'
 import type { ToolResult } from '../../types/tool.js'
+import { runVisionSideQuery } from '../../llm/visionSideQuery.js'
 import { buildTool, type Tool } from '../types.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
 import { getDefaultReadLimits } from './readLimits.js'
@@ -56,6 +57,8 @@ export type ReadImageToolOutput = {
     mediaType: string
     sizeBytes: number
   }
+  analysisText?: string
+  analysisSource?: 'vision_side_query'
 }
 
 export type ReadToolOutput = ReadTextToolOutput | ReadImageToolOutput
@@ -130,6 +133,30 @@ function isSupportedLocalImageExtension(filePath: string): boolean {
 
 function getUnsupportedImageRangeError(): string {
   return 'Read does not support offset or limit when reading image files'
+}
+
+function shouldUseVisionSideQuery(context: {
+  supportsVisionInput?: boolean
+  visionRuntime?: unknown
+}): boolean {
+  return context.supportsVisionInput === false && Boolean(context.visionRuntime)
+}
+
+function buildVisionFallbackResultText(input: {
+  filePath: string
+  sourceBytes: number
+  sourceMediaType: string
+  attachedBytes: number
+  attachedMediaType: string
+  estimatedTokens: number
+  analysisText: string
+}): string {
+  return [
+    `Read image file ${input.filePath} (${input.sourceBytes} source bytes, ${input.sourceMediaType}).`,
+    `Because the active model runtime does not accept image input directly, dclaw analyzed an optimized ${input.attachedMediaType} payload (${input.attachedBytes} bytes, ~${input.estimatedTokens} tokens) through the configured vision side query.`,
+    '',
+    input.analysisText,
+  ].join('\n')
 }
 
 export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
@@ -234,6 +261,11 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
             },
             required: ['filePath', 'mediaType', 'sizeBytes'],
             additionalProperties: false,
+          },
+          analysisText: { type: 'string' },
+          analysisSource: {
+            type: 'string',
+            enum: ['vision_side_query'],
           },
         },
         required: ['type', 'file'],
@@ -365,6 +397,55 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
       const resultText = optimizedImage.wasOptimized
         ? `Read image file ${absolutePath} (${fileStat.size} source bytes, ${detectedMediaType}). Attached an optimized ${optimizedImage.mediaType} payload (${optimizedImage.buffer.length} bytes, ~${optimizedImage.estimatedTokens} tokens) for visual analysis.`
         : `Read image file ${absolutePath} (${optimizedImage.buffer.length} bytes, ${optimizedImage.mediaType}, ~${optimizedImage.estimatedTokens} tokens). The image is attached below for visual analysis.`
+
+      if (context.supportsVisionInput === false && !context.visionRuntime) {
+        throw new Error(
+          'Read image requires either a vision-capable active runtime or a configured vision side query runtime.',
+        )
+      }
+
+      if (shouldUseVisionSideQuery(context)) {
+        const analysisText = await runVisionSideQuery({
+          runtime: context.visionRuntime!,
+          mediaType: optimizedImage.mediaType,
+          data: optimizedImage.buffer.toString('base64'),
+          sourceLabel: `Read ${absolutePath}`,
+          currentUserRequest: context.currentUserRequest,
+          toolUseIntent: context.toolUseIntent,
+          queryTraceSink: context.queryTraceSink,
+          iteration: context.currentIteration,
+        })
+        const fallbackResultText = buildVisionFallbackResultText({
+          filePath: absolutePath,
+          sourceBytes: fileStat.size,
+          sourceMediaType: detectedMediaType,
+          attachedBytes: optimizedImage.buffer.length,
+          attachedMediaType: optimizedImage.mediaType,
+          estimatedTokens: optimizedImage.estimatedTokens,
+          analysisText,
+        })
+
+        return {
+          ok: true,
+          output: {
+            type: 'image',
+            file: {
+              filePath: absolutePath,
+              mediaType: optimizedImage.mediaType,
+              sizeBytes: optimizedImage.buffer.length,
+            },
+            analysisText,
+            analysisSource: 'vision_side_query',
+          },
+          content: [
+            {
+              type: 'text',
+              text: fallbackResultText,
+            },
+          ],
+          summary: `Read image ${absolutePath} via vision side query`,
+        }
+      }
 
       return {
         ok: true,

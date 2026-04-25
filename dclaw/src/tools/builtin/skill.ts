@@ -1,7 +1,14 @@
+import { runAgentToCompletion } from '../../agent/runner.js'
+import { filterSubagentAvailableTools } from '../../agent/runtime.js'
+import { createAgent } from '../../agent/store.js'
+import type { AgentRecord, AgentToolRuntime } from '../../agent/types.js'
 import { createTextMessage } from '../../types/message.js'
 import type { ToolResult } from '../../types/tool.js'
 import { recordInvokedSkill } from '../../skills/state.js'
-import { buildInvokedSkillReminderText } from '../../skills/prompt.js'
+import {
+  buildInvokedSkillReminderText,
+  buildSkillPrompt,
+} from '../../skills/prompt.js'
 import type { LoadedSkill } from '../../skills/types.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './skillPrompt.js'
@@ -16,8 +23,21 @@ type SkillToolOutput = {
     description: string
     source: 'builtin' | 'project'
     path: string
+    context?: 'inline' | 'fork'
   }
   applied: boolean
+  execution_context: 'inline' | 'fork'
+  agent?: {
+    agent_id: string
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped'
+    completed_at?: string
+    trace_path?: string
+  }
+  result?: {
+    summary?: string
+    output_text?: string
+    error?: string
+  }
 }
 
 function trimOrUndefined(value: string | undefined): string | undefined {
@@ -49,6 +69,102 @@ function buildReminderMessage(skill: LoadedSkill) {
   )
 }
 
+function buildForkedSkillPrompt(skill: LoadedSkill): string {
+  return buildSkillPrompt(skill)
+}
+
+function resolveSkillExecutionContext(
+  skill: LoadedSkill,
+): 'inline' | 'fork' {
+  return skill.context === 'fork' ? 'fork' : 'inline'
+}
+
+function isSubagentContext(context: {
+  sessionId?: string
+  agentRuntime?: AgentToolRuntime
+}): boolean {
+  return !context.sessionId && Boolean(context.agentRuntime?.currentAgentId)
+}
+
+function resolveEffectiveSkillExecutionContext(
+  skill: LoadedSkill,
+  context: {
+    sessionId?: string
+    agentRuntime?: AgentToolRuntime
+  },
+): 'inline' | 'fork' {
+  const requested = resolveSkillExecutionContext(skill)
+  if (requested !== 'fork') {
+    return requested
+  }
+
+  return isSubagentContext(context) ? 'inline' : 'fork'
+}
+
+function resolveForkParentSessionId(context: {
+  sessionId?: string
+  agentRuntime?: AgentToolRuntime
+}): string | undefined {
+  return context.sessionId ?? context.agentRuntime?.parentSessionId
+}
+
+function assertForkRuntime(
+  context: {
+    agentRuntime?: AgentToolRuntime
+  },
+): AgentToolRuntime {
+  if (!context.agentRuntime) {
+    throw new Error('Skill fork execution is not available in this runtime')
+  }
+
+  return context.agentRuntime
+}
+
+function toForkOutput(
+  skill: LoadedSkill,
+  agent: AgentRecord,
+): SkillToolOutput {
+  return {
+    skill: {
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+      path: skill.path,
+      context: 'fork',
+    },
+    applied: true,
+    execution_context: 'fork',
+    agent: {
+      agent_id: agent.agentId,
+      status: agent.status,
+      completed_at: agent.completedAt,
+      trace_path: agent.tracePath,
+    },
+    result:
+      agent.summary || agent.outputText || agent.lastError
+        ? {
+            summary: agent.summary,
+            output_text: agent.outputText,
+            error: agent.lastError,
+          }
+        : undefined,
+  }
+}
+
+function toInlineOutput(skill: LoadedSkill): SkillToolOutput {
+  return {
+    skill: {
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+      path: skill.path,
+      ...(skill.context ? { context: skill.context } : {}),
+    },
+    applied: true,
+    execution_context: 'inline',
+  }
+}
+
 export const skillTool: Tool<SkillToolInput, SkillToolOutput> = buildTool({
   name: 'Skill',
   description: DESCRIPTION,
@@ -78,6 +194,10 @@ export const skillTool: Tool<SkillToolInput, SkillToolOutput> = buildTool({
             enum: ['builtin', 'project'],
           },
           path: { type: 'string' },
+          context: {
+            type: 'string',
+            enum: ['inline', 'fork'],
+          },
         },
         required: ['name', 'description', 'source', 'path'],
         additionalProperties: false,
@@ -85,8 +205,35 @@ export const skillTool: Tool<SkillToolInput, SkillToolOutput> = buildTool({
       applied: {
         type: 'boolean',
       },
+      execution_context: {
+        type: 'string',
+        enum: ['inline', 'fork'],
+      },
+      agent: {
+        type: 'object',
+        properties: {
+          agent_id: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['queued', 'running', 'completed', 'failed', 'stopped'],
+          },
+          completed_at: { type: 'string' },
+          trace_path: { type: 'string' },
+        },
+        required: ['agent_id', 'status'],
+        additionalProperties: false,
+      },
+      result: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string' },
+          output_text: { type: 'string' },
+          error: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
     },
-    required: ['skill', 'applied'],
+    required: ['skill', 'applied', 'execution_context'],
     additionalProperties: false,
   },
   isEnabled(context) {
@@ -128,19 +275,50 @@ export const skillTool: Tool<SkillToolInput, SkillToolOutput> = buildTool({
       )
     }
 
+    if (resolveEffectiveSkillExecutionContext(skill, context) === 'fork') {
+      const runtime = assertForkRuntime(context)
+      const parentSessionId = resolveForkParentSessionId(context)
+      if (!parentSessionId) {
+        throw new Error('Skill fork execution requires an active parent session')
+      }
+
+      const env = runtime.env ?? process.env
+      const agent = await createAgent({
+        parentAgentId: runtime.currentAgentId,
+        parentSessionId,
+        parentTurnId: context.activeTurnId,
+        task: `Apply skill ${skill.name}`,
+        cwd: context.cwd,
+        provider: runtime.provider ?? runtime.client.providerName,
+        model: runtime.model,
+        permissionMode: context.permissionMode,
+        availableTools: filterSubagentAvailableTools(context.availableTools),
+        pendingPrompts: [buildForkedSkillPrompt(skill)],
+        env,
+      })
+      const completed = await runAgentToCompletion(
+        agent.agentId,
+        parentSessionId,
+        runtime,
+        env,
+      )
+
+      return {
+        ok: true,
+        output: toForkOutput(skill, completed.agent),
+        summary:
+          completed.agent.summary ??
+          completed.agent.outputText ??
+          completed.agent.lastError ??
+          `Applied skill ${skill.name} via forked subagent ${completed.agent.agentId}`,
+      }
+    }
+
     recordInvokedSkill(context.invokedSkills, skill)
 
     return {
       ok: true,
-      output: {
-        skill: {
-          name: skill.name,
-          description: skill.description,
-          source: skill.source,
-          path: skill.path,
-        },
-        applied: true,
-      },
+      output: toInlineOutput(skill),
       summary: `Applied skill ${skill.name}`,
       newMessages: [buildReminderMessage(skill)],
     }

@@ -6,6 +6,9 @@ import type {
 import type { AgentToolRuntime } from '../agent/types.js'
 import type { SkillRegistry } from '../skills/registry.js'
 import type { InvokedSkillState } from '../skills/state.js'
+import type { LlmClient } from '../llm/types.js'
+import type { LlmProviderName } from '../llm/providerNames.js'
+import type { QueryTraceSink } from '../core/queryTrace.js'
 
 export type PermissionMode =
   | 'default'
@@ -70,9 +73,21 @@ export type ReadStateEntry = {
   limit?: number
 }
 
+export type ToolUseIntent = {
+  source: 'assistant_text' | 'reasoning' | 'user_request'
+  text: string
+}
+
+export type VisionRuntime = {
+  client: LlmClient
+  provider: LlmProviderName
+  model?: string
+}
+
 export type ToolContext = {
   sessionId?: string
   activeTurnId?: string
+  currentIteration?: number
   planFilePath?: string
   cwd: string
   availableTools: string[]
@@ -81,6 +96,11 @@ export type ToolContext = {
   agentRuntime?: AgentToolRuntime
   skillRegistry?: SkillRegistry
   invokedSkills?: InvokedSkillState
+  currentUserRequest?: string
+  toolUseIntent?: ToolUseIntent
+  queryTraceSink?: QueryTraceSink
+  supportsVisionInput?: boolean
+  visionRuntime?: VisionRuntime
   setPermissionMode?: (permissionMode: PermissionMode) => void
   setPlanFilePath?: (planFilePath: string | undefined) => void
   askUserQuestions?: (

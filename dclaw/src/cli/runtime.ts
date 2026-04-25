@@ -29,7 +29,10 @@ import { loadTaskBoardForSession } from '../tasks/store.js'
 import { getCurrentTask } from '../tasks/taskState.js'
 import { createDefaultToolRegistry } from '../tools/index.js'
 import type { Message } from '../types/message.js'
-import type { PermissionMode } from '../types/tool.js'
+import type {
+  PermissionMode,
+  VisionRuntime,
+} from '../types/tool.js'
 import { appendSessionMessages } from '../session/store.js'
 import { askUserQuestionsInteractively } from './askUserQuestions.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
@@ -41,9 +44,13 @@ import {
   resolveMaxIterations,
 } from './maxIterationsConfig.js'
 import type { CommonCliOptions } from './types.js'
+import type { LlmProviderName } from '../llm/providerNames.js'
+import { resolveModelCapabilities } from '../llm/modelLimits.js'
 
 export type PreparedCliRuntime = {
   runtime: ReturnType<typeof resolveLlmRuntimeConfig>
+  supportsVisionInput: boolean
+  visionRuntime?: VisionRuntime
   permissionMode: PermissionMode
   permissionModeSource: PermissionModeSource
   dclawMdEntries: Awaited<ReturnType<typeof loadDclawMdEntries>>
@@ -51,6 +58,46 @@ export type PreparedCliRuntime = {
   engine: QueryEngine
   rotateQueryTrace: (sessionId?: string) => Promise<string | undefined>
   drainBackgroundWork: (timeoutMs?: number) => Promise<void>
+}
+
+function normalizeProviderName(
+  value: string | undefined,
+): LlmProviderName | undefined {
+  const normalized = value?.trim().toLowerCase()
+  switch (normalized) {
+    case 'anthropic':
+    case 'anthropic-compatible':
+      return 'anthropic'
+    case 'openai':
+    case 'openai-compatible':
+      return 'openai'
+    case 'stub':
+      return 'stub'
+    default:
+      return undefined
+  }
+}
+
+function resolveVisionRuntime(
+  env: NodeJS.ProcessEnv,
+): VisionRuntime | undefined {
+  const provider = normalizeProviderName(
+    env.DCLAW_VISION_PROVIDER ?? env.VISION_PROVIDER,
+  )
+  if (!provider) {
+    return undefined
+  }
+
+  const model =
+    env.DCLAW_VISION_MODEL?.trim() ||
+    env.VISION_MODEL?.trim() ||
+    undefined
+
+  return {
+    client: createLlmClient(provider, env),
+    provider,
+    model,
+  }
 }
 
 export async function prepareCliRuntime(
@@ -83,6 +130,12 @@ export async function prepareCliRuntime(
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
   const client = createLlmClient(runtime.provider, configured.env)
+  const supportsVisionInput = resolveModelCapabilities(
+    runtime.provider,
+    runtime.model,
+    configured.env,
+  ).supportsVisionInput
+  const visionRuntime = resolveVisionRuntime(configured.env)
 
   const resolveSystemPromptForUserPrompt = async (state: {
     sessionId?: string
@@ -135,6 +188,12 @@ export async function prepareCliRuntime(
             boardId: board.boardId,
             status: board.mode,
             planFilePath: board.planFilePath,
+            boardTitle: board.title,
+            boardPurpose: board.purpose,
+            boardBackground: board.background,
+            boardPlan: board.plan,
+            boardScope: board.scope,
+            boardVerification: board.verification,
             currentTaskTitle: currentTask?.subject,
             currentStep: board.currentStep,
             taskSummary: summarizePendingTasks(board),
@@ -214,6 +273,8 @@ export async function prepareCliRuntime(
         provider: runtime.provider,
         model: runtime.model,
         cwd: options.cwd,
+        supportsVisionInput,
+        visionRuntime,
         permissionMode: resolvedPermissionMode.permissionMode,
         availableTools: toolRegistry.list().map(tool => tool.name),
         planFilePath: undefined,
@@ -234,6 +295,8 @@ export async function prepareCliRuntime(
           )
         },
       },
+      supportsVisionInput,
+      visionRuntime,
       askUserQuestions: askUserQuestionsInteractively,
     },
     initialMessages,
@@ -243,6 +306,8 @@ export async function prepareCliRuntime(
 
   return {
     runtime,
+    supportsVisionInput,
+    visionRuntime,
     permissionMode: resolvedPermissionMode.permissionMode,
     permissionModeSource: resolvedPermissionMode.permissionModeSource,
     dclawMdEntries,

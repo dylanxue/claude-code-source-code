@@ -13,6 +13,8 @@ import {
 export async function runInteractive(command: InteractiveCommand): Promise<void> {
   const {
     runtime,
+    supportsVisionInput,
+    visionRuntime,
     dclawMdEntries,
     toolRegistry,
     engine,
@@ -48,6 +50,8 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
     `provider source: ${runtime.providerSource}`,
     `model: ${runtime.model ?? 'default'}`,
     `model source: ${runtime.modelSource}`,
+    `vision input: ${supportsVisionInput ? 'supported' : 'not supported'}`,
+    `vision side query: ${visionRuntime ? `${visionRuntime.provider} / ${visionRuntime.model ?? 'default'}` : 'not configured'}`,
     `permission mode: ${permissionMode}`,
     `permission mode source: ${permissionModeSource}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
@@ -95,7 +99,7 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
 
   await runInteractiveReplLoop({
     initialPrompt: command.prompt,
-    onPrompt: async prompt => {
+    onPrompt: async (prompt, control) => {
       if (
         await maybeHandleReplCommand(prompt, {
           engine,
@@ -113,6 +117,9 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
         prompt,
         stream: command.options.stream,
         verbose: command.options.verbose,
+        signal: control.signal,
+        writeOutput: control.writeOutput,
+        flushOutput: control.flushOutput,
       })
       replSession.sessionId = result.sessionId
       const runtimePermissionMode = engine.getPermissionMode()
@@ -129,6 +136,36 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
       }
 
       process.stderr.write(output.text)
+    },
+    async onBusyPrompt(prompt, busy) {
+      const originalWrite = process.stdout.write.bind(process.stdout)
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        busy.writeOutput(
+          typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+        )
+        return true
+      }) as typeof process.stdout.write
+      try {
+        return await maybeHandleReplCommand(
+          prompt,
+          {
+            engine,
+            options: command.options,
+            session: replSession,
+            rotateQueryTrace,
+          },
+          { allowDuringActivePrompt: true },
+        )
+      } finally {
+        process.stdout.write = originalWrite as typeof process.stdout.write
+        busy.flushOutput()
+      }
+    },
+    onPromptQueued(_prompt, pendingCount, writeOutput) {
+      writeOutput(`Queued prompt. Pending prompts: ${pendingCount}\n`)
+    },
+    onPromptInterrupted(_prompt, writeOutput) {
+      writeOutput('Current response interrupted.\n')
     },
   })
   await drainBackgroundWork()

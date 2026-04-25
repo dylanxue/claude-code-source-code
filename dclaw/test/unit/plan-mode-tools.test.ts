@@ -50,7 +50,7 @@ test('EnterPlanMode activates planning state without asking for approval', async
       context,
     )
 
-    assert.equal(result.output.status, 'approved')
+    assert.equal(result.output.status, 'entered')
     assert.equal(askUserQuestionsCalled, false)
     assert.equal(context.permissionMode, 'plan')
     assert.ok(context.planFilePath)
@@ -63,7 +63,7 @@ test('EnterPlanMode activates planning state without asking for approval', async
     assert.equal(board.planFilePath, context.planFilePath)
     assert.match(
       result.summary ?? '',
-      /Plan mode entered\./,
+      /Planning lock entered\./,
     )
   } finally {
     process.env = originalEnv
@@ -71,8 +71,8 @@ test('EnterPlanMode activates planning state without asking for approval', async
   }
 })
 
-test('ExitPlanMode returns Claude Code style rejection feedback when the user keeps planning', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-exit-plan-reject-tool-'))
+test('ExitPlanMode exits planning without asking for approval', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-exit-plan-no-approval-tool-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
 
@@ -102,16 +102,20 @@ test('ExitPlanMode returns Claude Code style rejection feedback when the user ke
     )
     await writeFile(
       board.planFilePath!,
-      ['# Implementation Plan', '', '- Update the approval flow'].join('\n'),
+      ['# Implementation Plan', '', '- Update the plan handoff flow'].join('\n'),
       'utf8',
     )
 
+    let askUserQuestionsCalled = false
     const context = createToolContext({
       cwd: '/tmp/project',
       sessionId: session.sessionId,
       permissionMode: 'plan',
       planFilePath: board.planFilePath,
-      askUserQuestions: async () => ({ decision: 'Keep Planning' }),
+      askUserQuestions: async () => {
+        askUserQuestionsCalled = true
+        return { decision: 'Approve' }
+      },
     })
 
     const result = await exitPlanModeTool.call(
@@ -121,27 +125,27 @@ test('ExitPlanMode returns Claude Code style rejection feedback when the user ke
       context,
     )
 
-    assert.equal(result.output.status, 'rejected')
-    assert.equal(context.permissionMode, 'plan')
-    assert.equal(context.planFilePath, board.planFilePath)
+    assert.equal(result.output.status, 'exited')
+    assert.equal(askUserQuestionsCalled, false)
+    assert.equal(context.permissionMode, 'accept-edits')
+    assert.equal(context.planFilePath, undefined)
     assert.match(
       result.output.message ?? '',
-      /The agent proposed a plan that was rejected by the user\./,
+      /If this direction looks good, I can start implementation/,
     )
-    assert.match(result.output.message ?? '', /Rejected plan:/)
-    assert.match(result.output.message ?? '', /- Update the approval flow/)
-    assert.equal(result.output.plan, '# Implementation Plan\n\n- Update the approval flow')
+    assert.match(result.output.message ?? '', /- Update the plan handoff flow/)
+    assert.equal(result.output.plan, '# Implementation Plan\n\n- Update the plan handoff flow')
 
     const updatedBoard = await loadTaskBoardForSession(session.sessionId, env)
     assert.ok(updatedBoard)
-    assert.equal(updatedBoard.mode, 'active')
+    assert.equal(updatedBoard.mode, 'inactive')
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })
   }
 })
 
-test('ExitPlanMode requests approval and restores the previous permission mode', async () => {
+test('ExitPlanMode presents the plan and restores the previous permission mode', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-exit-plan-tool-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -176,24 +180,17 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
         '# Implementation Plan',
         '',
         '## Implementation Steps',
-        '1. Inspect the current approval flow',
-        '2. Show the full plan body before approval',
+        '1. Inspect the current plan handoff flow',
+        '2. Show the full plan body before waiting for user direction',
       ].join('\n'),
       'utf8',
     )
-
-    let capturedPreview: string | undefined
 
     const context = createToolContext({
       cwd: '/tmp/project',
       sessionId: session.sessionId,
       permissionMode: 'plan',
       planFilePath: board.planFilePath,
-      askUserQuestions: async (questions, options) => {
-        assert.equal(options?.allowPreviewActions, undefined)
-        capturedPreview = questions[0]?.options[0]?.preview
-        return { decision: 'Approve' }
-      },
     })
 
     const result = await exitPlanModeTool.call(
@@ -203,20 +200,10 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
       context,
     )
 
-    assert.equal(result.output.status, 'approved')
-    assert.equal(
-      capturedPreview,
-      [
-        '# Implementation Plan',
-        '',
-        '## Implementation Steps',
-        '1. Inspect the current approval flow',
-        '2. Show the full plan body before approval',
-      ].join('\n'),
-    )
+    assert.equal(result.output.status, 'exited')
     assert.equal(
       result.output.planPreview,
-      '1. Inspect the current approval flow',
+      '1. Inspect the current plan handoff flow',
     )
     assert.equal(context.permissionMode, 'accept-edits')
     assert.equal(context.planFilePath, undefined)
@@ -226,28 +213,10 @@ test('ExitPlanMode requests approval and restores the previous permission mode',
     assert.equal(updatedBoard.mode, 'inactive')
     assert.equal(updatedBoard.resumePermissionMode, undefined)
     const listed = await listSessionTasks(session.sessionId, env)
-    assert.deepEqual(
-      listed.tasks.map(task => ({
-        id: task.id,
-        subject: task.subject,
-        description: task.description,
-      })),
-      [
-        {
-          id: '1',
-          subject: 'Inspect the current approval flow',
-          description: 'Inspect the current approval flow',
-        },
-        {
-          id: '2',
-          subject: 'Show the full plan body before approval',
-          description: 'Show the full plan body before approval',
-        },
-      ],
-    )
+    assert.deepEqual(listed.tasks, [])
     assert.match(
       result.summary ?? '',
-      /Created 2 initial task\(s\) from the approved plan/,
+      /Present the plan to the user and wait for the next instruction/,
     )
   } finally {
     process.env = originalEnv

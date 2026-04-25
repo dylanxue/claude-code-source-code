@@ -13,19 +13,19 @@ test('formatTranscript surfaces plan-mode tool result summaries', () => {
     'user',
     'tool_enter_plan',
     {
-      status: 'approved',
+      status: 'entered',
       boardId: 'board_123',
       planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
     },
     {
       ok: true,
       output: {
-        status: 'approved',
+        status: 'entered',
         boardId: 'board_123',
         planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
       },
       summary:
-        'Plan mode entered. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
+        'Planning lock entered. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
     },
   )
 
@@ -36,7 +36,7 @@ test('formatTranscript surfaces plan-mode tool result summaries', () => {
   assert.equal(lines.length, 1)
   assert.match(
     lines[0] ?? '',
-    /Plan mode entered\./,
+    /Planning lock entered\./,
   )
 })
 
@@ -57,19 +57,19 @@ test('formatTranscript renders plan-mode tool use and result summaries clearly',
         'user',
         'tool_enter_plan',
         {
-          status: 'approved',
+          status: 'entered',
           boardId: 'board_123',
           planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
         },
         {
           ok: true,
           output: {
-            status: 'approved',
+            status: 'entered',
             boardId: 'board_123',
             planFilePath: '/tmp/project/.dclaw/plans/plan_board_123.md',
           },
           summary:
-            'Plan mode entered. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
+            'Planning lock entered. Use /tmp/project/.dclaw/plans/plan_board_123.md as the source of truth and continue planning instead of implementation.',
         },
       ),
     ],
@@ -79,7 +79,7 @@ test('formatTranscript renders plan-mode tool use and result summaries clearly',
   )
 
   assert.ok(lines.some(line => /\[plan mode\] enter:/.test(line)))
-  assert.ok(lines.some(line => /\[plan mode\] entered:/.test(line)))
+  assert.ok(lines.some(line => /\[planning lock\] entered:/.test(line)))
 })
 
 test('formatTranscript renders generic tool use and results with natural phrasing', () => {

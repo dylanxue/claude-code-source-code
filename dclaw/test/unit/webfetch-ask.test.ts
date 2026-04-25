@@ -4,6 +4,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import sharp from 'sharp'
 import { getMaxRawBytesForImageTokens } from '../../src/llm/imageProcessing.js'
+import type {
+  CreateMessageRequest,
+  CreateMessageResponse,
+  LlmClient,
+} from '../../src/llm/types.js'
 import { webFetchTool } from '../../src/tools/builtin/webFetch.js'
 import { askUserQuestionTool } from '../../src/tools/builtin/askUserQuestion.js'
 import { getDefaultReadLimits } from '../../src/tools/builtin/readLimits.js'
@@ -27,6 +32,32 @@ async function createNoisyPng(
   })
     .png({ compressionLevel: 0 })
     .toBuffer()
+}
+
+class VisionSideQueryClient implements LlmClient {
+  readonly providerName = 'vision-test'
+  readonly requests: CreateMessageRequest[] = []
+
+  constructor(private readonly responseText: string) {}
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    return {
+      message: {
+        id: 'msg_vision_response',
+        role: 'assistant',
+        createdAt: new Date().toISOString(),
+        content: [
+          {
+            type: 'text',
+            text: this.responseText,
+          },
+        ],
+      },
+    }
+  }
 }
 
 test('WebFetch strips HTML and includes prompt context', async () => {
@@ -243,6 +274,85 @@ test('WebFetch returns structured image content for supported remote images', as
     const imageBlock = result.content?.[1]
     assert.ok(imageBlock && imageBlock.type === 'image')
     assert.equal(imageBlock.source.mediaType, 'image/png')
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch falls back to a vision side query when the active runtime does not support image input', async () => {
+  const pngBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxL8AAAAASUVORK5CYII=',
+    'base64',
+  )
+  const visionClient = new VisionSideQueryClient(
+    [
+      'Visual findings',
+      '- Visible text: none',
+      '- Style / mood: clean, minimal reference',
+      '- Layout / composition: compact centered icon',
+      '- UI elements / state cues: none',
+      '- Colors / typography / effects: bright blue accent',
+      '- Uncertainties: none',
+    ].join('\n'),
+  )
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(pngBytes.length),
+    })
+    response.end(pngBytes)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/cat.png`,
+        prompt: 'Describe the image',
+      },
+      createToolContext({
+        supportsVisionInput: false,
+        currentUserRequest: '参考这张图做一个风格接近的设计',
+        toolUseIntent: {
+          source: 'reasoning',
+          text: '需要看一下这张图片的整体风格和蓝色高光效果。',
+        },
+        visionRuntime: {
+          client: visionClient,
+          provider: 'openai',
+          model: 'vision-model',
+        },
+      }),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.contentKind, 'image')
+    assert.match(result.output.result, /Vision side query analysis:/)
+    assert.match(result.output.result, /clean, minimal reference/)
+    assert.deepEqual(
+      result.content?.map(block => block.type),
+      ['text'],
+    )
+    assert.equal(visionClient.requests.length, 1)
+    const visionPrompt = visionClient.requests[0]?.messages[0]
+    assert.ok(visionPrompt)
+    assert.equal(visionPrompt?.content[1]?.type, 'image')
+    assert.match(
+      (visionPrompt?.content[0] as { type: 'text'; text: string }).text,
+      /Why this image is being read now \(reasoning\):/,
+    )
+    assert.match(
+      (visionPrompt?.content[0] as { type: 'text'; text: string }).text,
+      /蓝色高光效果/,
+    )
   } finally {
     server.close()
     await once(server, 'close')

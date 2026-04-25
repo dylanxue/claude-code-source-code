@@ -196,6 +196,12 @@ export class StubLlmClient implements LlmClient {
   async createMessage(
     request: CreateMessageRequest,
   ): Promise<CreateMessageResponse> {
+    if (request.signal?.aborted) {
+      const error = new Error('Request aborted')
+      error.name = 'AbortError'
+      throw error
+    }
+
     if (request.systemPrompt?.includes('You are generating a compact summary')) {
       const lastUserMessage = findLastUserMessage(request.messages)
       const prompt = lastUserMessage ? getTextContent(lastUserMessage) : ''

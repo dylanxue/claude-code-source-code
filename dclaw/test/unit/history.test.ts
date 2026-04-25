@@ -213,6 +213,12 @@ test('runHistory prints planning summary when a task board is attached', async (
       board.boardId,
       current => ({
         ...current,
+        title: 'Auth flow migration',
+        purpose: 'Make the auth work batch visible in history.',
+        background: 'The user asked to continue planning after a context break.',
+        plan: 'Review the auth flow before implementation.',
+        scope: 'Auth flow planning only.',
+        verification: 'History output includes the task board brief.',
         mode: 'active',
         currentTaskId: '1',
         currentStep: 'Reviewing auth flow',
@@ -263,6 +269,9 @@ test('runHistory prints planning summary when a task board is attached', async (
 
   const text = output.join('')
   assert.match(text, /session-history-plan/)
+  assert.match(text, /board title: Auth flow migration/)
+  assert.match(text, /board purpose: Make the auth work batch visible in history\./)
+  assert.match(text, /board plan: Review the auth flow before implementation\./)
   assert.match(text, /plan mode state: active/)
   assert.match(text, /plan file:/)
   assert.match(text, /current task: Review auth flow/)

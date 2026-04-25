@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { executeSingleTurn } from '../../src/core/queryLoop.js'
+import { loadAgentMessages } from '../../src/agent/session.js'
+import { loadAgent } from '../../src/agent/store.js'
 import { loadSkills } from '../../src/skills/loader.js'
 import { createSkillRegistry } from '../../src/skills/registry.js'
 import { listInvokedSkills } from '../../src/skills/state.js'
@@ -27,6 +29,7 @@ async function writeSkill(
   input: {
     name: string
     description: string
+    context?: 'inline' | 'fork'
     prompt: string
   },
 ): Promise<void> {
@@ -37,6 +40,7 @@ async function writeSkill(
       '---',
       `name: ${JSON.stringify(input.name)}`,
       `description: ${JSON.stringify(input.description)}`,
+      ...(input.context ? [`context: ${JSON.stringify(input.context)}`] : []),
       '---',
       '',
       input.prompt,
@@ -87,6 +91,20 @@ class SkillContinuationClient implements LlmClient {
   }
 }
 
+class ForkSkillClient implements LlmClient {
+  readonly providerName = 'skill-test'
+  readonly requests: CreateMessageRequest[] = []
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    return {
+      message: createTextMessage('assistant', 'forked skill completed'),
+    }
+  }
+}
+
 function getReminderMessages(messages: Message[]): Message[] {
   return messages.filter(message =>
     getTextContent(message).includes('<system-reminder>'),
@@ -128,14 +146,13 @@ test('Skill tool validates and applies a loaded skill in the current context', a
   )
 
   assert.equal(result.summary, 'Applied skill review')
-  assert.deepEqual(result.output, {
-    skill: {
-      name: 'review',
-      description: 'Inspect a proposed change before shipping.',
-      source: 'builtin',
-      path: '/tmp/review.md',
-    },
-    applied: true,
+  assert.equal(result.output.applied, true)
+  assert.equal(result.output.execution_context, 'inline')
+  assert.deepEqual(result.output.skill, {
+    name: 'review',
+    description: 'Inspect a proposed change before shipping.',
+    source: 'builtin',
+    path: '/tmp/review.md',
   })
   assert.equal(result.newMessages?.length, 1)
   assert.match(
@@ -143,6 +160,144 @@ test('Skill tool validates and applies a loaded skill in the current context', a
     /Apply the following skill while continuing the current task/,
   )
   assert.match(getTextContent(result.newMessages?.[0]!), /name: review/)
+  assert.deepEqual(
+    listInvokedSkills(context.invokedSkills).map(skill => ({
+      name: skill.name,
+      source: skill.source,
+      path: skill.path,
+    })),
+    [
+      {
+        name: 'review',
+        source: 'builtin',
+        path: '/tmp/review.md',
+      },
+    ],
+  )
+})
+
+test('Skill tool can execute a forked skill through the subagent runtime', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-skill-tool-fork-home-'))
+  const env = { ...process.env, HOME: homeDir }
+  const registry = createSkillRegistry([
+    {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      prompt: 'Review the current work carefully.',
+      context: 'fork',
+      path: '/tmp/review.md',
+    },
+  ])
+  const toolRegistry = createDefaultToolRegistry()
+  const client = new ForkSkillClient()
+  const context = createToolContext({
+    sessionId: 'session-skill-fork',
+    activeTurnId: 'turn-skill-fork',
+    cwd: '/tmp/project',
+    availableTools: toolRegistry.list().map(tool => tool.name),
+    skillRegistry: registry,
+    agentRuntime: {
+      client,
+      provider: 'stub',
+      model: 'stub-model',
+      cwd: '/tmp/project',
+      env,
+      permissionMode: 'default',
+      availableTools: toolRegistry.list().map(tool => tool.name),
+      toolRegistry,
+      skillRegistry: registry,
+    },
+  })
+
+  try {
+    const result = await skillTool.call(
+      {
+        skill_name: 'review',
+      },
+      context,
+    )
+
+    assert.equal(result.newMessages?.length ?? 0, 0)
+    assert.equal(result.output.applied, true)
+    assert.equal(result.output.execution_context, 'fork')
+    assert.deepEqual(result.output.skill, {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      path: '/tmp/review.md',
+      context: 'fork',
+    })
+    assert.equal(result.output.agent?.status, 'completed')
+    assert.equal(result.output.result?.output_text, 'forked skill completed')
+    assert.equal(listInvokedSkills(context.invokedSkills).length, 0)
+    assert.equal(client.requests.length, 1)
+    assert.match(
+      getTextContent(client.requests[0]!.messages[0]!),
+      /# Skill\nname: review/,
+    )
+
+    const agentId = result.output.agent?.agent_id
+    assert.ok(agentId)
+    const storedAgent = await loadAgent(agentId, 'session-skill-fork', env)
+    assert.equal(storedAgent?.status, 'completed')
+    const messages = await loadAgentMessages('session-skill-fork', agentId, env)
+    assert.ok(messages.length >= 2)
+    const transcriptText = messages.map(message => getTextContent(message)).join('\n')
+    assert.match(transcriptText, /Review the current work carefully\./)
+    assert.match(transcriptText, /forked skill completed/)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('Skill tool ignores fork execution and applies the skill inline inside a subagent', async () => {
+  const registry = createSkillRegistry([
+    {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      prompt: 'Review the current work carefully.',
+      context: 'fork',
+      path: '/tmp/review.md',
+    },
+  ])
+  const toolRegistry = createDefaultToolRegistry()
+  const context = createToolContext({
+    sessionId: undefined,
+    activeTurnId: 'turn-subagent-inline-skill',
+    availableTools: toolRegistry.list().map(tool => tool.name),
+    skillRegistry: registry,
+    agentRuntime: {
+      client: new ForkSkillClient(),
+      provider: 'stub',
+      model: 'stub-model',
+      cwd: '/tmp/project',
+      permissionMode: 'default',
+      availableTools: toolRegistry.list().map(tool => tool.name),
+      toolRegistry,
+      skillRegistry: registry,
+      parentSessionId: 'session-parent',
+      currentAgentId: 'agent_parent',
+    },
+  })
+
+  const result = await skillTool.call(
+    {
+      skill_name: 'review',
+    },
+    context,
+  )
+
+  assert.equal(result.summary, 'Applied skill review')
+  assert.equal(result.output.applied, true)
+  assert.equal(result.output.execution_context, 'inline')
+  assert.equal(result.output.agent, undefined)
+  assert.equal(result.newMessages?.length, 1)
+  assert.match(
+    getTextContent(result.newMessages?.[0]!),
+    /Apply the following skill while continuing the current task/,
+  )
   assert.deepEqual(
     listInvokedSkills(context.invokedSkills).map(skill => ({
       name: skill.name,

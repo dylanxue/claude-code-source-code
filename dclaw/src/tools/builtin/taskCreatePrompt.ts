@@ -22,8 +22,19 @@ Skip using this tool when:
 - The work is trivial and tracking adds no value
 - The task can be completed in fewer than 3 trivial steps
 - The task is purely conversational or informational
-- You already have a relevant task list for the approved plan and can continue by using TaskList, TaskGet, and TaskUpdate
+- You already have a relevant task list for the current work batch and can continue by using TaskList, TaskGet, and TaskUpdate
 - The work is a major new requirement or scope change that should first be surfaced to the user before you expand the plan
+
+## Task Board Brief
+
+For the first task in a complex work batch, include the optional **board** object when the current board does not already explain the work. This keeps the short-lived task board self-contained without creating a separate runtime plan.
+
+- **title**: Short name for this work batch
+- **purpose**: What this board is trying to accomplish
+- **background**: User intent, decisions, or constraints that matter now
+- **plan**: How this batch should be executed
+- **scope**: What this batch includes or excludes
+- **verification**: How completion should be checked
 
 ## Task Fields
 
@@ -36,7 +47,7 @@ All tasks are created with status \`pending\`.
 ## Tips
 
 - Check TaskList first to avoid creating duplicate tasks
-- After plan mode approval, prefer consuming the approved task list instead of creating a brand-new execution plan during implementation
+- After leaving plan mode or resuming work, prefer consuming the existing task list instead of creating a brand-new execution batch during implementation
 - After creating tasks, use TaskUpdate to add dependencies when needed
 - When you begin work on a task, mark it as \`in_progress\` before starting
 - When you finish the work completely, mark it as \`completed\`

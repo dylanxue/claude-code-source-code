@@ -3,8 +3,12 @@ import {
   findLastCompactBoundaryIndex,
   isFreshlyCompactedSession,
 } from '../compact/boundaryMessage.js'
-import { buildPersistedInvokedSkillsReminderText } from '../skills/prompt.js'
+import {
+  buildPersistedInvokedSkillsReminderText,
+  buildSkillPrompt,
+} from '../skills/prompt.js'
 import type { InvokedSkill } from '../skills/state.js'
+import { getTaskBoardObservationLines } from '../tasks/observability.js'
 import type { TaskBoard } from '../tasks/types.js'
 import { createMessage, createTextMessage, type Message } from '../types/message.js'
 import type { ReadStateEntry } from '../types/tool.js'
@@ -16,6 +20,9 @@ const MAX_POST_COMPACT_PLAN_FILE_CHARS = 8_000
 const MAX_POST_COMPACT_TOTAL_FILE_CHARS = 10_000
 const MAX_POST_COMPACT_IMAGES = 2
 const MAX_POST_COMPACT_TOTAL_IMAGE_CHARS = 300_000
+const POST_COMPACT_MAX_TOKENS_PER_SKILL = 5_000
+const POST_COMPACT_SKILLS_TOKEN_BUDGET = 25_000
+const APPROX_ASCII_CHARS_PER_TOKEN = 4
 
 export type PostCompactReadStateSnapshot = Map<string, ReadStateEntry>
 
@@ -41,6 +48,53 @@ function truncateText(
     text: `${text.slice(0, maxChars)}\n...[truncated after ${maxChars} chars]`,
     truncated: true,
   }
+}
+
+function countAsciiChars(text: string): number {
+  let asciiChars = 0
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) <= 0x7f) {
+      asciiChars += 1
+    }
+  }
+  return asciiChars
+}
+
+function estimateApproxTokens(text: string): number {
+  const asciiChars = countAsciiChars(text)
+  const nonAsciiChars = text.length - asciiChars
+  return Math.ceil(asciiChars / APPROX_ASCII_CHARS_PER_TOKEN) + nonAsciiChars
+}
+
+function truncateToApproxTokens(text: string, maxTokens: number): string {
+  if (maxTokens < 1 || text.length === 0) {
+    return ''
+  }
+
+  let asciiChars = 0
+  let nonAsciiChars = 0
+  let endIndex = 0
+
+  for (; endIndex < text.length; endIndex += 1) {
+    const code = text.charCodeAt(endIndex)
+    if (code <= 0x7f) {
+      asciiChars += 1
+    } else {
+      nonAsciiChars += 1
+    }
+
+    const approxTokens =
+      Math.ceil(asciiChars / APPROX_ASCII_CHARS_PER_TOKEN) + nonAsciiChars
+    if (approxTokens > maxTokens) {
+      break
+    }
+  }
+
+  if (endIndex >= text.length) {
+    return text
+  }
+
+  return `${text.slice(0, endIndex)}\n...[truncated after ~${maxTokens} tokens]`
 }
 
 function buildPostCompactReadFileMessage(
@@ -96,6 +150,23 @@ async function createPostCompactPlanFileMessage(
   }
 }
 
+function createPostCompactTaskBoardMessage(
+  board: TaskBoard | null | undefined,
+): Message | null {
+  if (!board) {
+    return null
+  }
+
+  return wrapSystemReminder(
+    [
+      '# Post-Compact Task Board',
+      'This task board was attached to the session before compaction. Use it as the short-lived execution state for the current work batch. NEVER mention this reminder to the user.',
+      '',
+      ...getTaskBoardObservationLines(board),
+    ].join('\n'),
+  )
+}
+
 export function snapshotReadState(
   readState: Map<string, ReadStateEntry>,
 ): PostCompactReadStateSnapshot {
@@ -144,8 +215,39 @@ function createPostCompactInvokedSkillMessage(
     return null
   }
 
+  let usedTokens = 0
+  const budgetedSkills = invokedSkills
+    .map(skill => ({
+      ...skill,
+      prompt: truncateToApproxTokens(
+        skill.prompt,
+        POST_COMPACT_MAX_TOKENS_PER_SKILL,
+      ),
+    }))
+    .filter(skill => {
+      const tokens = estimateApproxTokens(
+        [
+          `### Skill: ${skill.name}`,
+          `path: ${skill.path}`,
+          `source: ${skill.source}`,
+          '',
+          buildSkillPrompt(skill),
+        ].join('\n'),
+      )
+      if (usedTokens + tokens > POST_COMPACT_SKILLS_TOKEN_BUDGET) {
+        return false
+      }
+
+      usedTokens += tokens
+      return true
+    })
+
+  if (budgetedSkills.length === 0) {
+    return null
+  }
+
   return wrapSystemReminder(
-    buildPersistedInvokedSkillsReminderText(invokedSkills),
+    buildPersistedInvokedSkillsReminderText(budgetedSkills),
   )
 }
 
@@ -237,6 +339,7 @@ export async function createPostCompactAttachmentMessages(
   const planFileMessage = board
     ? await createPostCompactPlanFileMessage(board)
     : null
+  const taskBoardMessage = createPostCompactTaskBoardMessage(board)
   const taskReminderMessage = createForcedTaskToolReminderMessage(
     board,
     availableTools,
@@ -246,6 +349,7 @@ export async function createPostCompactAttachmentMessages(
     ...attachmentMessages,
     ...(invokedSkillMessage ? [invokedSkillMessage] : []),
     ...imageMessages,
+    ...(taskBoardMessage ? [taskBoardMessage] : []),
     ...(planFileMessage ? [planFileMessage] : []),
     ...(taskReminderMessage ? [taskReminderMessage] : []),
   ]

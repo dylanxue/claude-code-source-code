@@ -24,6 +24,9 @@ export type InteractiveSessionPromptOptions = {
   stream: boolean
   verbose: boolean
   env?: NodeJS.ProcessEnv
+  signal?: AbortSignal
+  writeOutput?: (text: string) => void
+  flushOutput?: () => void
 }
 
 export type InteractiveSessionPromptResult = {
@@ -39,6 +42,11 @@ export type InteractiveSessionPromptResult = {
 export async function runInteractiveSessionPrompt(
   options: InteractiveSessionPromptOptions,
 ): Promise<InteractiveSessionPromptResult> {
+  const writeOutput =
+    options.writeOutput ?? ((text: string) => {
+      process.stdout.write(text)
+    })
+  const flushOutput = options.flushOutput ?? (() => {})
   const initialMessageCount = options.engine.getMessages().length
   const persistPartialTurnIfNeeded = async (): Promise<void> => {
     const activeSessionId = options.engine.getSessionId() ?? options.sessionId
@@ -74,14 +82,14 @@ export async function runInteractiveSessionPrompt(
       }
 
       if (activeReasoningKind) {
-        process.stdout.write('\n')
+        writeOutput('\n')
         activeReasoningKind = null
         outputEndsWithNewline = true
       }
       if (!outputEndsWithNewline) {
-        process.stdout.write('\n')
+        writeOutput('\n')
       }
-      process.stdout.write(lines.join('\n') + '\n')
+      writeOutput(lines.join('\n') + '\n')
       outputEndsWithNewline = true
     }
     let genericThinkingTimer: ReturnType<typeof setTimeout> | undefined
@@ -160,19 +168,19 @@ export async function runInteractiveSessionPrompt(
               return
             }
             if (activeReasoningKind) {
-              process.stdout.write('\n')
+              writeOutput('\n')
               activeReasoningKind = null
               outputEndsWithNewline = true
             }
             if (!options.verbose && !assistantTextStreamStarted) {
               if (!outputEndsWithNewline) {
-                process.stdout.write('\n')
+                writeOutput('\n')
               }
-              process.stdout.write('Assistant: ')
+              writeOutput('Assistant: ')
               assistantTextStreamStarted = true
               outputEndsWithNewline = false
             }
-            process.stdout.write(text)
+            writeOutput(text)
             if (text.length > 0) {
               assistantMessageHadStreamedText = true
               outputEndsWithNewline = text.endsWith('\n')
@@ -186,11 +194,11 @@ export async function runInteractiveSessionPrompt(
             streamedReasoningIterations.add(delta.iteration)
             if (activeReasoningKind !== delta.kind) {
               if (!outputEndsWithNewline) {
-                process.stdout.write('\n')
+                writeOutput('\n')
               }
-              process.stdout.write(formatReasoningDeltaPrefix(delta.kind))
+              writeOutput(formatReasoningDeltaPrefix(delta.kind))
             }
-            process.stdout.write(delta.text)
+            writeOutput(delta.text)
             activeReasoningKind = delta.text.endsWith('\n') ? null : delta.kind
             outputEndsWithNewline = delta.text.endsWith('\n')
           },
@@ -284,10 +292,14 @@ export async function runInteractiveSessionPrompt(
             writeEventTextLines([formatAutoCompactLine(event)])
           },
         },
+        {
+          signal: options.signal,
+        },
       )
     } catch (error) {
       clearGenericThinkingTimer()
       clearPendingReasoningTimer()
+      flushOutput()
       await persistPartialTurnIfNeeded()
       throw error
     }
@@ -306,7 +318,7 @@ export async function runInteractiveSessionPrompt(
     const normalizedOutputText = result.outputText.replace(/\s+/g, ' ').trim()
     if (options.stream) {
       if (!outputEndsWithNewline) {
-        process.stdout.write('\n')
+        writeOutput('\n')
       }
     } else if (
       result.outputText.length > 0 &&
@@ -314,6 +326,7 @@ export async function runInteractiveSessionPrompt(
     ) {
       writeEventTextLines(formatProgressAssistantOutputLines(result.outputText))
     }
+    flushOutput()
     return {
       sessionId: activeSessionId,
       ...(result.autoCompact ? { autoCompact: result.autoCompact } : {}),
@@ -322,10 +335,13 @@ export async function runInteractiveSessionPrompt(
 
   let result
   try {
-    result = await options.engine.submitUserPrompt(options.prompt)
+    result = await options.engine.submitUserPrompt(options.prompt, {
+      signal: options.signal,
+    })
   } catch (error) {
-    await persistPartialTurnIfNeeded()
-    throw error
+      await persistPartialTurnIfNeeded()
+      flushOutput()
+      throw error
   }
   const activeSessionId = options.engine.getSessionId() ?? options.sessionId
   await appendSessionMessages(
@@ -340,17 +356,19 @@ export async function runInteractiveSessionPrompt(
       includeReasoning: true,
       includeContent: true,
     })
-    process.stdout.write(
+    writeOutput(
       (verboseLines.length > 0 ? verboseLines.join('\n') : result.outputText) +
         '\n',
     )
+    flushOutput()
     return {
       sessionId: activeSessionId,
       ...(result.autoCompact ? { autoCompact: result.autoCompact } : {}),
     }
   }
 
-  process.stdout.write(result.outputText + '\n')
+  writeOutput(result.outputText + '\n')
+  flushOutput()
   return {
     sessionId: activeSessionId,
     ...(result.autoCompact ? { autoCompact: result.autoCompact } : {}),

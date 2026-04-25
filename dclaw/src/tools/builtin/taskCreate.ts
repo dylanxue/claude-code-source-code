@@ -7,6 +7,14 @@ export type TaskCreateInput = {
   subject: string
   description: string
   activeForm?: string
+  board?: {
+    title?: string
+    purpose?: string
+    background?: string
+    plan?: string
+    scope?: string
+    verification?: string
+  }
   metadata?: Record<string, unknown>
 }
 
@@ -38,6 +46,20 @@ export const taskCreateTool: Tool<TaskCreateInput, TaskCreateOutput> = buildTool
         type: 'string',
         description:
           'Present continuous form shown when in_progress, such as "Running tests".',
+      },
+      board: {
+        type: 'object',
+        description:
+          'Optional task-board brief for the current short-lived work batch. Use on the first task of complex work or when the board purpose changes.',
+        properties: {
+          title: { type: 'string' },
+          purpose: { type: 'string' },
+          background: { type: 'string' },
+          plan: { type: 'string' },
+          scope: { type: 'string' },
+          verification: { type: 'string' },
+        },
+        additionalProperties: false,
       },
       metadata: {
         type: 'object',
@@ -107,6 +129,7 @@ export const taskCreateTool: Tool<TaskCreateInput, TaskCreateOutput> = buildTool
       subject: input.subject,
       description: input.description,
       activeForm: input.activeForm,
+      board: input.board,
       metadata: input.metadata,
     })
 

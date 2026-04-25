@@ -105,10 +105,16 @@ test('maybeHandleReplCommand prints help for /help', async () => {
 })
 
 test('maybeHandleReplCommand prints diagnostics for /doctor', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-doctor-'))
   const output: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
+  const originalEnv = process.env
 
   try {
+    process.env = {
+      HOME: homeDir,
+      PATH: originalEnv.PATH,
+    } as NodeJS.ProcessEnv
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
         typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
@@ -120,7 +126,9 @@ test('maybeHandleReplCommand prints diagnostics for /doctor', async () => {
 
     assert.equal(handled, true)
   } finally {
+    process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
   }
 
   const text = output.join('')
@@ -135,6 +143,7 @@ test('maybeHandleReplCommand prints diagnostics for /doctor', async () => {
   assert.match(text, /max iterations\s+\d+ \((default|user_config)\)/)
   assert.match(text, /provider/)
   assert.match(text, /resolved model/)
+  assert.match(text, /vision side query\s+not configured/)
   assert.match(text, /max retries/)
   assert.match(text, /retry backoff/)
 })
@@ -334,10 +343,16 @@ test('maybeHandleReplCommand prints config sources for /config', async () => {
 })
 
 test('maybeHandleReplCommand prints current session info for /session', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-session-'))
   const output: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
+  const originalEnv = process.env
 
   try {
+    process.env = {
+      HOME: homeDir,
+      PATH: originalEnv.PATH,
+    } as NodeJS.ProcessEnv
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
         typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
@@ -349,7 +364,9 @@ test('maybeHandleReplCommand prints current session info for /session', async ()
 
     assert.equal(handled, true)
   } finally {
+    process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
   }
 
   const text = output.join('')
@@ -358,10 +375,74 @@ test('maybeHandleReplCommand prints current session info for /session', async ()
   assert.match(text, /mode: interactive/)
   assert.match(text, /provider: stub/)
   assert.match(text, /model: stub-model/)
+  assert.match(text, /vision side query\s+not configured/)
   assert.match(text, /permission mode: default/)
   assert.match(text, /compact pressure: low \(thresholds unavailable\)/)
   assert.match(text, /compact dry-run recommendation: no immediate compact needed/)
   assert.match(text, /compact tokens: \d+ used \(model limits unavailable\)/)
+})
+
+test('maybeHandleReplCommand allows read-only info commands while a response is active', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-busy-info-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  try {
+    process.env = env
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    const handled = await maybeHandleReplCommand(
+      '/info',
+      createCommandContext(),
+      { allowDuringActivePrompt: true },
+    )
+
+    assert.equal(handled, true)
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /current session:/)
+  assert.match(text, /session id:/)
+})
+
+test('maybeHandleReplCommand blocks mutating commands while a response is active', async () => {
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    const handled = await maybeHandleReplCommand(
+      '/clear',
+      createCommandContext(),
+      { allowDuringActivePrompt: true },
+    )
+
+    assert.equal(handled, true)
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+  }
+
+  assert.match(
+    output.join(''),
+    /\/clear cannot run while a response is active/,
+  )
 })
 
 test('maybeHandleReplCommand prints current transcript for /transcript', async () => {
@@ -822,6 +903,11 @@ test('maybeHandleReplCommand does not materialize a plan file when resuming a ta
   }
 
   const text = output.join('')
+  assert.match(text, /board title: Investigate auth edge cases/)
+  assert.match(
+    text,
+    /board purpose: Gather the outstanding execution tasks before coding\./,
+  )
   assert.match(text, /plan mode state: inactive/)
   assert.doesNotMatch(text, /plan file:/)
   assert.equal(context.session.permissionMode, 'default')

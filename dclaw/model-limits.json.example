@@ -4,481 +4,582 @@
       "*": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "claude-opus-4-6": {
         "contextWindow": 200000,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "claude-sonnet-4-6": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "claude-opus-4-5": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "claude-sonnet-4-5": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "claude-sonnet-4": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "claude-haiku-4-5": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "claude-3-7-sonnet": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "claude-3-5-sonnet": {
         "contextWindow": 200000,
         "maxOutputTokens": 8192,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": true
       },
       "claude-3-5-haiku": {
         "contextWindow": 200000,
         "maxOutputTokens": 8192,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": true
       },
       "claude-3-opus": {
         "contextWindow": 200000,
         "maxOutputTokens": 4096,
-        "maxOutputTokensUpperLimit": 4096
+        "maxOutputTokensUpperLimit": 4096,
+        "supportsVisionInput": true
       },
       "claude-3-sonnet": {
         "contextWindow": 200000,
         "maxOutputTokens": 8192,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": true
       },
       "claude-3-haiku": {
         "contextWindow": 200000,
         "maxOutputTokens": 4096,
-        "maxOutputTokensUpperLimit": 4096
+        "maxOutputTokensUpperLimit": 4096,
+        "supportsVisionInput": true
       },
       "bytedance-seed-code": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 32000
+        "maxOutputTokensUpperLimit": 32000,
+        "supportsVisionInput": true
       },
       "doubao-seed-2.0-code": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "doubao-seed-2.0-pro": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "doubao-seed-2.0-lite": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "dola-seed-2.0-pro": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "dola-seed-2.0-lite": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-2.0-pro": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-2.0-lite": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-2.0-mini": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-1.8": {
         "contextWindow": 256000,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "seed-1.6": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 32000
+        "maxOutputTokensUpperLimit": 32000,
+        "supportsVisionInput": true
       },
       "seed-1.6-flash": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 32000
+        "maxOutputTokensUpperLimit": 32000,
+        "supportsVisionInput": true
       },
       "kimi-k2.5": {
         "contextWindow": 256000,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 32768
+        "maxOutputTokensUpperLimit": 32768,
+        "supportsVisionInput": true
       },
       "deepseek-chat": {
         "contextWindow": 131072,
         "maxOutputTokens": 4096,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": false
       },
       "deepseek-v3.2": {
         "contextWindow": 131072,
         "maxOutputTokens": 4096,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": false
       },
       "deepseek-reasoner": {
         "contextWindow": 131072,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 65536
+        "maxOutputTokensUpperLimit": 65536,
+        "supportsVisionInput": false
       },
       "kimi-k2": {
         "contextWindow": 128000,
         "maxOutputTokens": 16384,
-        "maxOutputTokensUpperLimit": 16384
+        "maxOutputTokensUpperLimit": 16384,
+        "supportsVisionInput": false
       },
       "glm-5.1": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-5-turbo": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-5": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.7-flashx": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.7-flash": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.7": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.6": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.5-airx": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5-air": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5-x": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5-flash": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "minimax-m2.7": {
         "contextWindow": 204800,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       },
       "minimax-m2.5": {
         "contextWindow": 204800,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       },
       "minimax-m2": {
         "contextWindow": 204800,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       }
     },
     "openai": {
       "*": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5.4-pro": {
         "contextWindow": 1050000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5.4": {
         "contextWindow": 1050000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5-pro": {
         "contextWindow": 400000,
         "maxOutputTokens": 272000,
-        "maxOutputTokensUpperLimit": 272000
+        "maxOutputTokensUpperLimit": 272000,
+        "supportsVisionInput": true
       },
       "gpt-4.1-mini": {
         "contextWindow": 1047576,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 32768
+        "maxOutputTokensUpperLimit": 32768,
+        "supportsVisionInput": true
       },
       "gpt-4.1-nano": {
         "contextWindow": 1047576,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 32768
+        "maxOutputTokensUpperLimit": 32768,
+        "supportsVisionInput": true
+      },
+      "gpt-5-mini-text": {
+        "contextWindow": 400000,
+        "maxOutputTokens": 128000,
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       },
       "gpt-4.1": {
         "contextWindow": 1047576,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 32768
+        "maxOutputTokensUpperLimit": 32768,
+        "supportsVisionInput": true
       },
       "codex-mini-latest": {
         "contextWindow": 200000,
         "maxOutputTokens": 100000,
-        "maxOutputTokensUpperLimit": 100000
+        "maxOutputTokensUpperLimit": 100000,
+        "supportsVisionInput": true
       },
       "o4-mini": {
         "contextWindow": 200000,
         "maxOutputTokens": 100000,
-        "maxOutputTokensUpperLimit": 100000
+        "maxOutputTokensUpperLimit": 100000,
+        "supportsVisionInput": true
       },
       "gpt-5-codex": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5.1-codex": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5.3": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5.2": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5.1": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5-mini": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5-nano": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "gpt-5": {
         "contextWindow": 400000,
         "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "bytedance-seed-code": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 32000
+        "maxOutputTokensUpperLimit": 32000,
+        "supportsVisionInput": true
       },
       "doubao-seed-2.0-code": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "doubao-seed-2.0-pro": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "doubao-seed-2.0-lite": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "dola-seed-2.0-pro": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "dola-seed-2.0-lite": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-2.0-pro": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-2.0-lite": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-2.0-mini": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": true
       },
       "seed-1.8": {
         "contextWindow": 256000,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": true
       },
       "seed-1.6": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 32000
+        "maxOutputTokensUpperLimit": 32000,
+        "supportsVisionInput": true
       },
       "seed-1.6-flash": {
         "contextWindow": 256000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 32000
+        "maxOutputTokensUpperLimit": 32000,
+        "supportsVisionInput": true
       },
       "kimi-k2.5": {
         "contextWindow": 256000,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 32768
+        "maxOutputTokensUpperLimit": 32768,
+        "supportsVisionInput": true
       },
       "deepseek-chat": {
         "contextWindow": 131072,
         "maxOutputTokens": 4096,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": false
       },
       "deepseek-v3.2": {
         "contextWindow": 131072,
         "maxOutputTokens": 4096,
-        "maxOutputTokensUpperLimit": 8192
+        "maxOutputTokensUpperLimit": 8192,
+        "supportsVisionInput": false
       },
       "deepseek-reasoner": {
         "contextWindow": 131072,
         "maxOutputTokens": 32768,
-        "maxOutputTokensUpperLimit": 65536
+        "maxOutputTokensUpperLimit": 65536,
+        "supportsVisionInput": false
       },
       "kimi-k2": {
         "contextWindow": 128000,
         "maxOutputTokens": 16384,
-        "maxOutputTokensUpperLimit": 16384
+        "maxOutputTokensUpperLimit": 16384,
+        "supportsVisionInput": false
       },
       "glm-5.1": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-5-turbo": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-5": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.7-flashx": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.7-flash": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.7": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.6": {
         "contextWindow": 204800,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 131072
+        "maxOutputTokensUpperLimit": 131072,
+        "supportsVisionInput": false
       },
       "glm-4.5-airx": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5-air": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5-x": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5-flash": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "glm-4.5": {
         "contextWindow": 131072,
         "maxOutputTokens": 65536,
-        "maxOutputTokensUpperLimit": 98304
+        "maxOutputTokensUpperLimit": 98304,
+        "supportsVisionInput": false
       },
       "minimax-m2.7": {
         "contextWindow": 204800,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       },
       "minimax-m2.5": {
         "contextWindow": 204800,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       },
       "minimax-m2": {
         "contextWindow": 204800,
         "maxOutputTokens": 64000,
-        "maxOutputTokensUpperLimit": 128000
+        "maxOutputTokensUpperLimit": 128000,
+        "supportsVisionInput": false
       }
     },
     "stub": {
       "*": {
         "contextWindow": 200000,
         "maxOutputTokens": 32000,
-        "maxOutputTokensUpperLimit": 64000
+        "maxOutputTokensUpperLimit": 64000,
+        "supportsVisionInput": false
       }
     }
   }

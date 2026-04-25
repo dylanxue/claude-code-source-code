@@ -1,54 +1,33 @@
 export const DESCRIPTION =
-  'Enter plan mode proactively for non-trivial implementation work so you can explore the codebase and design an approach before coding.'
+  'Enter a high-constraint no-implementation planning lock when the user wants planning before implementation or asks you not to change code yet.'
 
-export const PROMPT = `Use this tool proactively when you're about to start a non-trivial implementation task. This tool enters plan mode so you can explore the codebase and design an implementation approach before coding.
+export const PROMPT = `Use this tool only when the current request needs a high-constraint no-implementation planning lock. Plan mode lets you explore with read-only tools and write the active plan file, but it is not the default path for normal implementation work and it does not create a separate runtime Plan object.
 
 ## When to Use This Tool
 
-**Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:
+Use EnterPlanMode when ANY of these conditions apply:
 
-1. New feature implementation
-- Adding meaningful new functionality
-- Example: "Add a logout button" - where should it go? What should happen on click?
-- Example: "Add form validation" - what rules? What error messages?
+1. The user explicitly asks to plan before coding
+- "先规划，别写代码"
+- "先出一个方案，等我确认"
+- "只做调研和设计，暂时不要改文件"
 
-2. Multiple valid approaches
-- The task can be solved in several different ways
-- Example: "Add caching to the API" - could use Redis, in-memory, file-based, etc.
-- Example: "Improve performance" - many optimization strategies possible
+2. You need a read-only exploration phase before implementation
+- The task is high risk, broad, or ambiguous enough that premature edits would be harmful
+- The user wants a plan file or reviewable design artifact before work starts
 
-3. Code modifications
-- Changes that affect existing behavior or structure
-- Example: "Update the login flow" - what exactly should change?
-- Example: "Refactor this component" - what's the target architecture?
-
-4. Architectural decisions
-- The task requires choosing between patterns or technologies
-- Example: "Add real-time updates" - WebSockets vs SSE vs polling
-- Example: "Implement state management" - Redux vs Context vs custom solution
-
-5. Multi-file changes
-- The task will likely touch more than 2-3 files
-- Example: "Refactor the authentication system"
-- Example: "Add a new API endpoint with tests"
-
-6. Unclear requirements
-- You need to explore before understanding the full scope
-- Example: "Make the app faster" - need to profile and identify bottlenecks
-- Example: "Fix the bug in checkout" - need to investigate root cause
-
-7. User preferences matter
-- The implementation could reasonably go multiple ways
-- If you would otherwise need to ask the user to choose an approach, prefer EnterPlanMode so you can explore first and present options with context
+3. The user asks for a high-constraint planning workflow
+- They want the plan delivered first, with implementation deferred until a later instruction
 
 ## When NOT to Use This Tool
 
-Only skip EnterPlanMode for simple tasks:
+Do not enter plan mode merely because a task is non-trivial. For normal implementation requests:
 
-- Single-line or few-line fixes (typos, obvious bugs, small tweaks)
-- Adding a single function with clear requirements
-- Tasks where the user has given very specific, detailed instructions
-- Pure research or exploration tasks
+- Create or update a task list with TaskCreate / TaskUpdate when tracking is useful
+- Start implementation directly when the user asked you to do the work
+- Keep the plan and task list current during execution
+- Use normal assistant text when the user only asks "what is the plan?" and does not ask for a high-constraint planning workflow
+- Do not enter plan mode for pure research or informational questions
 
 ## What Happens in Plan Mode
 
@@ -57,24 +36,24 @@ In plan mode, you should:
 2. Understand existing patterns and architecture
 3. Design an implementation approach
 4. Write and refine the plan in the plan file
-5. Exit plan mode with ExitPlanMode when ready to request approval
+5. Exit the planning lock with ExitPlanMode when ready to present the plan
 
 ## Examples
 
 ### GOOD - Use EnterPlanMode:
 User: "Add user authentication to the app"
-- Requires architectural decisions about auth flow and token handling
+- Only if the user also says to plan first, wait for confirmation, or avoid edits until the plan is reviewed
 
-User: "Optimize the database queries"
-- Multiple approaches are possible, and the tradeoffs matter
-
-User: "Implement dark mode"
-- Theme architecture affects many components
-
-User: "Add a delete button to the user profile"
-- Seems simple but still involves placement, confirmation flow, API behavior, and state updates
+User: "先规划认证方案，别动代码"
+- Explicit high-constraint planning request
 
 ### BAD - Don't use EnterPlanMode:
+User: "Add user authentication to the app"
+- Normal implementation request. Create a task list if useful and start work.
+
+User: "先列一下任务，然后直接做"
+- The user wants planning and immediate implementation. Use TaskCreate / TaskUpdate, not plan mode.
+
 User: "Fix the typo in the README"
 - Straightforward, no planning needed
 
@@ -86,7 +65,8 @@ User: "What files handle routing?"
 
 ## Important Notes
 
-- If unsure whether to use it, err on the side of planning
-- EnterPlanMode starts planning immediately; ExitPlanMode is the approval request step
-- Use plan mode to reduce rework when approach alignment matters more than immediate execution
+- Task boards are the runtime execution state; plan mode is only a temporary no-implementation lock
+- If unsure, prefer normal task tracking unless the user clearly wants a no-edits planning phase
+- EnterPlanMode starts the planning lock immediately; ExitPlanMode presents the plan and waits for the user
+- Use plan mode to reduce premature edits when approach alignment matters more than immediate execution
 `

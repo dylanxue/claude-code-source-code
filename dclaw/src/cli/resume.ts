@@ -8,9 +8,9 @@ import { loadSessionForResume } from '../session/resume.js'
 import type { SessionSubagentSummary } from '../agent/observability.js'
 import type { SessionPersistedToolResultRecord } from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
+import { getTaskBoardObservationLines } from '../tasks/observability.js'
 import { recoverTaskBoardPlanFile } from '../tasks/planSnapshots.js'
 import { loadTaskBoardForSession } from '../tasks/store.js'
-import { getCurrentTask } from '../tasks/taskState.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { runInteractiveReplLoop } from './repl.js'
@@ -100,6 +100,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
 
   const {
     runtime,
+    supportsVisionInput,
+    visionRuntime,
     dclawMdEntries,
     toolRegistry,
     engine,
@@ -133,8 +135,6 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     replSession.permissionMode = 'plan'
     replSession.permissionModeSource = 'task_board'
   }
-  const currentTask = taskBoard ? getCurrentTask(taskBoard) : undefined
-
   const lines = [
     'dclaw resume mode is ready.',
     `session id: ${command.sessionId}`,
@@ -144,13 +144,12 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     `provider source: ${runtime.providerSource}`,
     `model: ${runtime.model ?? 'default'}`,
     `model source: ${runtime.modelSource}`,
+    `vision input: ${supportsVisionInput ? 'supported' : 'not supported'}`,
+    `vision side query: ${visionRuntime ? `${visionRuntime.provider} / ${visionRuntime.model ?? 'default'}` : 'not configured'}`,
     `permission mode: ${replSession.permissionMode}`,
     `permission mode source: ${replSession.permissionModeSource}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
-    ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
-    ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
-    ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
-    ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...(taskBoard ? getTaskBoardObservationLines(taskBoard) : []),
     ...formatSubagentSummaryLines(resumed.subagents),
   ]
 
@@ -227,7 +226,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
 
   await runInteractiveReplLoop({
     initialPrompt: command.prompt,
-    onPrompt: async prompt => {
+    onPrompt: async (prompt, control) => {
       if (
         await maybeHandleReplCommand(prompt, {
           engine,
@@ -245,6 +244,9 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         prompt,
         stream: command.options.stream,
         verbose: command.options.verbose,
+        signal: control.signal,
+        writeOutput: control.writeOutput,
+        flushOutput: control.flushOutput,
       })
       replSession.sessionId = result.sessionId
       const runtimePermissionMode = engine.getPermissionMode()
@@ -261,6 +263,36 @@ export async function runResume(command: ResumeCommand): Promise<void> {
       }
 
       process.stderr.write(output.text)
+    },
+    async onBusyPrompt(prompt, busy) {
+      const originalWrite = process.stdout.write.bind(process.stdout)
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        busy.writeOutput(
+          typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+        )
+        return true
+      }) as typeof process.stdout.write
+      try {
+        return await maybeHandleReplCommand(
+          prompt,
+          {
+            engine,
+            options: command.options,
+            session: replSession,
+            rotateQueryTrace,
+          },
+          { allowDuringActivePrompt: true },
+        )
+      } finally {
+        process.stdout.write = originalWrite as typeof process.stdout.write
+        busy.flushOutput()
+      }
+    },
+    onPromptQueued(_prompt, pendingCount, writeOutput) {
+      writeOutput(`Queued prompt. Pending prompts: ${pendingCount}\n`)
+    },
+    onPromptInterrupted(_prompt, writeOutput) {
+      writeOutput('Current response interrupted.\n')
     },
   })
   await drainBackgroundWork()

@@ -30,6 +30,9 @@ export function buildPlanModeAttachmentLines(board: TaskBoard): string[] {
   const lines = [
     'Plan-mode reminder carried over from the previous session.',
     'Planning is still active.',
+    `task board: ${board.boardId}`,
+    ...(board.title ? [`board title: ${board.title}`] : []),
+    ...(board.purpose ? [`board purpose: ${board.purpose}`] : []),
     ...(board.planFilePath ? [`plan file: ${board.planFilePath}`] : []),
     ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
     ...(board.currentStep ? [`current step: ${board.currentStep}`] : []),

@@ -7,11 +7,21 @@ import { ensurePlanFileForTaskBoard } from './planFiles.js'
 import { createTaskRecord, getTaskActiveText } from './taskState.js'
 import type { TaskBoard, TaskRecord } from './types.js'
 
+export type TaskBoardBriefPatch = {
+  title?: string
+  purpose?: string
+  background?: string
+  plan?: string
+  scope?: string
+  verification?: string
+}
+
 export type CreateTaskBoardInput = {
   workspaceId: string
   rootSessionId: string
   latestSessionId?: string
   boardId?: string
+  brief?: TaskBoardBriefPatch
   env?: NodeJS.ProcessEnv
 }
 
@@ -39,13 +49,39 @@ function needsTaskBoardMigration(raw: unknown): boolean {
     return false
   }
 
-  return Object.hasOwn(raw, 'todos')
+  return Object.hasOwn(raw, 'todos') || Object.hasOwn(raw, 'planId')
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : undefined
+}
+
+function normalizeTaskBoardBrief(
+  brief: TaskBoardBriefPatch | undefined,
+): TaskBoardBriefPatch {
+  return {
+    title: normalizeOptionalString(brief?.title),
+    purpose: normalizeOptionalString(brief?.purpose),
+    background: normalizeOptionalString(brief?.background),
+    plan: normalizeOptionalString(brief?.plan),
+    scope: normalizeOptionalString(brief?.scope),
+    verification: normalizeOptionalString(brief?.verification),
+  }
 }
 
 function normalizeTaskBoard(board: TaskBoard): TaskBoard {
-  const { tasks, todos: _legacyTodos, ...rawBoard } = board as TaskBoard & {
+  const {
+    tasks,
+    todos: _legacyTodos,
+    planId: _legacyPlanId,
+    ...rawBoard
+  } = board as TaskBoard & {
     todos?: unknown
+    planId?: unknown
   }
+  const brief = normalizeTaskBoardBrief(board)
 
   return {
     ...rawBoard,
@@ -54,6 +90,12 @@ function normalizeTaskBoard(board: TaskBoard): TaskBoard {
       board.planFilePath.trim().length > 0
         ? board.planFilePath
         : undefined,
+    title: brief.title,
+    purpose: brief.purpose,
+    background: brief.background,
+    plan: brief.plan,
+    scope: brief.scope,
+    verification: brief.verification,
     resumePermissionMode: board.resumePermissionMode,
     currentTaskId:
       typeof board.currentTaskId === 'string' && board.currentTaskId.trim().length > 0
@@ -150,11 +192,13 @@ export async function createTaskBoard(
   }
 
   const now = nowIso()
+  const brief = normalizeTaskBoardBrief(input.brief)
   const board: TaskBoard = {
     boardId,
     workspaceId: input.workspaceId,
     rootSessionId: input.rootSessionId,
     latestSessionId: input.latestSessionId ?? input.rootSessionId,
+    ...brief,
     mode: 'inactive',
     createdAt: now,
     updatedAt: now,
@@ -255,7 +299,7 @@ export async function updateTaskBoardLatestSession(
   sessionId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<TaskBoard | null> {
-  return updateTaskBoard(
+  const updated = await updateTaskBoard(
     boardId,
     board => ({
       ...board,
@@ -264,6 +308,7 @@ export async function updateTaskBoardLatestSession(
     }),
     env,
   )
+  return updated
 }
 
 export async function getOrCreateTaskBoardForSession(
@@ -301,7 +346,7 @@ export async function ensureTaskBoardPlanFile(
     return board
   }
 
-  return (
+  const updated = (
     (await updateTaskBoard(
       board.boardId,
       current => ({
@@ -315,6 +360,7 @@ export async function ensureTaskBoardPlanFile(
       planFilePath: filePath,
     }
   )
+  return updated
 }
 
 function getNextTaskId(tasks: TaskRecord[]): string {
@@ -333,6 +379,52 @@ function getCurrentStepFromBoard(board: TaskBoard): string | undefined {
 
 function getVisibleTasks(board: TaskBoard): TaskRecord[] {
   return board.tasks.filter(task => !task.metadata?._internal)
+}
+
+function hasTaskBoardBrief(board: TaskBoard): boolean {
+  return Boolean(
+    board.title ||
+      board.purpose ||
+      board.background ||
+      board.plan ||
+      board.scope ||
+      board.verification,
+  )
+}
+
+function buildInitialBriefFromTask(input: {
+  subject: string
+  description: string
+}): TaskBoardBriefPatch {
+  return {
+    title: input.subject,
+    purpose: input.description,
+  }
+}
+
+function mergeTaskBoardBrief(
+  board: TaskBoard,
+  patch: TaskBoardBriefPatch | undefined,
+  fallback?: TaskBoardBriefPatch,
+): TaskBoard {
+  const normalizedPatch = normalizeTaskBoardBrief(patch)
+  const normalizedFallback = normalizeTaskBoardBrief(fallback)
+  return {
+    ...board,
+    title: normalizedPatch.title ?? board.title ?? normalizedFallback.title,
+    purpose:
+      normalizedPatch.purpose ?? board.purpose ?? normalizedFallback.purpose,
+    background:
+      normalizedPatch.background ??
+      board.background ??
+      normalizedFallback.background,
+    plan: normalizedPatch.plan ?? board.plan ?? normalizedFallback.plan,
+    scope: normalizedPatch.scope ?? board.scope ?? normalizedFallback.scope,
+    verification:
+      normalizedPatch.verification ??
+      board.verification ??
+      normalizedFallback.verification,
+  }
 }
 
 function isRetiredCompletedTaskBoard(
@@ -384,6 +476,7 @@ export async function createSessionTask(
     description: string
     activeForm?: string
     metadata?: Record<string, unknown>
+    board?: TaskBoardBriefPatch
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{
@@ -402,12 +495,18 @@ export async function createSessionTask(
   const updated =
     (await updateTaskBoard(
       board.boardId,
-      current => ({
-        ...current,
-        latestSessionId: sessionId,
-        tasks: [...current.tasks, task],
-        updatedAt: now,
-      }),
+      current => {
+        const fallback =
+          current.tasks.length === 0 && !hasTaskBoardBrief(current)
+            ? buildInitialBriefFromTask(input)
+            : undefined
+        return {
+          ...mergeTaskBoardBrief(current, input.board, fallback),
+          latestSessionId: sessionId,
+          tasks: [...current.tasks, task],
+          updatedAt: now,
+        }
+      },
       env,
     )) ?? board
 
@@ -458,12 +557,20 @@ export async function createSessionTasks(
   const updated =
     (await updateTaskBoard(
       board.boardId,
-      current => ({
-        ...current,
-        latestSessionId: sessionId,
-        tasks: [...current.tasks, ...tasks],
-        updatedAt: now,
-      }),
+      current => {
+        const fallback =
+          current.tasks.length === 0 &&
+          !hasTaskBoardBrief(current) &&
+          inputs[0]
+            ? buildInitialBriefFromTask(inputs[0])
+            : undefined
+        return {
+          ...mergeTaskBoardBrief(current, undefined, fallback),
+          latestSessionId: sessionId,
+          tasks: [...current.tasks, ...tasks],
+          updatedAt: now,
+        }
+      },
       env,
     )) ?? board
 

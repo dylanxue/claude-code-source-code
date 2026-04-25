@@ -55,7 +55,7 @@ function parseFrontmatterBlock(
     const key = line.slice(0, separatorIndex).trim() as keyof SkillFrontmatter
     const value = stripQuotes(line.slice(separatorIndex + 1))
 
-    if (key === 'name' || key === 'description') {
+    if (key === 'name' || key === 'description' || key === 'context') {
       parsed[key] = value
     }
   }
@@ -78,6 +78,9 @@ function normalizeSkillFrontmatter(
   return {
     name: value.name.trim(),
     description: value.description.trim(),
+    ...(value.context === 'fork' || value.context === 'inline'
+      ? { context: value.context }
+      : {}),
   }
 }
 
@@ -171,6 +174,7 @@ async function loadSkillFile(
       description: document.frontmatter.description,
       source,
       prompt,
+      context: document.frontmatter.context,
       path: resolve(path),
     }
   } catch {

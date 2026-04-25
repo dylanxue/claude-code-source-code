@@ -9,6 +9,12 @@ export type PlanPromptContext = {
   boardId?: string
   status?: PlanModeStatus
   planFilePath?: string
+  boardTitle?: string
+  boardPurpose?: string
+  boardBackground?: string
+  boardPlan?: string
+  boardScope?: string
+  boardVerification?: string
   currentTaskTitle?: string
   currentStep?: string
   taskSummary?: string[]

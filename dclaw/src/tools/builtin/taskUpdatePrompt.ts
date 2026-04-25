@@ -22,8 +22,8 @@ Use \`deleted\` only to remove a task permanently.
 - Only mark a task as \`completed\` when you have fully accomplished it
 - Do not mark a task as \`completed\` if tests are failing, implementation is partial, or blockers remain
 - After resolving a task, call TaskList again to find the next available work
-- If you cannot finish because of an unresolved blocker, keep the task \`in_progress\` and create a separate task for the blocker only when the blocker belongs inside the currently approved plan
-- Do not use follow-up tasks to silently replace the approved task list with a new execution plan; prefer continuing through the existing tasks
+- If you cannot finish because of an unresolved blocker, keep the task \`in_progress\` and create a separate task for the blocker only when the blocker belongs inside the current work batch
+- Do not use follow-up tasks to silently replace the current task list with a new execution plan; prefer continuing through the existing tasks
 - If you discover a substantial new workstream or scope change, surface it to the user at the end of the current turn instead of silently expanding the task list
 
 ## Fields You Can Update

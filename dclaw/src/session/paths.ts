@@ -123,8 +123,8 @@ export function getTaskBoardPath(
 }
 
 export function getPlanFilePath(
-  planId: string,
+  planFileId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getPlansDir(env), `${planId}.md`)
+  return join(getPlansDir(env), `${planFileId}.md`)
 }

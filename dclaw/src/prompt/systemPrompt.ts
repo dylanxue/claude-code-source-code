@@ -7,6 +7,7 @@ import {
   getIntroSection,
   getLanguageSection,
   getMemorySection,
+  getPlanCenteredWorkflowSection,
   getPlanModeSection,
   getUserOverrideSection,
 } from './sections.js'
@@ -16,6 +17,7 @@ export function buildSystemPrompt(context: PromptContext): string {
   const sections = [
     getIntroSection(),
     getDoingTasksSection(),
+    getPlanCenteredWorkflowSection(),
     getLanguageSection(),
     getContextSection(context),
     getCurrentDateSection(context),
