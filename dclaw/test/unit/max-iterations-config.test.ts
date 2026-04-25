@@ -10,9 +10,10 @@ import {
 
 test('resolveMaxIterations returns the CLI default when nothing is configured', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'dclaw-max-iterations-'))
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-max-iterations-home-'))
 
   try {
-    const resolved = await resolveMaxIterations({ cwd }, {})
+    const resolved = await resolveMaxIterations({ cwd }, { HOME: homeDir })
 
     assert.deepEqual(resolved, {
       maxIterations: DEFAULT_CLI_MAX_ITERATIONS,
@@ -20,6 +21,7 @@ test('resolveMaxIterations returns the CLI default when nothing is configured', 
     })
   } finally {
     await rm(cwd, { recursive: true, force: true })
+    await rm(homeDir, { recursive: true, force: true })
   }
 })
 
@@ -88,6 +90,7 @@ test('resolveMaxIterations reads direct config values from user and workspace co
 
 test('resolveMaxIterations rejects invalid direct config values', async () => {
   const workspaceDir = await mkdtemp(join(tmpdir(), 'dclaw-max-iterations-workspace-'))
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-max-iterations-home-'))
 
   try {
     await mkdir(join(workspaceDir, '.dclaw'), { recursive: true })
@@ -98,10 +101,11 @@ test('resolveMaxIterations rejects invalid direct config values', async () => {
     )
 
     await assert.rejects(
-      () => resolveMaxIterations({ cwd: workspaceDir }, {}),
+      () => resolveMaxIterations({ cwd: workspaceDir }, { HOME: homeDir }),
       /maxIterations must be a positive integer/,
     )
   } finally {
     await rm(workspaceDir, { recursive: true, force: true })
+    await rm(homeDir, { recursive: true, force: true })
   }
 })

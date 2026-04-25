@@ -7,6 +7,7 @@ import { runDoctor } from '../../src/cli/doctor.js'
 
 test('runDoctor prints effective retry and timeout diagnostics with sources', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'dclaw-doctor-'))
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-doctor-home-'))
   const originalEnv = process.env
   const originalWrite = process.stdout.write.bind(process.stdout)
   const output: string[] = []
@@ -25,7 +26,7 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
     )
 
     process.env = {
-      HOME: originalEnv.HOME,
+      HOME: homeDir,
       PATH: originalEnv.PATH,
       DCLAW_LLM_TIMEOUT_MS: '12345',
       DCLAW_STREAM_IDLE_TIMEOUT_MS: '45678',
@@ -51,6 +52,7 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
     process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write
     await rm(cwd, { recursive: true, force: true })
+    await rm(homeDir, { recursive: true, force: true })
   }
 
   const text = output.join('')

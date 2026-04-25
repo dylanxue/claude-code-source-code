@@ -13,6 +13,7 @@ export type ProcessedImage = {
 
 type SharpLike = typeof import('sharp')
 type SharpModule = SharpLike & { default?: SharpLike }
+type ImageDimensions = { width?: number; height?: number }
 
 function normalizeMediaType(mediaType: string): string {
   const normalized = mediaType.toLowerCase()
@@ -31,14 +32,23 @@ async function renderVariant(
   maxWidth: number,
   maxHeight: number,
   quality: number,
+  originalDimensions?: ImageDimensions,
 ): Promise<ProcessedImage> {
   const normalizedMediaType = normalizeMediaType(mediaType)
-  let pipeline = sharp(inputBuffer, { animated: false }).rotate().resize({
-    width: maxWidth,
-    height: maxHeight,
-    fit: 'inside',
-    withoutEnlargement: true,
-  })
+  let pipeline = sharp(inputBuffer, { animated: false }).rotate()
+  if (
+    !originalDimensions?.width ||
+    !originalDimensions?.height ||
+    originalDimensions.width > maxWidth ||
+    originalDimensions.height > maxHeight
+  ) {
+    pipeline = pipeline.resize({
+      width: maxWidth,
+      height: maxHeight,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+  }
 
   switch (normalizedMediaType) {
     case 'image/png':
@@ -103,6 +113,7 @@ async function compressImageToBudget(
   inputBuffer: Buffer,
   maxBytes: number,
   preferredMediaType: string,
+  originalDimensions?: ImageDimensions,
 ): Promise<ProcessedImage> {
   const normalizedMediaType = normalizeMediaType(preferredMediaType)
   const initialMaxDimension = Math.min(IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT)
@@ -114,6 +125,7 @@ async function compressImageToBudget(
       initialMaxDimension,
       initialMaxDimension,
       75,
+      originalDimensions,
     ),
   )
 
@@ -138,6 +150,7 @@ async function compressImageToBudget(
         fallback.maxWidth,
         fallback.maxHeight,
         fallback.quality,
+        originalDimensions,
       ),
     )
     if (candidate.buffer.length < best.buffer.length) {
@@ -193,6 +206,7 @@ export async function optimizeImageForModel(
         inputBuffer,
         Math.min(IMAGE_TARGET_RAW_SIZE, getMaxRawBytesForImageTokens(maxTokens)),
         normalizedMediaType,
+        { width, height },
       )
     }
 
@@ -204,6 +218,7 @@ export async function optimizeImageForModel(
         IMAGE_MAX_WIDTH,
         IMAGE_MAX_HEIGHT,
         80,
+        { width, height },
       ),
     )
     if (
@@ -218,6 +233,7 @@ export async function optimizeImageForModel(
       inputBuffer,
       Math.min(IMAGE_TARGET_RAW_SIZE, getMaxRawBytesForImageTokens(maxTokens)),
       normalizedMediaType,
+      { width, height },
     )
   } catch {
     return finalizeProcessedImage({
