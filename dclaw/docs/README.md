@@ -55,6 +55,7 @@
 - [tool-spec.md](./tool-spec.md)
 - [plan-task-spec.md](./plan-task-spec.md)
 - [memory-spec.md](./memory-spec.md)
+- [tui-design.md](./tui-design.md)
 - [skill-install-dialog-design.md](./skill-install-dialog-design.md)
 - [multimodal-input-todo.md](./multimodal-input-todo.md)
 - [agent-spec.md](./agent-spec.md)
