@@ -5,7 +5,8 @@
   "DCLAW_LLM_MAX_RETRIES": 10,
   "DCLAW_LLM_TIMEOUT_MS": 600000,
   "DCLAW_ENABLE_STREAM_WATCHDOG": true,
-  "DCLAW_STREAM_IDLE_TIMEOUT_MS": 90000,
+  "DCLAW_STREAM_IDLE_TIMEOUT_MS": 600000,
+
   "llm": {
     "defaultRuntime": "glm-5.1",
     "providers": {
