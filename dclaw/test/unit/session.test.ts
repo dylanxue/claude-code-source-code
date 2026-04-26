@@ -738,6 +738,13 @@ test('QueryEngine injects skill listing only for newly surfaced skills', async (
   const toolRegistry = createDefaultToolRegistry()
   const skillRegistry = createSkillRegistry([
     {
+      name: 'install-skills',
+      description: 'Install or enable local and external skills.',
+      source: 'builtin',
+      prompt: 'Check local skills before installing external ones.',
+      path: '/tmp/install-skills.md',
+    },
+    {
       name: 'review',
       description: 'Inspect a proposed change before shipping.',
       source: 'builtin',
@@ -770,6 +777,10 @@ test('QueryEngine injects skill listing only for newly surfaced skills', async (
   assert.match(
     firstRequestText,
     /The following skills are available for use with the Skill tool:/,
+  )
+  assert.match(
+    firstRequestText,
+    /The following skills are available for use with the Skill tool:\n\n- install-skills: Install or enable local and external skills\.[\s\S]*- handoff: Prepare a concise teammate handoff\.[\s\S]*- review: Inspect a proposed change before shipping\./,
   )
   assert.match(firstRequestText, /- handoff: Prepare a concise teammate handoff\./)
   assert.match(firstRequestText, /- review: Inspect a proposed change before shipping\./)

@@ -3,6 +3,7 @@ import {
   type ContentBlock,
   type ImageContentBlock,
   type Message,
+  type PdfContentBlock,
   type TextAnnotation,
 } from '../../types/message.js'
 import {
@@ -25,10 +26,9 @@ import {
   type SseEvent,
 } from '../providerUtils.js'
 import {
-  resolveOpenAiProviderConfig,
-  type OpenAiApiStyle,
   type OpenAiProviderConfig as OpenAiConfig,
 } from '../providerConfig.js'
+import type { ModelCatalogOverrides, OpenAiApiStyle } from '../config.js'
 import { resolveModelSelection } from '../modelSelection.js'
 import type {
   CreateMessageRequest,
@@ -40,11 +40,7 @@ import type {
   OpenAiResponsesRequestOptions,
   OpenAiTextVerbosity,
 } from '../types.js'
-export {
-  resolveOpenAiProviderConfig as resolveOpenAiConfig,
-  type OpenAiApiStyle,
-  type OpenAiConfig,
-}
+export { type OpenAiApiStyle, type OpenAiConfig }
 
 type OpenAiResponsesMessageInputContent =
   | {
@@ -54,6 +50,11 @@ type OpenAiResponsesMessageInputContent =
   | {
       type: 'input_image'
       image_url: string
+    }
+  | {
+      type: 'input_file'
+      filename?: string
+      file_data: string
     }
 
 type OpenAiResponsesInputItem =
@@ -210,6 +211,13 @@ type OpenAiChatContentPart =
         url: string
       }
     }
+  | {
+      type: 'file'
+      file: {
+        filename?: string
+        file_data: string
+      }
+    }
 
 type OpenAiChatCompletionResponse = {
   choices?: Array<{
@@ -302,6 +310,7 @@ export type OpenAiLlmClientOptions = {
   baseUrl?: string
   defaultModel?: string
   apiStyle?: OpenAiApiStyle
+  modelCatalogOverrides?: ModelCatalogOverrides
   defaultTextVerbosity?: OpenAiTextVerbosity
   defaultReasoningEffort?: OpenAiReasoningEffort
   defaultStore?: boolean
@@ -331,17 +340,29 @@ function toResponsesImageUrl(block: ImageContentBlock): string {
   return `data:${block.source.mediaType};base64,${block.source.data}`
 }
 
+function toResponsesPdfFileData(block: PdfContentBlock): string {
+  return `data:${block.source.mediaType};base64,${block.source.data}`
+}
+
 function stringifyToolResultForOpenAi(output: unknown): string {
   return stringifyJson(output)
 }
 
 function toResponsesMessageContent(
-  block: Extract<ContentBlock, { type: 'text' | 'image' }>,
+  block: Extract<ContentBlock, { type: 'text' | 'image' | 'pdf' }>,
 ): OpenAiResponsesMessageInputContent {
   if (block.type === 'text') {
     return {
       type: 'input_text',
       text: block.text,
+    }
+  }
+
+  if (block.type === 'pdf') {
+    return {
+      type: 'input_file',
+      ...(block.filename ? { filename: block.filename } : {}),
+      file_data: toResponsesPdfFileData(block),
     }
   }
 
@@ -352,12 +373,22 @@ function toResponsesMessageContent(
 }
 
 function toChatCompletionContentPart(
-  block: Extract<ContentBlock, { type: 'text' | 'image' }>,
+  block: Extract<ContentBlock, { type: 'text' | 'image' | 'pdf' }>,
 ): OpenAiChatContentPart {
   if (block.type === 'text') {
     return {
       type: 'text',
       text: block.text,
+    }
+  }
+
+  if (block.type === 'pdf') {
+    return {
+      type: 'file',
+      file: {
+        ...(block.filename ? { filename: block.filename } : {}),
+        file_data: toResponsesPdfFileData(block),
+      },
     }
   }
 
@@ -378,22 +409,24 @@ function toResponsesInput(messages: Message[]): OpenAiResponsesInputItem[] {
     }
     const role: 'user' | 'assistant' = message.role
 
-    let messageContent: Array<Extract<ContentBlock, { type: 'text' | 'image' }>> = []
+    let messageContent: Array<Extract<ContentBlock, { type: 'text' | 'image' | 'pdf' }>> = []
 
     const flushMessageContent = (): void => {
       if (messageContent.length === 0) {
         return
       }
 
-      const hasImage = messageContent.some(block => block.type === 'image')
-      if (message.role === 'assistant' && hasImage) {
+      const hasNonTextAttachment = messageContent.some(
+        block => block.type === 'image' || block.type === 'pdf',
+      )
+      if (message.role === 'assistant' && hasNonTextAttachment) {
         throw new Error(
-          'OpenAI image blocks are only supported on user messages in dclaw',
+          'OpenAI attachment blocks are only supported on user messages in dclaw',
         )
       }
 
       if (
-        !hasImage &&
+        !hasNonTextAttachment &&
         messageContent.length === 1 &&
         messageContent[0]?.type === 'text'
       ) {
@@ -415,6 +448,7 @@ function toResponsesInput(messages: Message[]): OpenAiResponsesInputItem[] {
       switch (block.type) {
         case 'text':
         case 'image':
+        case 'pdf':
           messageContent.push(block)
           break
         case 'thinking':
@@ -1103,8 +1137,8 @@ function toChatCompletionMessages(
     }
 
     const userContentBlocks = message.content.filter(
-      (block): block is Extract<ContentBlock, { type: 'text' | 'image' }> =>
-        block.type === 'text' || block.type === 'image',
+      (block): block is Extract<ContentBlock, { type: 'text' | 'image' | 'pdf' }> =>
+        block.type === 'text' || block.type === 'image' || block.type === 'pdf',
     )
     const textBlocks = message.content.filter(
       (block): block is Extract<ContentBlock, { type: 'text' }> =>
@@ -1131,19 +1165,23 @@ function toChatCompletionMessages(
     }
 
     if (message.role === 'user') {
-      const hasImage = userContentBlocks.some(block => block.type === 'image')
+      const hasAttachment = userContentBlocks.some(
+        block => block.type === 'image' || block.type === 'pdf',
+      )
       messages.push({
         role: 'user',
-        content: hasImage
+        content: hasAttachment
           ? userContentBlocks.map(toChatCompletionContentPart)
           : textBlocks.map(block => block.text).join('\n'),
       })
       continue
     }
 
-    if (userContentBlocks.some(block => block.type === 'image')) {
+    if (userContentBlocks.some(
+      block => block.type === 'image' || block.type === 'pdf',
+    )) {
       throw new Error(
-        'OpenAI image blocks are only supported on user messages in dclaw',
+        'OpenAI attachment blocks are only supported on user messages in dclaw',
       )
     }
 
@@ -1330,6 +1368,7 @@ export class OpenAiLlmClient implements LlmClient {
   private readonly baseUrl: string
   private readonly defaultModel?: string
   private readonly apiStyle: OpenAiApiStyle
+  private readonly modelCatalogOverrides?: ModelCatalogOverrides
   private readonly defaultTextVerbosity?: OpenAiTextVerbosity
   private readonly defaultReasoningEffort?: OpenAiReasoningEffort
   private readonly defaultStore?: boolean
@@ -1341,16 +1380,14 @@ export class OpenAiLlmClient implements LlmClient {
   private readonly streamIdleTimeoutMs?: number
 
   constructor(options: OpenAiLlmClientOptions = {}) {
-    const config = resolveOpenAiProviderConfig(options.env)
-    this.apiKey = options.apiKey ?? config.apiKey
-    this.baseUrl = options.baseUrl ?? config.baseUrl
-    this.defaultModel = options.defaultModel ?? config.defaultModel
-    this.apiStyle = options.apiStyle ?? config.apiStyle
-    this.defaultTextVerbosity =
-      options.defaultTextVerbosity ?? config.defaultTextVerbosity
-    this.defaultReasoningEffort =
-      options.defaultReasoningEffort ?? config.defaultReasoningEffort
-    this.defaultStore = options.defaultStore ?? config.defaultStore
+    this.apiKey = options.apiKey
+    this.baseUrl = options.baseUrl ?? 'https://api.openai.com/v1'
+    this.defaultModel = options.defaultModel
+    this.apiStyle = options.apiStyle ?? 'responses'
+    this.modelCatalogOverrides = options.modelCatalogOverrides
+    this.defaultTextVerbosity = options.defaultTextVerbosity
+    this.defaultReasoningEffort = options.defaultReasoningEffort
+    this.defaultStore = options.defaultStore
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
     this.maxRetries = options.maxRetries ?? getLlmMaxRetries(this.env)
@@ -1665,20 +1702,23 @@ export class OpenAiLlmClient implements LlmClient {
   } {
     if (!this.apiKey) {
       throw new Error(
-        'OpenAI API key is required. Set OPENAI_API_KEY or DCLAW_OPENAI_API_KEY, or configure OPENAI_API_KEY in .dclaw/config.json.',
+        'OpenAI API key is required. Configure llm.providers.<name>.apiKey in ~/.dclaw/config.json.',
       )
     }
 
     const { model } = resolveModelSelection(request.model, this.defaultModel)
     if (!model) {
       throw new Error(
-        'OpenAI model is required. Pass --model or set OPENAI_MODEL / DCLAW_OPENAI_MODEL.',
+        'OpenAI model is required. Configure llm.runtimes.<name>.primary.model.',
       )
     }
 
     return {
       model,
-      limits: resolveModelLimits('openai', model, this.env),
+      limits: resolveModelLimits('openai', model, {
+        env: this.env,
+        overrides: this.modelCatalogOverrides,
+      }),
       responsesOptions: this.resolveResponsesOptions(request),
     }
   }

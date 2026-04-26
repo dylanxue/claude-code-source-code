@@ -1,4 +1,5 @@
 import { compactSession } from '../compact/compactSession.js'
+import type { ModelCatalogOverrides } from '../llm/config.js'
 import {
   getMessagesAfterCompactBoundary,
 } from '../compact/boundaryMessage.js'
@@ -65,6 +66,7 @@ export type QueryEngineOptions = {
   client: LlmClient
   provider?: LlmProviderName
   modelLimitsEnv?: NodeJS.ProcessEnv
+  modelCatalogOverrides?: ModelCatalogOverrides
   sessionMode?: SessionMode
   model?: string
   systemPrompt?: string
@@ -118,6 +120,7 @@ export class QueryEngine {
   private readonly client: LlmClient
   private readonly provider?: LlmProviderName
   private readonly modelLimitsEnv?: NodeJS.ProcessEnv
+  private readonly modelCatalogOverrides?: ModelCatalogOverrides
   private readonly sessionMode: SessionMode
   private model?: string
   private systemPrompt?: string
@@ -148,6 +151,7 @@ export class QueryEngine {
     this.client = options.client
     this.provider = options.provider
     this.modelLimitsEnv = options.modelLimitsEnv
+    this.modelCatalogOverrides = options.modelCatalogOverrides
     this.sessionMode = options.sessionMode ?? 'interactive'
     this.model = options.model
     this.systemPrompt = options.systemPrompt
@@ -182,6 +186,10 @@ export class QueryEngine {
 
   getMessages(): Message[] {
     return [...this.messages]
+  }
+
+  getClient(): LlmClient {
+    return this.client
   }
 
   appendMessages(messages: Message[]): void {
@@ -312,9 +320,15 @@ export class QueryEngine {
       return []
     }
 
-    const currentSkills = [...this.toolContext.skillRegistry.list()].sort((left, right) =>
-      left.name.localeCompare(right.name),
-    )
+    const currentSkills = [...this.toolContext.skillRegistry.list()].sort((left, right) => {
+      if (left.name === 'install-skills' && right.name !== 'install-skills') {
+        return -1
+      }
+      if (right.name === 'install-skills' && left.name !== 'install-skills') {
+        return 1
+      }
+      return left.name.localeCompare(right.name)
+    })
     if (currentSkills.length === 0) {
       return []
     }
@@ -440,7 +454,10 @@ export class QueryEngine {
     )
     const modelLimits =
       this.provider && this.provider !== 'stub'
-        ? resolveModelLimits(this.provider, this.model, this.modelLimitsEnv)
+        ? resolveModelLimits(this.provider, this.model, {
+            env: this.modelLimitsEnv,
+            overrides: this.modelCatalogOverrides,
+          })
         : undefined
     const toolResultBudgetOptions = modelLimits
       ? deriveToolResultBudgetFromModelLimits(modelLimits)
@@ -458,7 +475,10 @@ export class QueryEngine {
 
   private getResolvedModelLimits() {
     return this.provider && this.provider !== 'stub'
-      ? resolveModelLimits(this.provider, this.model, this.modelLimitsEnv)
+      ? resolveModelLimits(this.provider, this.model, {
+          env: this.modelLimitsEnv,
+          overrides: this.modelCatalogOverrides,
+        })
       : undefined
   }
 

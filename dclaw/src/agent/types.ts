@@ -8,7 +8,7 @@ import type { Message } from '../types/message.js'
 import type {
   PermissionMode,
   ToolContext,
-  VisionRuntime,
+  ToolRuntimeProfile,
 } from '../types/tool.js'
 import type { ToolRegistry } from '../tools/registry.js'
 
@@ -91,9 +91,9 @@ export type ParentAgentRuntime = {
   planFilePath?: string
   parentSessionId?: string
   currentAgentId?: string
-  supportsVisionInput?: boolean
-  visionRuntime?: VisionRuntime
+  runtimeProfile?: ToolRuntimeProfile
   askUserQuestions?: ToolContext['askUserQuestions']
+  reloadSkills?: ToolContext['reloadSkills']
   toolRegistry: ToolRegistry
   skillRegistry?: SkillRegistry
   modelLimitsEnv?: NodeJS.ProcessEnv

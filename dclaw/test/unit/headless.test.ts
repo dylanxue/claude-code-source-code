@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +6,18 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { once } from 'node:events'
 import { runHeadless } from '../../src/cli/headless.js'
+
+async function writeUserConfig(
+  dclawHome: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await mkdir(dclawHome, { recursive: true })
+  await writeFile(
+    join(dclawHome, 'config.json'),
+    JSON.stringify(config, null, 2),
+    'utf8',
+  )
+}
 
 function parseSseEvents(output: string): Array<{
   event: string
@@ -79,9 +91,6 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
 
   const originalEnv = {
     DCLAW_HOME: process.env.DCLAW_HOME,
-    DCLAW_OPENAI_API_KEY: process.env.DCLAW_OPENAI_API_KEY,
-    DCLAW_OPENAI_BASE_URL: process.env.DCLAW_OPENAI_BASE_URL,
-    DCLAW_OPENAI_API_STYLE: process.env.DCLAW_OPENAI_API_STYLE,
   }
   const originalWrite = process.stdout.write.bind(process.stdout)
   const output: string[] = []
@@ -92,9 +101,27 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
     }
 
     process.env.DCLAW_HOME = join(dir, '.dclaw-home')
-    process.env.DCLAW_OPENAI_API_KEY = 'test-key'
-    process.env.DCLAW_OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`
-    process.env.DCLAW_OPENAI_API_STYLE = 'responses'
+    await writeUserConfig(process.env.DCLAW_HOME, {
+      llm: {
+        defaultRuntime: 'default',
+        providers: {
+          'openai-test': {
+            type: 'openai',
+            apiKey: 'test-key',
+            baseURL: `http://127.0.0.1:${address.port}/v1`,
+            apiStyle: 'responses',
+          },
+        },
+        runtimes: {
+          default: {
+            primary: {
+              providerRef: 'openai-test',
+              model: 'gpt-4.1-mini',
+            },
+          },
+        },
+      },
+    })
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -108,8 +135,7 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
       prompt: 'Please inspect the file and answer.',
       options: {
         cwd: dir,
-        provider: 'openai',
-        model: 'gpt-4.1-mini',
+        runtime: 'default',
         permissionMode: 'default',
         stream: true,
         verbose: false,
@@ -119,9 +145,6 @@ test('runHeadless emits assistant message and reasoning SSE events', async () =>
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
     process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
-    process.env.DCLAW_OPENAI_API_KEY = originalEnv.DCLAW_OPENAI_API_KEY
-    process.env.DCLAW_OPENAI_BASE_URL = originalEnv.DCLAW_OPENAI_BASE_URL
-    process.env.DCLAW_OPENAI_API_STYLE = originalEnv.DCLAW_OPENAI_API_STYLE
     server.close()
     await once(server, 'close')
     await rm(dir, { recursive: true, force: true })
@@ -222,9 +245,6 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
 
   const originalEnv = {
     DCLAW_HOME: process.env.DCLAW_HOME,
-    DCLAW_OPENAI_API_KEY: process.env.DCLAW_OPENAI_API_KEY,
-    DCLAW_OPENAI_BASE_URL: process.env.DCLAW_OPENAI_BASE_URL,
-    DCLAW_OPENAI_API_STYLE: process.env.DCLAW_OPENAI_API_STYLE,
   }
   const originalWrite = process.stdout.write.bind(process.stdout)
   const output: string[] = []
@@ -235,9 +255,27 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
     }
 
     process.env.DCLAW_HOME = join(dir, '.dclaw-home')
-    process.env.DCLAW_OPENAI_API_KEY = 'test-key'
-    process.env.DCLAW_OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`
-    process.env.DCLAW_OPENAI_API_STYLE = 'responses'
+    await writeUserConfig(process.env.DCLAW_HOME, {
+      llm: {
+        defaultRuntime: 'default',
+        providers: {
+          'openai-test': {
+            type: 'openai',
+            apiKey: 'test-key',
+            baseURL: `http://127.0.0.1:${address.port}/v1`,
+            apiStyle: 'responses',
+          },
+        },
+        runtimes: {
+          default: {
+            primary: {
+              providerRef: 'openai-test',
+              model: 'gpt-4.1-mini',
+            },
+          },
+        },
+      },
+    })
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -251,8 +289,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
       prompt: 'Please inspect the file and answer.',
       options: {
         cwd: dir,
-        provider: 'openai',
-        model: 'gpt-4.1-mini',
+        runtime: 'default',
         permissionMode: 'default',
         stream: true,
         verbose: true,
@@ -262,9 +299,6 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
     process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
-    process.env.DCLAW_OPENAI_API_KEY = originalEnv.DCLAW_OPENAI_API_KEY
-    process.env.DCLAW_OPENAI_BASE_URL = originalEnv.DCLAW_OPENAI_BASE_URL
-    process.env.DCLAW_OPENAI_API_STYLE = originalEnv.DCLAW_OPENAI_API_STYLE
     server.close()
     await once(server, 'close')
     await rm(dir, { recursive: true, force: true })
@@ -292,7 +326,7 @@ test('runHeadless verbose SSE emits meta and streams tool calls in event order',
     provider: 'openai',
     providerSource: 'cli',
     model: 'gpt-4.1-mini',
-    modelSource: 'cli',
+    modelSource: 'workspace_config',
     permissionMode: 'default',
     permissionModeSource: 'cli',
     stream: true,
@@ -375,9 +409,6 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
 
   const originalEnv = {
     DCLAW_HOME: process.env.DCLAW_HOME,
-    DCLAW_ANTHROPIC_API_KEY: process.env.DCLAW_ANTHROPIC_API_KEY,
-    DCLAW_ANTHROPIC_BASE_URL: process.env.DCLAW_ANTHROPIC_BASE_URL,
-    DCLAW_ANTHROPIC_MODEL: process.env.DCLAW_ANTHROPIC_MODEL,
   }
   const originalWrite = process.stdout.write.bind(process.stdout)
   const output: string[] = []
@@ -388,9 +419,26 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
     }
 
     process.env.DCLAW_HOME = join(dir, '.dclaw-home')
-    process.env.DCLAW_ANTHROPIC_API_KEY = 'test-key'
-    process.env.DCLAW_ANTHROPIC_BASE_URL = `http://127.0.0.1:${address.port}`
-    process.env.DCLAW_ANTHROPIC_MODEL = 'claude-test'
+    await writeUserConfig(process.env.DCLAW_HOME, {
+      llm: {
+        defaultRuntime: 'default',
+        providers: {
+          'anthropic-test': {
+            type: 'anthropic',
+            apiKey: 'test-key',
+            baseURL: `http://127.0.0.1:${address.port}`,
+          },
+        },
+        runtimes: {
+          default: {
+            primary: {
+              providerRef: 'anthropic-test',
+              model: 'claude-test',
+            },
+          },
+        },
+      },
+    })
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -404,8 +452,7 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
       prompt: 'Please think first and answer.',
       options: {
         cwd: dir,
-        provider: 'anthropic',
-        model: 'claude-test',
+        runtime: 'default',
         permissionMode: 'default',
         stream: true,
         verbose: true,
@@ -415,9 +462,6 @@ test('runHeadless verbose text streaming prints anthropic thinking before conten
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
     process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
-    process.env.DCLAW_ANTHROPIC_API_KEY = originalEnv.DCLAW_ANTHROPIC_API_KEY
-    process.env.DCLAW_ANTHROPIC_BASE_URL = originalEnv.DCLAW_ANTHROPIC_BASE_URL
-    process.env.DCLAW_ANTHROPIC_MODEL = originalEnv.DCLAW_ANTHROPIC_MODEL
     server.close()
     await once(server, 'close')
     await rm(dir, { recursive: true, force: true })
@@ -472,9 +516,6 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
 
   const originalEnv = {
     DCLAW_HOME: process.env.DCLAW_HOME,
-    DCLAW_ANTHROPIC_API_KEY: process.env.DCLAW_ANTHROPIC_API_KEY,
-    DCLAW_ANTHROPIC_BASE_URL: process.env.DCLAW_ANTHROPIC_BASE_URL,
-    DCLAW_ANTHROPIC_MODEL: process.env.DCLAW_ANTHROPIC_MODEL,
   }
   const originalWrite = process.stdout.write.bind(process.stdout)
   const output: string[] = []
@@ -485,9 +526,26 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
     }
 
     process.env.DCLAW_HOME = join(dir, '.dclaw-home')
-    process.env.DCLAW_ANTHROPIC_API_KEY = 'test-key'
-    process.env.DCLAW_ANTHROPIC_BASE_URL = `http://127.0.0.1:${address.port}`
-    process.env.DCLAW_ANTHROPIC_MODEL = 'claude-test'
+    await writeUserConfig(process.env.DCLAW_HOME, {
+      llm: {
+        defaultRuntime: 'default',
+        providers: {
+          'anthropic-test': {
+            type: 'anthropic',
+            apiKey: 'test-key',
+            baseURL: `http://127.0.0.1:${address.port}`,
+          },
+        },
+        runtimes: {
+          default: {
+            primary: {
+              providerRef: 'anthropic-test',
+              model: 'claude-test',
+            },
+          },
+        },
+      },
+    })
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -503,8 +561,7 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
           prompt: 'Please think first and answer.',
           options: {
             cwd: dir,
-            provider: 'anthropic',
-            model: 'claude-test',
+            runtime: 'default',
             permissionMode: 'default',
             stream: true,
             verbose: true,
@@ -519,9 +576,6 @@ test('runHeadless verbose SSE emits llm.error when streaming fails after partial
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
     process.env.DCLAW_HOME = originalEnv.DCLAW_HOME
-    process.env.DCLAW_ANTHROPIC_API_KEY = originalEnv.DCLAW_ANTHROPIC_API_KEY
-    process.env.DCLAW_ANTHROPIC_BASE_URL = originalEnv.DCLAW_ANTHROPIC_BASE_URL
-    process.env.DCLAW_ANTHROPIC_MODEL = originalEnv.DCLAW_ANTHROPIC_MODEL
     server.close()
     await once(server, 'close')
     await rm(dir, { recursive: true, force: true })

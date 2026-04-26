@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ContextStats } from '../core/contextStats.js'
-import { createLlmClient } from '../llm/client.js'
 import type { LlmClient } from '../llm/types.js'
-import type { LlmProviderName } from '../llm/providerNames.js'
 import { formatTranscript } from '../session/transcript.js'
 import {
   appendSessionMessages,
@@ -47,9 +45,11 @@ export async function compactSession(
     includeThinking: false,
     maxMessages: input.transcriptMessageLimit ?? 40,
   })
+  if (!input.client) {
+    throw new Error('compactSession requires an explicit llm client')
+  }
   const compactSummary = await summarizeCompactSession({
-    client:
-      input.client ?? createLlmClient(input.provider as LlmProviderName, env),
+    client: input.client,
     model: input.model,
     transcriptLines,
     instructionText: input.instructionText,

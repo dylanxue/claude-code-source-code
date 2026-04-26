@@ -1,20 +1,68 @@
 {
-    "permissionMode": "bypass-permissions",
-    "maxIterations": 128,
-    "DCLAW_QUERY_TRACE": true,
-    "DCLAW_LLM_MAX_RETRIES": 10,
-    "DCLAW_LLM_TIMEOUT_MS": 600000,
-    "DCLAW_ENABLE_STREAM_WATCHDOG": true,
-    "DCLAW_STREAM_IDLE_TIMEOUT_MS": 90000,
-
-    "MODEL_PROVIDER": "openai",
-    
-    "OPENAI_MODEL": "doubao-seed-2.0-code",
-    "OPENAI_API_STYLE": "chat-completions",
-    "OPENAI_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "OPENAI_API_KEY": "f4b1bde0-e387-49ef-a732-e9e369770766",
-
-    "ANTHROPIC_API_KEY":"sk-cp-8fbwtCj-AGJo-q9W6e8ztBfMQ4YUsXV9VFbC0mnDXiW_N2QMUnh4Z345QoGjKJlPWUDHXMWCElvJI6pUvMAc-bOc9kZNiDUnVOoitlMrKZoXmaxkPI0rmWE",
-    "ANTHROPIC_MODEL": "minimax-m2.7",
-    "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic"
+  "permissionMode": "bypass-permissions",
+  "maxIterations": 128,
+  "DCLAW_QUERY_TRACE": true,
+  "DCLAW_LLM_MAX_RETRIES": 10,
+  "DCLAW_LLM_TIMEOUT_MS": 600000,
+  "DCLAW_ENABLE_STREAM_WATCHDOG": true,
+  "DCLAW_STREAM_IDLE_TIMEOUT_MS": 90000,
+  "llm": {
+    "defaultRuntime": "default",
+    "providers": {
+      "openai-default": {
+        "type": "openai",
+        "apiKey": "your-openai-api-key",
+        "baseURL": "https://api.openai.com/v1",
+        "apiStyle": "responses",
+        "requestDefaults": {
+          "verbosity": "medium",
+          "reasoningEffort": "medium",
+          "store": false
+        }
+      },
+      "anthropic-default": {
+        "type": "anthropic",
+        "apiKey": "your-anthropic-api-key",
+        "baseURL": "https://api.anthropic.com"
+      },
+      "openrouter-default": {
+        "type": "openai",
+        "apiKey": "your-openrouter-api-key",
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiStyle": "chat-completions"
+      }
+    },
+    "runtimes": {
+      "default": {
+        "primary": {
+          "providerRef": "openai-default",
+          "model": "gpt-5.4"
+        },
+        "imageFallback": {
+          "providerRef": "anthropic-default",
+          "model": "claude-sonnet-4-6"
+        }
+      },
+      "openrouter-claude": {
+        "primary": {
+          "providerRef": "openrouter-default",
+          "model": "anthropic/claude-opus-4.7"
+        },
+        "imageFallback": {
+          "providerRef": "openrouter-default",
+          "model": "gpt-4.1-mini"
+        }
+      }
+    },
+    "modelCatalogOverrides": {
+      "gpt-5": {
+        "contextWindow": 900000,
+        "maxOutputTokens": 96000,
+        "maxOutputTokensUpperLimit": 128000
+      },
+      "claude-opus-4.7": {
+        "supportsPdfInput": true
+      }
+    }
   }
+}

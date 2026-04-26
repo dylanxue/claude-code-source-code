@@ -53,6 +53,10 @@ function getBlockApproxChars(block: ContentBlock): number {
       return block.text.length
     case 'image':
       return block.source.mediaType.length + block.source.data.length
+    case 'pdf':
+      return block.source.mediaType.length +
+        block.source.data.length +
+        (block.filename?.length ?? 0)
     case 'thinking':
       return block.thinking.length
     case 'redacted_thinking':
@@ -70,7 +74,9 @@ function getBlockApproxChars(block: ContentBlock): number {
               total +
               (item.type === 'text'
                 ? item.text.length
-                : item.source.mediaType.length + item.source.data.length),
+                : item.source.mediaType.length +
+                  item.source.data.length +
+                  (item.type === 'pdf' ? (item.filename?.length ?? 0) : 0)),
             0,
           )
         : stringifyValue(block.output).length

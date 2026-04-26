@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -11,6 +11,18 @@ const dclawRoot = resolve(here, '../..')
 const mainEntrypoint = resolve(dclawRoot, 'src/cli/main.ts')
 const binEntrypoint = resolve(dclawRoot, 'bin/dclaw.js')
 const tsxLoader = resolve(dclawRoot, 'node_modules/tsx/dist/loader.mjs')
+
+async function writeUserConfig(
+  dclawHome: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await mkdir(dclawHome, { recursive: true })
+  await writeFile(
+    join(dclawHome, 'config.json'),
+    JSON.stringify(config, null, 2),
+    'utf8',
+  )
+}
 
 async function runCli(args: string[], cwd: string): Promise<{
   stdout: string
@@ -28,10 +40,6 @@ async function runCli(args: string[], cwd: string): Promise<{
         env: {
           ...process.env,
           DCLAW_HOME: dclawHome,
-          OPENAI_API_KEY: '',
-          DCLAW_OPENAI_API_KEY: '',
-          ANTHROPIC_API_KEY: '',
-          DCLAW_ANTHROPIC_API_KEY: '',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -72,10 +80,6 @@ async function runBin(args: string[], cwd: string): Promise<{
       env: {
         ...process.env,
         DCLAW_HOME: dclawHome,
-        OPENAI_API_KEY: '',
-        DCLAW_OPENAI_API_KEY: '',
-        ANTHROPIC_API_KEY: '',
-        DCLAW_ANTHROPIC_API_KEY: '',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -104,18 +108,36 @@ async function runBin(args: string[], cwd: string): Promise<{
 
 test('main emits response.error SSE for print+sse provider failures', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-'))
+  const dclawHome = join(dir, '.dclaw-home-test')
 
   try {
+    await writeUserConfig(dclawHome, {
+      llm: {
+        defaultRuntime: 'openai-missing-key',
+        providers: {
+          'openai-missing-key': {
+            type: 'openai',
+          },
+        },
+        runtimes: {
+          'openai-missing-key': {
+            primary: {
+              providerRef: 'openai-missing-key',
+              model: 'gpt-5',
+            },
+          },
+        },
+      },
+    })
+
     const result = await runCli(
       [
         '--print',
         '--stream',
         '--output-format',
         'sse',
-        '--provider',
-        'openai',
-        '--model',
-        'gpt-5',
+        '--runtime',
+        'openai-missing-key',
         'hello',
       ],
       dir,
@@ -125,7 +147,10 @@ test('main emits response.error SSE for print+sse provider failures', async () =
     assert.equal(result.stderr, '')
     assert.match(result.stdout, /^event: response\.error\n/)
     assert.match(result.stdout, /"kind":"unknown"/)
-    assert.match(result.stdout, /"message":"OpenAI API key is required\./)
+    assert.match(
+      result.stdout,
+      /"message":"OpenAI API key is required\. Configure llm\.providers\.<name>\.apiKey in ~\/\.dclaw\/config\.json\./,
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -133,15 +158,33 @@ test('main emits response.error SSE for print+sse provider failures', async () =
 
 test('main emits stderr for non-sse provider failures', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-'))
+  const dclawHome = join(dir, '.dclaw-home-test')
 
   try {
+    await writeUserConfig(dclawHome, {
+      llm: {
+        defaultRuntime: 'anthropic-missing-key',
+        providers: {
+          'anthropic-missing-key': {
+            type: 'anthropic',
+          },
+        },
+        runtimes: {
+          'anthropic-missing-key': {
+            primary: {
+              providerRef: 'anthropic-missing-key',
+              model: 'claude-test',
+            },
+          },
+        },
+      },
+    })
+
     const result = await runCli(
       [
         '--print',
-        '--provider',
-        'anthropic',
-        '--model',
-        'claude-test',
+        '--runtime',
+        'anthropic-missing-key',
         'hello',
       ],
       dir,
@@ -151,7 +194,7 @@ test('main emits stderr for non-sse provider failures', async () => {
     assert.equal(result.stdout, '')
     assert.match(
       result.stderr,
-      /^CLI failed: Anthropic API key is required\. Set ANTHROPIC_API_KEY or DCLAW_ANTHROPIC_API_KEY, or configure ANTHROPIC_API_KEY in \.dclaw\/config\.json\.\nContext: phase=before_response iteration=1\n$/,
+      /^CLI failed: Anthropic API key is required\. Configure llm\.providers\.<name>\.apiKey in ~\/\.dclaw\/config\.json\.\nContext: phase=before_response iteration=1\n$/,
     )
   } finally {
     await rm(dir, { recursive: true, force: true })

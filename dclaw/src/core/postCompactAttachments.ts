@@ -282,7 +282,9 @@ function createPostCompactImageMessages(messages: Message[]): Message[] {
           total +
           (item.type === 'text'
             ? item.text.length
-            : item.source.mediaType.length + item.source.data.length),
+            : item.source.mediaType.length +
+              item.source.data.length +
+              (item.type === 'pdf' ? (item.filename?.length ?? 0) : 0)),
         0,
       )
       if (usedChars + nextSize > MAX_POST_COMPACT_TOTAL_IMAGE_CHARS) {
@@ -301,13 +303,23 @@ function createPostCompactImageMessages(messages: Message[]): Message[] {
                   text: item.text,
                   ...(item.annotations ? { annotations: item.annotations } : {}),
                 }
-              : {
+              : item.type === 'image'
+              ? {
                   type: 'image' as const,
                   source: {
                     type: 'base64' as const,
                     mediaType: item.source.mediaType,
                     data: item.source.data,
                   },
+                }
+              : {
+                  type: 'pdf' as const,
+                  source: {
+                    type: 'base64' as const,
+                    mediaType: item.source.mediaType,
+                    data: item.source.data,
+                  },
+                  ...(item.filename ? { filename: item.filename } : {}),
                 },
           ),
         ),

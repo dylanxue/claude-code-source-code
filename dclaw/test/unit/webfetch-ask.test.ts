@@ -9,10 +9,27 @@ import type {
   CreateMessageResponse,
   LlmClient,
 } from '../../src/llm/types.js'
-import { webFetchTool } from '../../src/tools/builtin/webFetch.js'
+import {
+  webFetchTool,
+  type WebFetchToolOutput,
+} from '../../src/tools/builtin/webFetch.js'
+import { validateJsonSchema } from '../../src/tools/schema.js'
 import { askUserQuestionTool } from '../../src/tools/builtin/askUserQuestion.js'
 import { getDefaultReadLimits } from '../../src/tools/builtin/readLimits.js'
-import { createToolContext } from '../helpers/toolContext.js'
+import {
+  createToolContext,
+  createToolRuntimeProfile,
+} from '../helpers/toolContext.js'
+
+type UnsupportedWebFetchOutput = Extract<
+  WebFetchToolOutput,
+  { type: 'unsupported_content' }
+>
+
+type SuccessfulWebFetchOutput = Exclude<
+  WebFetchToolOutput,
+  UnsupportedWebFetchOutput
+>
 
 async function createNoisyPng(
   width: number,
@@ -60,6 +77,24 @@ class VisionSideQueryClient implements LlmClient {
   }
 }
 
+function expectSuccessfulWebFetchOutput(
+  output: WebFetchToolOutput,
+): asserts output is SuccessfulWebFetchOutput {
+  assert.notEqual(
+    (output as { type?: string }).type,
+    'unsupported_content',
+  )
+}
+
+function expectUnsupportedWebFetchOutput(
+  output: WebFetchToolOutput,
+): asserts output is UnsupportedWebFetchOutput {
+  assert.equal(
+    (output as { type?: string }).type,
+    'unsupported_content',
+  )
+}
+
 test('WebFetch strips HTML and includes prompt context', async () => {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -86,6 +121,7 @@ test('WebFetch strips HTML and includes prompt context', async () => {
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.equal(result.output.code, 200)
     assert.match(result.output.result, /Prompt: Summarize the page/)
     assert.match(result.output.result, /Title: Example/)
@@ -132,6 +168,7 @@ test('WebFetch returns redirect instructions when the destination host changes',
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.equal(result.output.code, 302)
     assert.match(result.output.result, /REDIRECT DETECTED/)
     assert.match(result.output.result, /https:\/\/example\.com\/final/)
@@ -189,6 +226,7 @@ test('WebFetch prefers prompt-relevant excerpts over unrelated sections', async 
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.match(result.output.result, /Relevant excerpts for the prompt:/)
     assert.match(result.output.result, /Starter costs \$9 per month/)
     assert.doesNotMatch(result.output.result, /hiring across product/)
@@ -224,8 +262,52 @@ test('WebFetch falls back to leading excerpts for generic prompts', async () => 
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
+    assert.deepEqual(
+      validateJsonSchema(result.output, webFetchTool.outputSchema),
+      { ok: true },
+    )
     assert.match(result.output.result, /Leading excerpt from the page:/)
     assert.match(result.output.result, /Opening summary/)
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch accepts markdown responses under the declared output schema', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' })
+    response.end(
+      '# SkillHub Install\n\nRun `curl -fsSL https://example.com/install.sh | bash -s -- --cli-only`.\n\nThen run `skillhub --dir .dclaw/skills install agent-browser`.',
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/install.md`,
+        prompt: '提取完整的 SkillHub 安装说明，特别是 CLI 安装方式和技能安装方式，包括所有命令和步骤',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
+    assert.deepEqual(
+      validateJsonSchema(result.output, webFetchTool.outputSchema),
+      { ok: true },
+    )
+    assert.equal(result.output.contentType, 'text/markdown; charset=utf-8')
+    assert.match(result.output.result, /skillhub --dir \.dclaw\/skills install agent-browser/i)
   } finally {
     server.close()
     await once(server, 'close')
@@ -263,6 +345,7 @@ test('WebFetch returns structured image content for supported remote images', as
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.equal(result.output.contentKind, 'image')
     assert.equal(result.output.mediaType, 'image/png')
     assert.equal(result.output.bytes, pngBytes.length)
@@ -274,6 +357,140 @@ test('WebFetch returns structured image content for supported remote images', as
     const imageBlock = result.content?.[1]
     assert.ok(imageBlock && imageBlock.type === 'image')
     assert.equal(imageBlock.source.mediaType, 'image/png')
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch returns structured unsupported output for remote PDFs', async () => {
+  const pdfBytes = Buffer.from('%PDF-1.7\n%test\n', 'utf8')
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'application/pdf',
+      'content-length': String(pdfBytes.length),
+    })
+    response.end(pdfBytes)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/report.pdf`,
+        prompt: 'Summarize the report',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, false)
+    expectUnsupportedWebFetchOutput(result.output)
+    assert.equal(result.output.type, 'unsupported_content')
+    assert.equal(result.output.error.source, 'webfetch')
+    assert.equal(result.output.error.contentKind, 'pdf')
+    assert.equal(result.output.error.detectedMediaType, 'application/pdf')
+    assert.equal(result.content?.[0]?.type, 'text')
+    assert.match(
+      (result.content?.[0] as { type: 'text'; text: string }).text,
+      /Call the Skill tool with skill_name: `pdf`/i,
+    )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch attaches PDF content directly when the active runtime supports pdf input', async () => {
+  const pdfBytes = Buffer.from('%PDF-1.7\n%test\n', 'utf8')
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'application/pdf',
+      'content-length': String(pdfBytes.length),
+    })
+    response.end(pdfBytes)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/report.pdf`,
+        prompt: 'Summarize the report',
+      },
+      createToolContext({
+        runtimeProfile: createToolRuntimeProfile({
+          supportsPdfInput: true,
+        }),
+      }),
+    )
+
+    assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
+    assert.equal(result.output.contentKind, 'pdf')
+    assert.equal(result.output.mediaType, 'application/pdf')
+    assert.equal(result.output.bytes, pdfBytes.length)
+    assert.match(result.output.result, /Attached report\.pdf below for document analysis/i)
+    assert.deepEqual(
+      result.content?.map(block => block.type),
+      ['text', 'pdf'],
+    )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch returns structured unsupported output for remote office documents', async () => {
+  const bytes = Buffer.from('PK\x03\x04xlsx', 'binary')
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'content-length': String(bytes.length),
+    })
+    response.end(bytes)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/sheet.xlsx`,
+        prompt: 'Analyze the spreadsheet',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, false)
+    expectUnsupportedWebFetchOutput(result.output)
+    assert.equal(result.output.type, 'unsupported_content')
+    assert.equal(result.output.error.contentKind, 'office_document')
+    assert.equal(result.output.error.detectedExtension, 'xlsx')
+    assert.match(
+      (result.content?.[0] as { type: 'text'; text: string }).text,
+      /Call the Skill tool with skill_name: `spreadsheet`/i,
+    )
   } finally {
     server.close()
     await once(server, 'close')
@@ -319,21 +536,24 @@ test('WebFetch falls back to a vision side query when the active runtime does no
         prompt: 'Describe the image',
       },
       createToolContext({
-        supportsVisionInput: false,
+        runtimeProfile: createToolRuntimeProfile({
+          supportsImageInput: false,
+          imageFallback: {
+            client: visionClient,
+            provider: 'openai',
+            model: 'vision-model',
+          },
+        }),
         currentUserRequest: '参考这张图做一个风格接近的设计',
         toolUseIntent: {
           source: 'reasoning',
           text: '需要看一下这张图片的整体风格和蓝色高光效果。',
         },
-        visionRuntime: {
-          client: visionClient,
-          provider: 'openai',
-          model: 'vision-model',
-        },
       }),
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.equal(result.output.contentKind, 'image')
     assert.match(result.output.result, /Vision side query analysis:/)
     assert.match(result.output.result, /clean, minimal reference/)
@@ -352,6 +572,58 @@ test('WebFetch falls back to a vision side query when the active runtime does no
     assert.match(
       (visionPrompt?.content[0] as { type: 'text'; text: string }).text,
       /蓝色高光效果/,
+    )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('WebFetch returns structured unsupported output when the active runtime does not support image input and no image fallback is configured', async () => {
+  const pngBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxL8AAAAASUVORK5CYII=',
+    'base64',
+  )
+  const server = createServer((_, response) => {
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(pngBytes.length),
+    })
+    response.end(pngBytes)
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected an IPv4 test server address')
+    }
+
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/cat.png`,
+        prompt: 'Describe the image',
+      },
+      createToolContext({
+        runtimeProfile: createToolRuntimeProfile({
+          supportsImageInput: false,
+        }),
+      }),
+    )
+
+    assert.equal(result.ok, false)
+    expectUnsupportedWebFetchOutput(result.output)
+    assert.equal(result.output.error.code, 'unsupported_runtime_capability')
+    assert.equal(result.output.error.contentKind, 'image')
+    assert.deepEqual(result.output.error.suggestedNextSteps, [
+      'ask_for_text_alternative',
+      'configure_image_support',
+    ])
+    assert.match(
+      (result.content?.[0] as { type: 'text'; text: string }).text,
+      /does not accept image input and no image fallback runtime is configured/i,
     )
   } finally {
     server.close()
@@ -397,6 +669,7 @@ test('WebFetch downscales oversized-dimension remote images before attaching the
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.equal(result.output.contentKind, 'image')
     assert.equal(result.output.mediaType, 'image/png')
     const imageBlock = result.content?.[1]
@@ -445,6 +718,7 @@ test('WebFetch applies token-aware compression for dense remote images', async (
     )
 
     assert.equal(result.ok, true)
+    expectSuccessfulWebFetchOutput(result.output)
     assert.equal(result.output.contentKind, 'image')
     const imageBlock = result.content?.[1]
     assert.ok(imageBlock && imageBlock.type === 'image')
@@ -458,7 +732,7 @@ test('WebFetch applies token-aware compression for dense remote images', async (
   }
 })
 
-test('WebFetch rejects unsupported remote image media types', async () => {
+test('WebFetch returns structured unsupported output for remote image media types outside the built-in path', async () => {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'image/svg+xml' })
     response.end('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
@@ -473,15 +747,24 @@ test('WebFetch rejects unsupported remote image media types', async () => {
       throw new Error('Expected an IPv4 test server address')
     }
 
-    await assert.rejects(
-      webFetchTool.call(
-        {
-          url: `http://127.0.0.1:${address.port}/vector.svg`,
-          prompt: 'Describe the image',
-        },
-        createToolContext(),
-      ),
-      /only supports remote images with media types/i,
+    const result = await webFetchTool.call(
+      {
+        url: `http://127.0.0.1:${address.port}/vector.svg`,
+        prompt: 'Describe the image',
+      },
+      createToolContext(),
+    )
+
+    assert.equal(result.ok, false)
+    expectUnsupportedWebFetchOutput(result.output)
+    assert.equal(result.output.type, 'unsupported_content')
+    assert.equal(result.output.error.source, 'webfetch')
+    assert.equal(result.output.error.contentKind, 'unknown_binary')
+    assert.equal(result.output.error.detectedMediaType, 'image/svg+xml')
+    assert.equal(result.output.error.detectedExtension, 'svg')
+    assert.match(
+      (result.content?.[0] as { type: 'text'; text: string }).text,
+      /Call the Skill tool with an appropriate document-analysis skill/i,
     )
   } finally {
     server.close()

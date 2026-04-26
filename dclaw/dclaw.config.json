@@ -1,0 +1,48 @@
+{
+  "permissionMode": "bypass-permissions",
+  "maxIterations": 128,
+  "DCLAW_QUERY_TRACE": true,
+  "DCLAW_LLM_MAX_RETRIES": 10,
+  "DCLAW_LLM_TIMEOUT_MS": 600000,
+  "DCLAW_ENABLE_STREAM_WATCHDOG": true,
+  "DCLAW_STREAM_IDLE_TIMEOUT_MS": 90000,
+  "llm": {
+    "defaultRuntime": "glm-5.1",
+    "providers": {
+      "doubao": {
+        "type": "openai",
+        "apiKey": "ark-a6205f22-9603-459b-a3fd-6d4d1f4cab25-050fd",
+        "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "apiStyle": "chat-completions"
+      },
+      "openrouter": {
+        "type": "openai",
+        "apiKey": "7Dm8RlZya912CqrXO7rRppfrpAjEBTAffEHCO9uJMWhjhoSt",
+        "baseURL": "https://api.newoa.cn/v1",
+        "apiStyle": "chat-completions"
+      }
+    },
+    "runtimes": {
+      "glm-5.1": {
+        "primary": {
+          "providerRef": "doubao",
+          "model": "glm-5.1"
+        },
+        "imageFallback": {
+          "providerRef": "doubao",
+          "model": "doubao-seed-2.0-code"
+        }
+      },
+      "gpt-5.4": {
+        "primary": {
+          "providerRef": "openrouter",
+          "model": "openai/gpt-5.4"
+        },
+        "imageFallback": {
+          "providerRef": "openrouter",
+          "model": "openai/gpt-5.4"
+        }
+      }
+    }
+  }
+}

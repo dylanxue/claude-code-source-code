@@ -104,7 +104,7 @@ npm run check
 npm test
 ```
 
-## Provider 与模型配额
+## LLM 配置
 
 当前 `dclaw` 已支持：
 
@@ -112,154 +112,163 @@ npm test
 - `anthropic`
 - `openai`
 
-运行时配置现在按更接近 Claude Code 的分层来解析：
+LLM 相关配置已经统一切到结构化配置文件，不再通过 provider/model 环境变量驱动。
 
-- `provider selection`：CLI `--provider` 优先，否则尝试 `DCLAW_PROVIDER` / `LLM_PROVIDER` / `MODEL_PROVIDER`
-- `provider config`：按 provider 分别解析 `api key / base url / api style`
-- `model selection`：CLI `--model` 优先，否则回退到 provider 默认模型
-- `model limits / capabilities`：最后再按 provider + model 解析 token 配额与视觉输入能力
+配置分三层：
 
-真实 provider 会先从当前工作目录加载 `.env`，再加载 `.env.local`，随后再读取当前 shell 环境：
+- `llm.providers`
+  负责连接信息，例如 `apiKey / baseURL / apiStyle`
+- `llm.runtimes`
+  负责 `primary + imageFallback`
+- `llm.modelCatalogOverrides`
+  负责局部修正模型能力与 token limit
 
-- `ANTHROPIC_API_KEY` / `DCLAW_ANTHROPIC_API_KEY`
-- `ANTHROPIC_MODEL` / `DCLAW_ANTHROPIC_MODEL`
-- `OPENAI_API_KEY` / `DCLAW_OPENAI_API_KEY`
-- `OPENAI_MODEL` / `DCLAW_OPENAI_MODEL`
-- `OPENAI_BASE_URL` / `DCLAW_OPENAI_BASE_URL`
-- `OPENAI_API_STYLE` / `DCLAW_OPENAI_API_STYLE`
+其中：
 
-其中 `openai` provider 当前同时支持两种请求风格：
+- 用户级配置：`~/.dclaw/config.json`
+- workspace 级配置：`.dclaw/config.json`
+- workspace 配置不能写 provider `apiKey`
 
-- `responses`
-- `chat-completions`
+CLI 入口也已经收口到：
 
-默认会优先根据 `OPENAI_API_STYLE` 显式配置判断；未配置时会按 base URL 和 `MODEL_PROVIDER=openai-compatible` 做兼容推断。
+- `--runtime <name>`
 
-模型 token limit 采用“内置默认值 + 覆盖”的方式：
+不再使用 `--provider`，也不再支持 `--model`。
 
-- 全局覆盖：
-  - `DCLAW_MAX_CONTEXT_TOKENS`
-  - `DCLAW_MAX_OUTPUT_TOKENS`
-  - `DCLAW_MAX_OUTPUT_TOKENS_UPPER_LIMIT`
-- 模型级覆盖：
-  - `DCLAW_MODEL_LIMITS_JSON`
-  - `DCLAW_MODEL_LIMITS_FILE`
-  - 默认文件路径：`~/.dclaw/model-limits.json`
-  - 若设置 `DCLAW_HOME`，则默认文件路径改为 `<DCLAW_HOME>/model-limits.json`
+### 配置示例
 
-`model-limits` 配置除了 token limit，也可以显式覆盖模型能力，例如 `supportsVisionInput`。
+参考 [config.json.example](./config.json.example)。
 
-注意：
-
-- 当前不再支持用单独环境变量强行覆盖 `supportsVisionInput`
-- 视觉输入能力只来自两层：
-  - 内置的 `provider + model` 默认规则
-  - 你的 `model-limits.json` / `DCLAW_MODEL_LIMITS_JSON` 覆盖
-- 这样可以避免“一个全局 env 把所有模型都误判成支持或不支持 vision”
-
-示例：
+一个最常见的用户级配置示例：
 
 ```json
 {
-  "providers": {
-    "openai": {
+  "llm": {
+    "defaultRuntime": "default",
+    "providers": {
+      "openai-default": {
+        "type": "openai",
+        "apiKey": "your-openai-api-key",
+        "baseURL": "https://api.openai.com/v1",
+        "apiStyle": "responses"
+      },
+      "anthropic-default": {
+        "type": "anthropic",
+        "apiKey": "your-anthropic-api-key",
+        "baseURL": "https://api.anthropic.com"
+      }
+    },
+    "runtimes": {
+      "default": {
+        "primary": {
+          "providerRef": "openai-default",
+          "model": "gpt-5.4"
+        },
+        "imageFallback": {
+          "providerRef": "anthropic-default",
+          "model": "claude-sonnet-4-6"
+        }
+      }
+    },
+    "modelCatalogOverrides": {
       "gpt-5": {
         "contextWindow": 900000,
         "maxOutputTokens": 96000,
-        "maxOutputTokensUpperLimit": 128000,
-        "supportsVisionInput": true
+        "maxOutputTokensUpperLimit": 128000
       },
-      "gpt-5-mini-text": {
-        "contextWindow": 400000,
-        "maxOutputTokens": 128000,
-        "maxOutputTokensUpperLimit": 128000,
-        "supportsVisionInput": false
+      "claude-opus-4.7": {
+        "supportsPdfInput": true
       }
     }
   }
 }
 ```
 
-如果主模型本身不支持视觉输入，但你另外配置了一个支持视觉的模型，`Read / WebFetch` 在遇到图片时会走受控的 `vision side query` 降级链路，而不是中途切换整个主会话 provider。
+### 模型能力目录
 
-这条 side-query 通道当前通过独立环境变量配置：
+模型能力信息来自：
 
-- `DCLAW_VISION_PROVIDER` / `VISION_PROVIDER`
-- `DCLAW_VISION_MODEL` / `VISION_MODEL`
+1. 内置的 [src/llm/modelCatalog.json](./src/llm/modelCatalog.json)
+2. `llm.modelCatalogOverrides`
+3. 全局 token 环境覆盖：
+   - `DCLAW_MAX_CONTEXT_TOKENS`
+   - `DCLAW_MAX_OUTPUT_TOKENS`
+   - `DCLAW_MAX_OUTPUT_TOKENS_UPPER_LIMIT`
+
+当前的内置 model catalog 是全局目录，不再按 provider 分桶。
+
+这意味着：
+
+- transport provider 只负责“怎么发请求”
+- model id 决定命中哪条能力配置
+
+`match` 规则是：
+
+- 前缀匹配
+- 多个命中时取最长前缀
 
 例如：
 
-```bash
-DCLAW_PROVIDER=openai
-OPENAI_MODEL=gpt-5-mini-text
+- `gpt-5.4-pro-preview` 会优先命中 `gpt-5.4-pro`
+- `anthropic/claude-opus-4.7` 会先规范化，再命中 `claude-opus-4-7`
 
-DCLAW_VISION_PROVIDER=openai
-DCLAW_VISION_MODEL=gpt-4.1-mini
+### Canonical Model Id
+
+为了兼容不同平台的模型命名差异，`dclaw` 会先对模型名做 canonicalization，再查能力目录。
+
+当前已实现的例子：
+
+- `claude-opus-4.6` -> `claude-opus-4-6`
+- `anthropic/claude-opus-4.7` -> `claude-opus-4-7`
+- `anthropic/claude-sonnet-4.6` -> `claude-sonnet-4-6`
+
+这样做的结果是：
+
+- `modelCatalog.json` 里只维护一份 canonical id
+- 不需要为同一个 Claude 模型重复配置 dotted/hyphenated 两套条目
+- `modelCatalogOverrides` 里写 dotted key 也能正常生效
+
+### 图片与 PDF
+
+当前运行时只为图片设计模型兜底：
+
+- 主模型支持图片：直接处理
+- 主模型不支持图片但配置了 `imageFallback`：走受控 side query
+- 两者都不满足：返回结构化“无法处理图片”结果，不会等到 provider 调用时报错
+
+对于 `pdf`：
+
+- 主模型支持 `pdfInput`：`Read / WebFetch` 可直接附加 PDF
+- 主模型不支持：统一收口到 unsupported + skill-first
+
+对于 `docx / xlsx / 其他复杂文档`：
+
+- `Read / WebFetch` 不做隐式提取
+- 返回结构化 unsupported 结果
+- 由模型决定切到 `pdf / doc / spreadsheet` skill 或 Bash
+
+### Doctor
+
+可以用下面的命令查看当前解析结果：
+
+```bash
+npm run start -- --doctor
+npm run start -- --doctor --runtime default
 ```
 
-上面的含义是：
+`doctor` 当前会显示：
 
-- 主会话继续使用 `gpt-5-mini-text`
-- 当 `Read / WebFetch` 读到图片且主模型不支持 vision 时，改由 `gpt-4.1-mini` 做一次受控视觉 side query
-- side query 返回纯文本观察结果，再继续喂给主模型
+- `runtime / runtime source`
+- `provider ref / provider`
+- `resolved model / model source`
+- `canonical model`
+- `catalog match`
+- `supportsImageInput / supportsPdfInput`
+- `contextWindow / maxOutputTokens`
+- `imageFallback`
+- `max retries / request timeout / stream watchdog / stream idle timeout`
 
-当前这条 vision side query 只覆盖：
-
-- `Read(image)`
-- `WebFetch(image)`
-
-还不包括：
-
-- 用户直接附图输入
-- interactive 图片输入
-- `--print --image`
-
-可用以下命令查看当前 provider、默认模型和解析后的 token limit：
-
-```bash
-npm run start -- --doctor --provider openai
-```
-
-如果不显式传 `--provider`，`doctor` 也会尝试从配置链路推断 provider，并显示：
-
-- `provider source`
-- `model source`
-- `vision input`
-- `max iterations`
-- `max retries / request timeout / stream watchdog / stream idle timeout` 的当前生效值与来源
-
-这两个 `source` 字段当前可能出现：
-
-- `cli`
-- `env`
-- `user_config`
-- `workspace_config`
-- `default`
-
-含义分别是：
-
-- `cli`：来自命令行参数
-- `env`：来自当前 shell 环境或 `.env` / `.env.local`
-- `user_config`：来自用户级 `config.json`
-- `workspace_config`：来自 workspace 级 `config.json`
-- `default`：来自内置默认值
-
-当前内置也补了一批兼容模型的默认 limits，`openai` 和 `anthropic` 两侧都可直接使用这些模型名：
-
-- `MiniMax`: `minimax-m2.7`, `minimax-m2.5`, `minimax-m2`
-- `Moonshot / Kimi`: `kimi-k2.5`, `kimi-k2`
-- `Zhipu / GLM`: `glm-4.5`, `glm-4.5-air`, `glm-4.5-flash`
-
-当前内置默认的 vision 能力规则也已经按模型族做了收口，而不是只按 provider 粗略判断。例如：
-
-- `Claude` 全系：默认支持 `vision`
-- `OpenAI` 的 `gpt-4.1 / gpt-5 / codex-mini-latest / o4-mini`：默认支持 `vision`
-- `deepseek-chat / deepseek-reasoner`：默认不支持 `vision`
-- `glm-5.1 / glm-5 / glm-4.7 / glm-4.6 / glm-4.5*`：默认不支持 `vision`
-- `kimi-k2.5`：默认支持 `vision`
-- `kimi-k2`：默认不支持 `vision`
-
-如果某个具体模型和你的实际接入能力不一致，优先在 `model-limits.json` 里按 `provider + model` 显式覆盖，而不是依赖全局环境变量。
+如果某个具体模型和你的实际接入能力不一致，优先在 `llm.modelCatalogOverrides` 里显式覆盖，而不是依赖全局环境变量。
 
 ## Streaming 与 SSE
 
@@ -286,7 +295,7 @@ SSE 模式下当前会输出：
 示例：
 
 ```bash
-npm run start -- --print --provider openai --output-format sse "Reply with exactly: ok"
+npm run start -- --print --runtime default --output-format sse "Reply with exactly: ok"
 ```
 
 ## Interactive / REPL
@@ -319,7 +328,7 @@ npm run start -- resume <session-id>
 - `/session` / `/info`
 - `/history`
 - `/doctor`
-- `/model [model]`
+- `/runtime [name|list]`
 - `/permissions [mode]`
 - `/config`
 - `/transcript [N]`
@@ -338,6 +347,10 @@ npm run start -- resume <session-id>
 - `/resume`
   - 带 `session-id` 时切到该会话
   - 不带参数时显示最近的 sessions，便于继续恢复
+- `/runtime`
+  - 不带参数时显示当前 runtime 解析结果，并列出当前可用 runtimes
+  - `list` 时只显示当前可用 runtimes
+  - 带 `name` 时切整套 runtime，不会只改主模型
 
 当前这条 session / resume 链路还包含：
 

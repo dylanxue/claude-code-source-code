@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { loadResolvedLlmConfig } from '../llm/config.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import { getMemoryDir, getMemoryEntrypointPath } from '../memory/paths.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
@@ -37,8 +38,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     statusLine('cwd', cwd),
     statusLine('cwd exists', existsSync(cwd) ? 'yes' : 'no'),
     statusLine('mode', 'doctor'),
-    statusLine('provider override', command.options.provider ?? 'none'),
-    statusLine('model override', command.options.model ?? 'none'),
+    statusLine('runtime override', command.options.runtime ?? 'none'),
     statusLine('permission override', command.options.permissionMode ?? 'none'),
     statusLine('permission mode', resolvedPermissionMode.permissionMode),
     statusLine('permission source', resolvedPermissionMode.permissionModeSource),
@@ -61,41 +61,44 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     ),
   ]
 
-  const runtime = resolveLlmRuntimeConfig(
-    command.options,
-    configured.env,
-    key => configured.keySources[key],
-  )
-  lines.push(statusLine('provider', runtime.provider))
-  lines.push(statusLine('provider source', runtime.providerSource))
+  const llmConfig = await loadResolvedLlmConfig(cwd, configured.env)
+  const runtime = resolveLlmRuntimeConfig(command.options, llmConfig, configured.env)
+  lines.push(statusLine('runtime', runtime.runtimeName ?? 'stub'))
+  lines.push(statusLine('runtime source', runtime.runtimeSource))
+  lines.push(statusLine('provider ref', runtime.primary.providerRef))
+  lines.push(statusLine('provider', runtime.primary.provider))
 
-  if (runtime.providerConfig.provider === 'anthropic') {
-    const config = runtime.providerConfig
+  if (runtime.primary.providerConfig.provider === 'anthropic') {
+    const config = runtime.primary.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
     lines.push(statusLine('base url', config.baseUrl))
-    lines.push(statusLine('default model', config.defaultModel ?? 'none'))
-    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
-    lines.push(statusLine('model source', runtime.modelSource))
+    lines.push(statusLine('resolved model', runtime.primary.model ?? 'none'))
+    lines.push(statusLine('model source', runtime.primary.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
-    if (runtime.model) {
-      appendModelLimitLines(lines, 'anthropic', runtime.model)
+    if (runtime.primary.model) {
+      appendModelLimitLines(lines, 'anthropic', runtime.primary.model, {
+        env: configured.env,
+        overrides: llmConfig.modelCatalogOverrides,
+      })
     }
-    appendVisionRuntimeLines(lines, configured.env)
+    appendVisionRuntimeLines(lines, runtime.imageFallback)
   }
 
-  if (runtime.providerConfig.provider === 'openai') {
-    const config = runtime.providerConfig
+  if (runtime.primary.providerConfig.provider === 'openai') {
+    const config = runtime.primary.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
     lines.push(statusLine('base url', config.baseUrl))
     lines.push(statusLine('api style', config.apiStyle))
-    lines.push(statusLine('default model', config.defaultModel ?? 'none'))
-    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
-    lines.push(statusLine('model source', runtime.modelSource))
+    lines.push(statusLine('resolved model', runtime.primary.model ?? 'none'))
+    lines.push(statusLine('model source', runtime.primary.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
-    if (runtime.model) {
-      appendModelLimitLines(lines, 'openai', runtime.model)
+    if (runtime.primary.model) {
+      appendModelLimitLines(lines, 'openai', runtime.primary.model, {
+        env: configured.env,
+        overrides: llmConfig.modelCatalogOverrides,
+      })
     }
-    appendVisionRuntimeLines(lines, configured.env)
+    appendVisionRuntimeLines(lines, runtime.imageFallback)
   }
 
   appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])

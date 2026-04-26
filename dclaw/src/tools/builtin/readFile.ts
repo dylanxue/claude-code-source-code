@@ -1,14 +1,32 @@
-import { readFile, stat } from 'node:fs/promises'
+import { open, readFile, stat } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
+import { basename } from 'node:path'
 import {
   IMAGE_TARGET_RAW_SIZE,
   optimizeImageForModel,
 } from '../../llm/imageProcessing.js'
 import {
   createImageBlock,
+  createPdfBlock,
   createTextMessage,
 } from '../../types/message.js'
-import type { ToolResult } from '../../types/tool.js'
+import {
+  getToolSupportsImageInput,
+  getToolSupportsPdfInput,
+  getToolVisionRuntime,
+  type ToolContext,
+  type ToolResult,
+} from '../../types/tool.js'
 import { runVisionSideQuery } from '../../llm/visionSideQuery.js'
+import {
+  classifyLocalFileContent,
+  isSupportedImageMediaType,
+  SUPPORTED_IMAGE_MEDIA_TYPES,
+} from '../contentTypes.js'
+import {
+  createUnsupportedContentResult,
+  type UnsupportedContentToolOutput,
+} from '../fileHandling.js'
 import { buildTool, type Tool } from '../types.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
 import { getDefaultReadLimits } from './readLimits.js'
@@ -20,13 +38,6 @@ import {
   PATH_ALIAS_DESCRIPTION,
   PROMPT,
 } from './readFilePrompt.js'
-
-const SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-])
 
 export type ReadFileToolInput = {
   file_path?: string
@@ -61,7 +72,18 @@ export type ReadImageToolOutput = {
   analysisSource?: 'vision_side_query'
 }
 
-export type ReadToolOutput = ReadTextToolOutput | ReadImageToolOutput
+export type ReadPdfToolOutput = {
+  type: 'pdf'
+  file: {
+    filePath: string
+    mediaType: 'application/pdf'
+    sizeBytes: number
+    filename: string
+  }
+}
+
+export type ReadToolOutput = ReadTextToolOutput | ReadImageToolOutput | ReadPdfToolOutput
+  | UnsupportedContentToolOutput
 
 function splitLogicalLines(text: string): string[] {
   if (text.length === 0) {
@@ -75,71 +97,17 @@ function splitLogicalLines(text: string): string[] {
   return lines
 }
 
-function parseMediaType(contentType: string): string {
-  return contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-}
-
-function detectImageMediaTypeFromBuffer(buffer: Buffer): string | undefined {
-  if (
-    buffer.length >= 8 &&
-    buffer[0] === 0x89 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x4e &&
-    buffer[3] === 0x47 &&
-    buffer[4] === 0x0d &&
-    buffer[5] === 0x0a &&
-    buffer[6] === 0x1a &&
-    buffer[7] === 0x0a
-  ) {
-    return 'image/png'
-  }
-
-  if (
-    buffer.length >= 3 &&
-    buffer[0] === 0xff &&
-    buffer[1] === 0xd8 &&
-    buffer[2] === 0xff
-  ) {
-    return 'image/jpeg'
-  }
-
-  if (
-    buffer.length >= 6 &&
-    (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' ||
-      buffer.subarray(0, 6).toString('ascii') === 'GIF89a')
-  ) {
-    return 'image/gif'
-  }
-
-  if (
-    buffer.length >= 12 &&
-    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
-    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
-  ) {
-    return 'image/webp'
-  }
-
-  return undefined
-}
-
-function isSupportedLocalImageMediaType(contentType: string): boolean {
-  return SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES.has(parseMediaType(contentType))
-}
-
-function isSupportedLocalImageExtension(filePath: string): boolean {
-  const extension = filePath.split('.').at(-1)?.toLowerCase() ?? ''
-  return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)
-}
-
 function getUnsupportedImageRangeError(): string {
   return 'Read does not support offset or limit when reading image files'
 }
 
-function shouldUseVisionSideQuery(context: {
-  supportsVisionInput?: boolean
-  visionRuntime?: unknown
-}): boolean {
-  return context.supportsVisionInput === false && Boolean(context.visionRuntime)
+function shouldUseVisionSideQuery(
+  context: Pick<ToolContext, 'runtimeProfile'>,
+): boolean {
+  return (
+    getToolSupportsImageInput(context) === false &&
+    Boolean(getToolVisionRuntime(context))
+  )
 }
 
 function buildVisionFallbackResultText(input: {
@@ -157,6 +125,41 @@ function buildVisionFallbackResultText(input: {
     '',
     input.analysisText,
   ].join('\n')
+}
+
+function buildPdfResultText(input: {
+  filePath: string
+  sizeBytes: number
+  filename: string
+}): string {
+  return `Read PDF file ${input.filePath} (${input.sizeBytes} bytes). Attached ${input.filename} below for document analysis.`
+}
+
+async function readFileProbe(filePath: string): Promise<Buffer> {
+  const handle = await open(filePath, 'r')
+  try {
+    const probe = Buffer.alloc(64)
+    const { bytesRead } = await handle.read(probe, 0, probe.length, 0)
+    return probe.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+}
+
+async function getReadableFileStat(filePath: string): Promise<Stats> {
+  try {
+    const fileStat = await stat(filePath)
+    if (!fileStat.isFile()) {
+      throw new Error('Read can only read regular files')
+    }
+    return fileStat
+  } catch (error) {
+    const fileError = error as NodeJS.ErrnoException
+    if (fileError.code === 'ENOENT') {
+      throw new Error(`File does not exist: ${filePath}`)
+    }
+    throw error
+  }
 }
 
 export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
@@ -191,10 +194,9 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
         description: LIMIT_DESCRIPTION,
       },
     },
-    anyOf: [
-      { required: ['file_path'] },
-      { required: ['path'] },
-    ],
+    // Keep alias validation in runtime code instead of a top-level anyOf.
+    // Some OpenAI-compatible chat-completions gateways reject tool schemas
+    // that combine object properties with root anyOf branches.
     additionalProperties: false,
   },
   outputSchema: {
@@ -255,7 +257,7 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
               filePath: { type: 'string' },
               mediaType: {
                 type: 'string',
-                enum: [...SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES],
+                enum: [...SUPPORTED_IMAGE_MEDIA_TYPES],
               },
               sizeBytes: { type: 'integer' },
             },
@@ -269,6 +271,79 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
           },
         },
         required: ['type', 'file'],
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['pdf'],
+          },
+          file: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              mediaType: {
+                type: 'string',
+                enum: ['application/pdf'],
+              },
+              sizeBytes: { type: 'integer' },
+              filename: { type: 'string' },
+            },
+            required: ['filePath', 'mediaType', 'sizeBytes', 'filename'],
+            additionalProperties: false,
+          },
+        },
+        required: ['type', 'file'],
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['unsupported_content'],
+          },
+          error: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+                enum: [
+                  'unsupported_content_type',
+                  'unsupported_runtime_capability',
+                ],
+              },
+              source: {
+                type: 'string',
+                enum: ['read'],
+              },
+              path: { type: 'string' },
+              detectedMediaType: { type: 'string' },
+              detectedExtension: { type: 'string' },
+              contentKind: {
+                type: 'string',
+                enum: ['image', 'pdf', 'office_document', 'unknown_binary'],
+              },
+              suggestedNextSteps: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  enum: [
+                    'use_skill',
+                    'use_bash_fallback',
+                    'ask_for_text_alternative',
+                    'configure_image_support',
+                  ],
+                },
+              },
+            },
+            required: ['code', 'source', 'contentKind', 'suggestedNextSteps'],
+            additionalProperties: false,
+          },
+        },
+        required: ['type', 'error'],
         additionalProperties: false,
       },
     ],
@@ -310,30 +385,28 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
       }
     }
 
-    if (
-      isSupportedLocalImageExtension(filePath) &&
-      (input.offset !== undefined || input.limit !== undefined)
-    ) {
-      return {
-        ok: false,
-        error: getUnsupportedImageRangeError(),
-      }
-    }
-
     try {
-      const fileStat = await stat(toAbsoluteToolPath(filePath))
-      if (!fileStat.isFile()) {
+      const absolutePath = toAbsoluteToolPath(filePath)
+      await getReadableFileStat(absolutePath)
+      const classified = classifyLocalFileContent({
+        filePath: absolutePath,
+        probe: await readFileProbe(absolutePath),
+      })
+
+      if (
+        classified.kind === 'image' &&
+        (input.offset !== undefined || input.limit !== undefined)
+      ) {
         return {
           ok: false,
-          error: 'Read can only read regular files',
+          error: getUnsupportedImageRangeError(),
         }
       }
     } catch (error) {
-      const fileError = error as NodeJS.ErrnoException
-      if (fileError.code === 'ENOENT') {
+      if (error instanceof Error) {
         return {
           ok: false,
-          error: `File does not exist: ${filePath}`,
+          error: error.message,
         }
       }
       throw error
@@ -352,15 +425,73 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
     const limits = getDefaultReadLimits()
 
     const absolutePath = toAbsoluteToolPath(filePath)
+    const fileStat = await getReadableFileStat(absolutePath)
+    const probe = await readFileProbe(absolutePath)
+    const classified = classifyLocalFileContent({
+      filePath: absolutePath,
+      probe,
+    })
     if (
-      isSupportedLocalImageExtension(absolutePath) &&
+      classified.kind === 'image' &&
       (input.offset !== undefined || input.limit !== undefined)
     ) {
       throw new Error(getUnsupportedImageRangeError())
     }
 
-    const fileStat = await stat(absolutePath)
-    if (isSupportedLocalImageExtension(absolutePath)) {
+    if (classified.kind === 'pdf' && getToolSupportsPdfInput(context) === true) {
+      if (fileStat.size > limits.maxImageSourceBytes) {
+        throw new Error(
+          `Read PDF source is too large (${fileStat.size} bytes). Limit is ${limits.maxImageSourceBytes} bytes.`,
+        )
+      }
+
+      const pdfBase64 = await readFile(absolutePath, 'base64')
+      const filename = basename(absolutePath)
+
+      return {
+        ok: true,
+        output: {
+          type: 'pdf',
+          file: {
+            filePath: absolutePath,
+            mediaType: 'application/pdf',
+            sizeBytes: fileStat.size,
+            filename,
+          },
+        },
+        content: [
+          createPdfBlock(pdfBase64, filename),
+        ],
+        newMessages: [
+          createTextMessage(
+            'user',
+            buildPdfResultText({
+              filePath: absolutePath,
+              sizeBytes: fileStat.size,
+              filename,
+            }),
+          ),
+        ],
+        summary: `Read PDF ${absolutePath}`,
+      }
+    }
+
+    if (classified.kind === 'pdf' || classified.kind === 'office_document' || classified.kind === 'unknown_binary') {
+      return createUnsupportedContentResult(
+        {
+          code: 'unsupported_content_type',
+          source: 'read',
+          path: absolutePath,
+          detectedMediaType: classified.detectedMediaType,
+          detectedExtension: classified.detectedExtension,
+          contentKind: classified.kind,
+          suggestedNextSteps: ['use_skill', 'use_bash_fallback'],
+        },
+        `Read could not directly process ${absolutePath}`,
+      )
+    }
+
+    if (classified.kind === 'image') {
       if (fileStat.size > limits.maxImageSourceBytes) {
         throw new Error(
           `Read image source is too large (${fileStat.size} bytes). Limit is ${limits.maxImageSourceBytes} bytes.`,
@@ -368,13 +499,13 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
       }
 
       const imageBuffer = await readFile(absolutePath)
-      const detectedMediaType = detectImageMediaTypeFromBuffer(imageBuffer)
+      const detectedMediaType = classified.detectedMediaType
       if (
         !detectedMediaType ||
-        !isSupportedLocalImageMediaType(detectedMediaType)
+        !isSupportedImageMediaType(detectedMediaType)
       ) {
         throw new Error(
-          `Read only supports local images with media types: ${[...SUPPORTED_LOCAL_IMAGE_MEDIA_TYPES].join(', ')}.`,
+          `Read only supports local images with media types: ${[...SUPPORTED_IMAGE_MEDIA_TYPES].join(', ')}.`,
         )
       }
 
@@ -398,15 +529,27 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
         ? `Read image file ${absolutePath} (${fileStat.size} source bytes, ${detectedMediaType}). Attached an optimized ${optimizedImage.mediaType} payload (${optimizedImage.buffer.length} bytes, ~${optimizedImage.estimatedTokens} tokens) for visual analysis.`
         : `Read image file ${absolutePath} (${optimizedImage.buffer.length} bytes, ${optimizedImage.mediaType}, ~${optimizedImage.estimatedTokens} tokens). The image is attached below for visual analysis.`
 
-      if (context.supportsVisionInput === false && !context.visionRuntime) {
-        throw new Error(
-          'Read image requires either a vision-capable active runtime or a configured vision side query runtime.',
+      const visionRuntime = getToolVisionRuntime(context)
+      if (getToolSupportsImageInput(context) === false && !visionRuntime) {
+        return createUnsupportedContentResult(
+          {
+            code: 'unsupported_runtime_capability',
+            source: 'read',
+            path: absolutePath,
+            detectedMediaType,
+            contentKind: 'image',
+            suggestedNextSteps: [
+              'ask_for_text_alternative',
+              'configure_image_support',
+            ],
+          },
+          `Read image ${absolutePath} requires image-capable runtime support`,
         )
       }
 
       if (shouldUseVisionSideQuery(context)) {
         const analysisText = await runVisionSideQuery({
-          runtime: context.visionRuntime!,
+          runtime: visionRuntime!,
           mediaType: optimizedImage.mediaType,
           data: optimizedImage.buffer.toString('base64'),
           sourceLabel: `Read ${absolutePath}`,

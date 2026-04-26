@@ -16,6 +16,7 @@ import type {
 } from '../../src/llm/types.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { skillTool } from '../../src/tools/builtin/skill.js'
+import { PROMPT as SKILL_TOOL_PROMPT } from '../../src/tools/builtin/skillPrompt.js'
 import {
   createTextMessage,
   createToolUseMessage,
@@ -56,7 +57,7 @@ class SkillContinuationClient implements LlmClient {
 
   constructor(
     private readonly skillName: string,
-    private readonly expectedSource: 'builtin' | 'project',
+    private readonly expectedSource: 'builtin' | 'user' | 'project',
   ) {}
 
   async createMessage(
@@ -87,6 +88,20 @@ class SkillContinuationClient implements LlmClient {
         'assistant',
         `continued with skill ${this.skillName}`,
       ),
+    }
+  }
+}
+
+class InstallIntentCaptureClient implements LlmClient {
+  readonly providerName = 'skill-test'
+  readonly requests: CreateMessageRequest[] = []
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    return {
+      message: createTextMessage('assistant', 'ok'),
     }
   }
 }
@@ -358,6 +373,58 @@ test('query loop can invoke a builtin skill and continue the conversation', asyn
   }
 })
 
+test('repository builtin document skills are loadable through the skill registry', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'dclaw-skill-tool-repo-builtin-'))
+
+  try {
+    const registry = createSkillRegistry(
+      await loadSkills({
+        cwd: tempDir,
+      }),
+    )
+
+    assert.ok(registry.get('pdf'))
+    assert.ok(registry.get('doc'))
+    assert.ok(registry.get('spreadsheet'))
+
+    const result = await skillTool.call(
+      { skill_name: 'pdf' },
+      createToolContext({
+        cwd: tempDir,
+        skillRegistry: registry,
+      }),
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.skill.name, 'pdf')
+    assert.equal(result.output.skill.source, 'builtin')
+    assert.match(result.summary ?? '', /Applied skill pdf/)
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('Skill tool prompt tells the model how to follow unsupported document results', () => {
+  assert.match(
+    SKILL_TOOL_PROMPT,
+    /When Read or WebFetch returns structured unsupported content for a document/i,
+  )
+  assert.match(
+    SKILL_TOOL_PROMPT,
+    /prefer the builtin `install-skills` skill first/i,
+  )
+  assert.match(
+    SKILL_TOOL_PROMPT,
+    /checking local skills before any external install flow/i,
+  )
+  assert.match(SKILL_TOOL_PROMPT, /`pdf` for PDF documents/)
+  assert.match(SKILL_TOOL_PROMPT, /`doc` for `.doc` and `.docx`/i)
+  assert.match(
+    SKILL_TOOL_PROMPT,
+    /`spreadsheet` for `.csv`, `.tsv`, `.xls`, `.xlsx`/i,
+  )
+})
+
 test('query loop can invoke a project skill and continue the conversation', async () => {
   const tempDir = await mkdtemp(join(tmpdir(), 'dclaw-skill-tool-project-'))
   const workspaceDir = join(tempDir, 'workspace')
@@ -394,6 +461,58 @@ test('query loop can invoke a project skill and continue the conversation', asyn
     assert.match(
       getTextContent(getReminderMessages(result.addedMessages)[0]!),
       /source: project/,
+    )
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('install intent exposes install-skills and reload guidance to the model-facing request', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'dclaw-skill-install-intent-'))
+  const toolRegistry = createDefaultToolRegistry()
+
+  try {
+    const skillRegistry = createSkillRegistry(
+      await loadSkills({
+        cwd: tempDir,
+      }),
+    )
+    const client = new InstallIntentCaptureClient()
+
+    const result = await executeSingleTurn({
+      client,
+      messages: [createTextMessage('user', 'please install the agent-browser skill')],
+      toolRegistry,
+      toolContext: createToolContext({
+        cwd: tempDir,
+        availableTools: toolRegistry.list().map(tool => tool.name),
+        skillRegistry,
+        reloadSkills: async () => ({
+          reloaded: true,
+          totalSkills: skillRegistry.list().length,
+          skillNames: skillRegistry.list().map(skill => skill.name),
+        }),
+      }),
+    })
+
+    assert.equal(result.outputText, 'ok')
+    assert.equal(client.requests.length, 1)
+
+    const request = client.requests[0]!
+    const skillDefinition = request.tools?.find(tool => tool.name === 'Skill')
+    assert.ok(skillDefinition)
+    assert.match(
+      skillDefinition?.description ?? '',
+      /prefer the builtin `install-skills` skill first/i,
+    )
+
+    const reloadDefinition = request.tools?.find(
+      tool => tool.name === 'ReloadSkills',
+    )
+    assert.ok(reloadDefinition)
+    assert.match(
+      reloadDefinition?.description ?? '',
+      /become available in the current conversation immediately/i,
     )
   } finally {
     await rm(tempDir, { recursive: true, force: true })

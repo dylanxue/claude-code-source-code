@@ -1,5 +1,16 @@
 # 多模态输入任务清单
 
+相关正式设计文档：
+
+- [多模态运行时与文档处理设计](./multimodal-runtime-design.md)
+- [多模态运行时实施计划](./multimodal-runtime-implementation-plan.md)
+
+状态说明（2026-04-25）：
+
+- 配置与 runtime 主链路已经开始转向新架构
+- 本文仍保留为历史任务清单和输入侧补充记录
+- 涉及 `providers / runtimes / imageFallback / pdf / skill-first` 的最新口径，以前两份正式文档为准
+
 ## 1. 目标
 
 为 `dclaw` 增加与 Claude Code 当前源码主路径尽量一致的多模态输入能力。
@@ -405,7 +416,10 @@
   - provider 只继续序列化标准 `tool_result.output`
 - [x] `WebFetch`：
   - 支持的远程图片可成功下载并返回结构化内容
-  - 非支持 image-like media type 会明确失败
+  - 非支持 image-like media type 会返回结构化 unsupported 结果
+- [x] `Read / WebFetch` 文档边界：
+  - `pdf / docx / xlsx / binary` 已走共享内容分类
+  - unsupported 情况会返回结构化字段和稳定文字说明
 - [x] `Read / WebFetch` 的 `vision side query`：
   - 当前主 runtime 不支持视觉输入时，可改走 side query
   - `toolUseIntent` 会按 `assistant text -> reasoning/thinking -> user request` 顺序回退

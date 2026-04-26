@@ -50,6 +50,9 @@ function summarizeMessage(message: Message): string | undefined {
   const imageCount = message.content.filter(
     block => block.type === 'image',
   ).length
+  const pdfCount = message.content.filter(
+    block => block.type === 'pdf',
+  ).length
   if (text.length > 0) {
     return truncate(
       (describeSystemReminderText(text) ?? text).replace(/\s+/g, ' '),
@@ -57,6 +60,9 @@ function summarizeMessage(message: Message): string | undefined {
   }
   if (imageCount > 0) {
     return imageCount === 1 ? '[image]' : `[${imageCount} images]`
+  }
+  if (pdfCount > 0) {
+    return pdfCount === 1 ? '[pdf]' : `[${pdfCount} pdfs]`
   }
 
   for (const block of message.content) {

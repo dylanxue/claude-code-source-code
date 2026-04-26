@@ -21,7 +21,7 @@ type SkillToolOutput = {
   skill: {
     name: string
     description: string
-    source: 'builtin' | 'project'
+    source: 'builtin' | 'user' | 'project'
     path: string
     context?: 'inline' | 'fork'
   }
@@ -191,7 +191,7 @@ export const skillTool: Tool<SkillToolInput, SkillToolOutput> = buildTool({
           description: { type: 'string' },
           source: {
             type: 'string',
-            enum: ['builtin', 'project'],
+            enum: ['builtin', 'user', 'project'],
           },
           path: { type: 'string' },
           context: {

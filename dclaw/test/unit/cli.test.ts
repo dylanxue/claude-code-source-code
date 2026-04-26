@@ -2,27 +2,22 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CliArgumentError, parseArgs } from '../../src/cli/parseArgs.js'
 
-test('parseArgs accepts anthropic as a provider', () => {
+test('parseArgs accepts an explicit runtime override', () => {
   const command = parseArgs([
-    '--provider',
-    'anthropic',
-    '--model',
-    'claude-test',
+    '--runtime',
+    'anthropic-default',
     '--print',
     'hello',
   ])
 
   assert.equal(command.mode, 'print')
-  assert.equal(command.options.provider, 'anthropic')
-  assert.equal(command.options.model, 'claude-test')
+  assert.equal(command.options.runtime, 'anthropic-default')
 })
 
-test('parseArgs accepts openai as a provider', () => {
+test('parseArgs accepts runtime + streaming flags together', () => {
   const command = parseArgs([
-    '--provider',
-    'openai',
-    '--model',
-    'gpt-5',
+    '--runtime',
+    'openai-fast',
     '--stream',
     '--output-format',
     'sse',
@@ -31,10 +26,16 @@ test('parseArgs accepts openai as a provider', () => {
   ])
 
   assert.equal(command.mode, 'print')
-  assert.equal(command.options.provider, 'openai')
-  assert.equal(command.options.model, 'gpt-5')
+  assert.equal(command.options.runtime, 'openai-fast')
   assert.equal(command.options.stream, true)
   assert.equal(command.options.outputFormat, 'sse')
+})
+
+test('parseArgs rejects removed --model overrides', () => {
+  assert.throws(
+    () => parseArgs(['--runtime', 'openai-fast', '--model', 'gpt-5']),
+    /Unknown option: --model/,
+  )
 })
 
 test('parseArgs enables verbose mode', () => {
@@ -96,18 +97,8 @@ test('parseArgs rejects invalid max iteration overrides', () => {
   )
 })
 
-test('parseArgs reports supported providers for invalid input', () => {
-  assert.throws(
-    () => parseArgs(['--provider', 'unknown']),
-    (error: unknown) => {
-      assert(error instanceof CliArgumentError)
-      assert.match(
-        error.message,
-        /Supported providers: stub, anthropic, openai/,
-      )
-      return true
-    },
-  )
+test('parseArgs requires a value for --runtime', () => {
+  assert.throws(() => parseArgs(['--runtime']), /Missing value for --runtime/)
 })
 
 test('parseArgs rejects unsupported output format', () => {

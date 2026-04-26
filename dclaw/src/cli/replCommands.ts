@@ -8,11 +8,18 @@ import { compactSession } from '../compact/compactSession.js'
 import { formatCompactRecommendationLines } from '../compact/pressure.js'
 import { formatCompactBoundaryLabel } from '../compact/types.js'
 import type { QueryEngine } from '../core/queryEngine.js'
-import type { LlmProviderName } from '../llm/providerNames.js'
-import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
+import { loadResolvedLlmConfig } from '../llm/config.js'
+import {
+  resolveLlmRuntimeConfig,
+  type ResolvedLlmRuntimeConfig,
+} from '../llm/runtimeConfig.js'
 import { listSessionHistory } from '../session/history.js'
 import { loadSessionForResume } from '../session/resume.js'
-import { createSession, loadSessionMeta } from '../session/store.js'
+import {
+  createSession,
+  loadSessionMeta,
+  updateSessionMeta,
+} from '../session/store.js'
 import {
   ensurePlanFileForTaskBoard,
   readPlanFile,
@@ -81,6 +88,12 @@ export type ReplCommandContext = {
   options: CommonCliOptions
   session: ReplSessionState
   rotateQueryTrace?: (sessionId?: string) => Promise<string | undefined>
+  switchRuntime?: (
+    runtimeName: string,
+  ) => Promise<{
+    runtime: ResolvedLlmRuntimeConfig
+    queryTracePath?: string
+  }>
 }
 
 type ReplCommandDefinition = {
@@ -95,8 +108,19 @@ type ReplCommandDefinition = {
   ) => Promise<void> | void
 }
 
+let activeOutputWriter: ((text: string) => void) | undefined
+
+function writeReplOutput(text: string): void {
+  if (activeOutputWriter) {
+    activeOutputWriter(text)
+    return
+  }
+
+  process.stdout.write(text)
+}
+
 function printLines(lines: string[]): void {
-  process.stdout.write(lines.join('\n') + '\n')
+  writeReplOutput(lines.join('\n') + '\n')
 }
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
@@ -166,13 +190,14 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     ? await loadTaskBoard(meta.taskBoardId)
     : null
   const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
+  const llmConfig = await loadResolvedLlmConfig(context.options.cwd, configured.env)
   const runtime = resolveLlmRuntimeConfig(
     {
-      provider: context.session.provider as LlmProviderName,
+      runtime: context.options.runtime,
       model: context.session.model,
     },
+    llmConfig,
     configured.env,
-    key => configured.keySources[key],
   )
   const compactRecommendation = context.engine.getCompactRecommendation()
   const messages = context.engine.getMessages()
@@ -188,6 +213,12 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     `provider source: ${context.session.providerSource}`,
     `model: ${context.session.model ?? 'default'}`,
     `model source: ${context.session.modelSource}`,
+    ...(runtime.model && runtime.canonicalModel && runtime.canonicalModel !== runtime.model
+      ? [`model canonicalized to: ${runtime.canonicalModel}`]
+      : []),
+    ...(runtime.model
+      ? [`catalog match: ${runtime.catalogMatch ?? 'none'}`]
+      : []),
     `permission mode: ${context.session.permissionMode}`,
     `permission mode source: ${context.session.permissionModeSource}`,
     `stream: ${context.options.stream ? 'enabled' : 'disabled'}`,
@@ -214,7 +245,7 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
   ) {
     appendModelLimitLines(lines, runtime.providerConfig.provider, runtime.model)
   }
-  appendVisionRuntimeLines(lines, configured.env)
+  appendVisionRuntimeLines(lines, runtime.imageFallback)
   lines.push('')
 
   printLines(lines)
@@ -519,6 +550,7 @@ async function compactConversation(
       : 'user requested /compact',
     instructionText,
     contextStats,
+    client: context.engine.getClient(),
     env: configured.env,
   })
 
@@ -549,13 +581,14 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     configured.env,
     key => configured.keySources[key],
   )
+  const llmConfig = await loadResolvedLlmConfig(cwd, configured.env)
   const runtime = resolveLlmRuntimeConfig(
     {
-      provider: context.session.provider as LlmProviderName,
+      runtime: context.options.runtime,
       model: context.session.model,
     },
+    llmConfig,
     configured.env,
-    key => configured.keySources[key],
   )
   const compactRecommendation = context.engine.getCompactRecommendation()
   const compactPressureValue =
@@ -626,9 +659,12 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     lines.push(statusLine('model source', context.session.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
     if (runtime.model) {
-      appendModelLimitLines(lines, 'anthropic', runtime.model)
+      appendModelLimitLines(lines, 'anthropic', runtime.model, {
+        env: configured.env,
+        overrides: llmConfig.modelCatalogOverrides,
+      })
     }
-    appendVisionRuntimeLines(lines, configured.env)
+    appendVisionRuntimeLines(lines, runtime.imageFallback)
   } else if (runtime.providerConfig.provider === 'openai') {
     const config = runtime.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
@@ -638,45 +674,138 @@ async function printDoctor(context: ReplCommandContext): Promise<void> {
     lines.push(statusLine('model source', context.session.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
     if (runtime.model) {
-      appendModelLimitLines(lines, 'openai', runtime.model)
+      appendModelLimitLines(lines, 'openai', runtime.model, {
+        env: configured.env,
+        overrides: llmConfig.modelCatalogOverrides,
+      })
     }
-    appendVisionRuntimeLines(lines, configured.env)
+    appendVisionRuntimeLines(lines, runtime.imageFallback)
   } else {
     lines.push(statusLine('resolved model', runtime.model ?? 'none'))
     lines.push(statusLine('model source', context.session.modelSource))
-    appendVisionRuntimeLines(lines, configured.env)
+    appendVisionRuntimeLines(lines, runtime.imageFallback)
   }
 
   appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])
   printLines(lines)
 }
 
-function printCurrentModel(context: ReplCommandContext): void {
+function formatRuntimeSummaryLines(
+  runtime: ResolvedLlmRuntimeConfig,
+  queryTracePath?: string,
+): string[] {
+  return [
+    `runtime: ${runtime.runtimeName ?? 'stub'}`,
+    `runtime source: ${runtime.runtimeSource}`,
+    `provider: ${runtime.provider}`,
+    `provider ref: ${runtime.primary.providerRef}`,
+    `model: ${runtime.model ?? 'default'}`,
+    `model source: ${runtime.modelSource}`,
+    ...(runtime.model && runtime.canonicalModel && runtime.canonicalModel !== runtime.model
+      ? [`model canonicalized to: ${runtime.canonicalModel}`]
+      : []),
+    ...(runtime.model
+      ? [`catalog match: ${runtime.catalogMatch ?? 'none'}`]
+      : []),
+    `image input: ${runtime.primary.modelCapabilities.supportsImageInput ? 'supported' : 'not supported'}`,
+    `image fallback: ${runtime.imageFallback ? `${runtime.imageFallback.provider} / ${runtime.imageFallback.model ?? 'default'}` : 'not configured'}`,
+    ...(queryTracePath ? [`query trace: ${queryTracePath}`] : []),
+  ]
+}
+
+function formatAvailableRuntimeLines(
+  llmConfig: Awaited<ReturnType<typeof loadResolvedLlmConfig>>,
+  activeRuntimeName?: string,
+): string[] {
+  const runtimeNames = Object.keys(llmConfig.runtimes).sort((left, right) =>
+    left.localeCompare(right),
+  )
+  if (runtimeNames.length === 0) {
+    return ['available runtimes: none']
+  }
+
+  return [
+    'available runtimes:',
+    ...runtimeNames.map(name => {
+      const profile = llmConfig.runtimes[name]
+      const model = profile.primary.model ?? 'default'
+      const fallback = profile.imageFallback?.model
+      const marker = name === activeRuntimeName ? '* ' : '- '
+      return `${marker}${name}  ${profile.primary.providerRef} / ${model}${fallback ? `  imageFallback=${fallback}` : ''}`
+    }),
+  ]
+}
+
+async function printCurrentRuntime(
+  context: ReplCommandContext,
+  mode: 'current' | 'list' = 'current',
+): Promise<void> {
+  const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
+  const llmConfig = await loadResolvedLlmConfig(context.options.cwd, configured.env)
+  const runtime = resolveLlmRuntimeConfig(
+    {
+      runtime: context.options.runtime,
+    },
+    llmConfig,
+    configured.env,
+  )
+
+  if (mode === 'list') {
+    printLines([
+      ...formatAvailableRuntimeLines(llmConfig, runtime.runtimeName),
+      '',
+    ])
+    return
+  }
+
   printLines([
-    `Current model: ${context.session.model ?? 'default'}`,
-    'Use /model <name> to switch models for this REPL session.',
+    'current runtime:',
+    ...formatRuntimeSummaryLines(runtime),
+    '',
+    ...formatAvailableRuntimeLines(llmConfig, runtime.runtimeName),
     '',
   ])
 }
 
-function setCurrentModel(args: string[], context: ReplCommandContext): void {
+async function setCurrentRuntime(
+  args: string[],
+  context: ReplCommandContext,
+): Promise<void> {
   if (args.length === 0) {
-    printCurrentModel(context)
+    await printCurrentRuntime(context)
     return
   }
 
-  const nextModel = args.join(' ').trim()
-  if (!nextModel) {
-    printCurrentModel(context)
+  const nextRuntime = args.join(' ').trim()
+  if (!nextRuntime) {
+    await printCurrentRuntime(context)
     return
   }
 
-  context.engine.setModel(nextModel)
-  context.session.model = nextModel
-  context.session.modelSource = 'repl_command'
+  if (nextRuntime === 'list') {
+    await printCurrentRuntime(context, 'list')
+    return
+  }
+
+  if (!context.switchRuntime) {
+    printLines([
+      'Runtime switching is not available in this REPL context.',
+      '',
+    ])
+    return
+  }
+
+  const { runtime, queryTracePath } = await context.switchRuntime(nextRuntime)
+  await updateSessionMeta(context.session.sessionId, meta => ({
+    ...meta,
+    provider: runtime.provider,
+    model: runtime.model,
+    updatedAt: new Date().toISOString(),
+  }))
 
   printLines([
-    `Model updated for this REPL session: ${nextModel}`,
+    `Runtime updated for this REPL session: ${runtime.runtimeName ?? nextRuntime}`,
+    ...formatRuntimeSummaryLines(runtime, queryTracePath),
     '',
   ])
 }
@@ -910,11 +1039,11 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     },
   },
   {
-    name: '/model',
-    argumentHint: '[model]',
-    description: 'Show or change the active model for this REPL session.',
-    handle(args, context) {
-      setCurrentModel(args, context)
+    name: '/runtime',
+    argumentHint: '[name|list]',
+    description: 'Show the current runtime, list available runtimes, or switch to one.',
+    async handle(args, context) {
+      await setCurrentRuntime(args, context)
     },
   },
   {
@@ -1028,24 +1157,39 @@ export async function maybeHandleReplCommand(
   context: ReplCommandContext,
   options: {
     allowDuringActivePrompt?: boolean
+    writeOutput?: (text: string) => void
   } = {},
 ): Promise<boolean> {
-  const trimmedPrompt = prompt.trim()
-  const [commandName, ...args] = trimmedPrompt.split(/\s+/)
-  const command = findReplCommand(commandName)
+  const previousWriter = activeOutputWriter
+  activeOutputWriter = options.writeOutput ?? previousWriter
+  try {
+    const trimmedPrompt = prompt.trim()
+    const [commandName, ...args] = trimmedPrompt.split(/\s+/)
+    const command = findReplCommand(commandName)
 
-  if (!command) {
-    return false
-  }
+    if (!command) {
+      if (commandName.startsWith('/')) {
+        printLines([
+          `Unknown REPL command: ${commandName}`,
+          'Use /help to list available commands.',
+          '',
+        ])
+        return true
+      }
+      return false
+    }
 
-  if (options.allowDuringActivePrompt && !command.canRunWhileBusy) {
-    printLines([
-      `${command.name} cannot run while a response is active. Use /interrupt to stop the response, or wait for it to finish.`,
-      '',
-    ])
+    if (options.allowDuringActivePrompt && !command.canRunWhileBusy) {
+      printLines([
+        `${command.name} cannot run while a response is active. Use /interrupt to stop the response, or wait for it to finish.`,
+        '',
+      ])
+      return true
+    }
+
+    await command.handle(args, context)
     return true
+  } finally {
+    activeOutputWriter = previousWriter
   }
-
-  await command.handle(args, context)
-  return true
 }

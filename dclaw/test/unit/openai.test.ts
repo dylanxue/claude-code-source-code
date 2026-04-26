@@ -5,14 +5,13 @@ import test from 'node:test'
 import {
   createImageBlock,
   createMessage,
+  createPdfBlock,
   createTextMessage,
   createToolResultMessage,
 } from '../../src/types/message.js'
 import type { PersistedToolResultOutput } from '../../src/core/toolResultBudget.js'
-import {
-  OpenAiLlmClient,
-  resolveOpenAiConfig,
-} from '../../src/llm/providers/openai.js'
+import { OpenAiLlmClient } from '../../src/llm/providers/openai.js'
+import { resolveProviderConfig } from '../../src/llm/providerConfig.js'
 import {
   getRetryDelayMs,
   getProviderErrorKind,
@@ -20,22 +19,18 @@ import {
   RetryableHttpError,
 } from '../../src/llm/providerUtils.js'
 
-test('resolveOpenAiConfig reads dclaw env vars first', () => {
-  const config = resolveOpenAiConfig({
-    OPENAI_API_KEY: 'fallback-key',
-    OPENAI_BASE_URL: 'https://fallback.example.com/v1/',
-    OPENAI_MODEL: 'fallback-model',
-    DCLAW_OPENAI_API_KEY: 'primary-key',
-    DCLAW_OPENAI_BASE_URL: 'https://primary.example.com/v1/',
-    DCLAW_OPENAI_MODEL: 'primary-model',
+test('resolveProviderConfig builds openai provider config from a typed profile', () => {
+  const config = resolveProviderConfig({
+    type: 'openai',
+    apiKey: 'primary-key',
+    baseURL: 'https://primary.example.com/v1/',
+    apiStyle: 'chat-completions',
   })
 
   assert.deepEqual(config, {
     provider: 'openai',
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com/v1',
-    defaultModel: 'primary-model',
-    defaultModelSource: 'env',
     apiStyle: 'chat-completions',
     defaultTextVerbosity: undefined,
     defaultReasoningEffort: undefined,
@@ -43,20 +38,20 @@ test('resolveOpenAiConfig reads dclaw env vars first', () => {
   })
 })
 
-test('resolveOpenAiConfig reads Responses defaults from env', () => {
-  const config = resolveOpenAiConfig({
-    OPENAI_API_STYLE: 'responses',
-    OPENAI_VERBOSITY: 'medium',
-    OPENAI_REASONING_EFFORT: 'high',
-    OPENAI_STORE: 'false',
+test('resolveProviderConfig keeps openai request defaults from typed config', () => {
+  const config = resolveProviderConfig({
+    type: 'openai',
+    requestDefaults: {
+      verbosity: 'medium',
+      reasoningEffort: 'high',
+      store: false,
+    },
   })
 
   assert.deepEqual(config, {
     provider: 'openai',
     apiKey: undefined,
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: undefined,
-    defaultModelSource: undefined,
     apiStyle: 'responses',
     defaultTextVerbosity: 'medium',
     defaultReasoningEffort: 'high',
@@ -202,18 +197,12 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${address.port}`,
       apiStyle: 'responses',
-      env: {
-        DCLAW_MODEL_LIMITS_JSON: JSON.stringify({
-          providers: {
-            openai: {
-              'gpt-5': {
-                maxOutputTokens: 777,
-                maxOutputTokensUpperLimit: 1000,
-                contextWindow: 400000,
-              },
-            },
-          },
-        }),
+      modelCatalogOverrides: {
+        'gpt-5': {
+          maxOutputTokens: 777,
+          maxOutputTokensUpperLimit: 1000,
+          contextWindow: 400000,
+        },
       },
     })
 
@@ -551,6 +540,136 @@ test('OpenAiLlmClient maps user image blocks to chat-completions content parts',
   }
 })
 
+test('OpenAiLlmClient maps user PDF blocks to Responses input files', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }],
+      }))
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+    })
+    await client.createMessage({
+      model: 'gpt-5',
+      messages: [
+        createMessage('user', [
+          { type: 'text', text: 'Summarize this PDF' },
+          createPdfBlock('JVBERi0xLjc=', 'report.pdf'),
+        ]),
+      ],
+    })
+
+    assert.deepEqual(
+      (capturedBody as { input?: unknown[] }).input,
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Summarize this PDF' },
+            {
+              type: 'input_file',
+              filename: 'report.pdf',
+              file_data: 'data:application/pdf;base64,JVBERi0xLjc=',
+            },
+          ],
+        },
+      ],
+    )
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
+test('OpenAiLlmClient maps user PDF blocks to chat-completions file parts', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      }))
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'chat-completions',
+    })
+    await client.createMessage({
+      model: 'gpt-5',
+      messages: [
+        createMessage('user', [
+          { type: 'text', text: 'Summarize this PDF' },
+          createPdfBlock('JVBERi0xLjc=', 'report.pdf'),
+        ]),
+      ],
+    })
+
+    assert.deepEqual(
+      (capturedBody as { messages?: unknown[] }).messages,
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Summarize this PDF' },
+            {
+              type: 'file',
+              file: {
+                filename: 'report.pdf',
+                file_data: 'data:application/pdf;base64,JVBERi0xLjc=',
+              },
+            },
+          ],
+        },
+      ],
+    )
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
 test('OpenAiLlmClient stringifies tool_result output even when structured image content exists', async () => {
   let capturedBody: unknown
 
@@ -744,11 +863,9 @@ test('OpenAiLlmClient supports Responses API message item streaming without outp
       baseUrl: `http://127.0.0.1:${address.port}`,
       apiStyle: 'responses',
       defaultModel: 'gpt-5',
-      env: {
-        OPENAI_VERBOSITY: 'low',
-        OPENAI_REASONING_EFFORT: 'medium',
-        OPENAI_STORE: 'false',
-      },
+      defaultTextVerbosity: 'low',
+      defaultReasoningEffort: 'medium',
+      defaultStore: false,
     })
 
     const result = await client.createMessageStream?.(
@@ -1009,18 +1126,12 @@ test('OpenAiLlmClient supports chat completions requests', async () => {
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${address.port}`,
       apiStyle: 'chat-completions',
-      env: {
-        DCLAW_MODEL_LIMITS_JSON: JSON.stringify({
-          providers: {
-            openai: {
-              'kimi-k2.5': {
-                maxOutputTokens: 2048,
-                maxOutputTokensUpperLimit: 8192,
-                contextWindow: 256000,
-              },
-            },
-          },
-        }),
+      modelCatalogOverrides: {
+        'kimi-k2.5': {
+          maxOutputTokens: 2048,
+          maxOutputTokensUpperLimit: 8192,
+          contextWindow: 256000,
+        },
       },
     })
 
@@ -2044,6 +2155,61 @@ test('OpenAiLlmClient classifies model availability failures distinctly', async 
           error.userMessage,
           'The selected model is not available on OpenAI. Check the model name and account access.',
         )
+        return true
+      },
+    )
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient surfaces provider 400 responses when error.code is numeric', async () => {
+  const server = createServer((_, response) => {
+    response.writeHead(400, {
+      'content-type': 'application/json',
+    })
+    response.end(
+      JSON.stringify({
+        error: {
+          code: 400,
+          message: 'Provider returned error',
+        },
+      }),
+    )
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'chat-completions',
+      defaultModel: 'gpt-5',
+      maxRetries: 0,
+    })
+
+    await assert.rejects(
+      () =>
+        client.createMessage({
+          messages: [createTextMessage('user', 'hello')],
+        }),
+      error => {
+        assert.ok(error instanceof RetryableHttpError)
+        assert.equal(
+          error.message,
+          'OpenAI request failed (400 Bad Request): Provider returned error',
+        )
+        assert.equal(error.kind, 'bad_request')
+        assert.equal(error.subtype, 'bad_request')
+        assert.equal(error.errorCode, '400')
         return true
       },
     )

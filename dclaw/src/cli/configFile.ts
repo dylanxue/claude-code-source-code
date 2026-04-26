@@ -5,6 +5,7 @@ import { getDclawConfigPath } from '../session/paths.js'
 export type DclawConfigFile = Record<string, unknown> & {
   permissionMode?: unknown
   maxIterations?: unknown
+  llm?: unknown
 }
 
 export type ConfigEnvSource = 'user_config' | 'workspace_config'
@@ -86,13 +87,14 @@ function hasConfiguredEnvValue(
 
 function isEnvLikeConfigKey(key: string): boolean {
   return (
-    (key.startsWith('DCLAW_') ||
-      key.startsWith('OPENAI_') ||
-      key.startsWith('ANTHROPIC_') ||
-      key === 'LLM_PROVIDER' ||
-      key === 'MODEL_PROVIDER') &&
+    key.startsWith('DCLAW_') &&
     /^[A-Z_][A-Z0-9_]*$/.test(key) &&
-    key !== 'DCLAW_HOME'
+    key !== 'DCLAW_HOME' &&
+    key !== 'DCLAW_PROVIDER' &&
+    key !== 'DCLAW_VISION_PROVIDER' &&
+    key !== 'DCLAW_VISION_MODEL' &&
+    !key.startsWith('DCLAW_OPENAI_') &&
+    !key.startsWith('DCLAW_ANTHROPIC_')
   )
 }
 

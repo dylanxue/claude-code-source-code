@@ -22,6 +22,10 @@ export type ReplLoopOptions = {
   output?: NodeJS.WritableStream
   promptText?: string
   busyPromptText?: string
+  onImmediatePrompt?: (
+    prompt: string,
+    control: ReplPromptControl,
+  ) => Promise<boolean> | boolean
   onPrompt: (prompt: string, control: ReplPromptControl) => Promise<void>
   onBusyPrompt?: (
     prompt: string,
@@ -51,6 +55,7 @@ const EXIT_COMMANDS = new Set([
 const INTERRUPT_COMMANDS = new Set([
   '/interrupt',
   '/cancel',
+  '/abort',
 ])
 
 function trimPrompt(value: string | undefined): string | undefined {
@@ -323,6 +328,17 @@ export async function runInteractiveReplLoop(
         pendingPrompts.push(trimmed)
         options.onPromptQueued?.(trimmed, pendingPrompts.length, writeOutput)
         redrawPrompt()
+        continue
+      }
+
+      const immediateHandled = await options.onImmediatePrompt?.(trimmed, {
+        signal: new AbortController().signal,
+        writeOutput,
+        flushOutput,
+      })
+      if (immediateHandled) {
+        flushOutput()
+        promptIfIdle()
         continue
       }
 

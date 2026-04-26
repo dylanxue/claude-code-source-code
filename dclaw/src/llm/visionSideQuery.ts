@@ -5,7 +5,7 @@ import {
 } from '../types/message.js'
 import type {
   ToolUseIntent,
-  VisionRuntime,
+  ToolRuntimeProfile,
 } from '../types/tool.js'
 import type { QueryTraceSink } from '../core/queryTrace.js'
 
@@ -86,7 +86,7 @@ function buildVisionSideQueryUserPrompt(input: {
 }
 
 export async function runVisionSideQuery(input: {
-  runtime: VisionRuntime
+  runtime: NonNullable<ToolRuntimeProfile['imageFallback']>
   mediaType: string
   data: string
   sourceLabel: string

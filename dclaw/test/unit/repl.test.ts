@@ -225,6 +225,82 @@ test('runInteractiveReplLoop runs allowed busy commands immediately', async () =
   assert.deepEqual(busyCommands, ['/info'])
 })
 
+test('runInteractiveReplLoop treats /abort as an interrupt command while busy', async () => {
+  const input = new PassThrough() as PassThrough & { isTTY?: boolean }
+  const output = new PassThrough() as PassThrough & { isTTY?: boolean }
+  const outputChunks = collectStreamOutput(output)
+  const prompts: string[] = []
+
+  input.isTTY = true
+  output.isTTY = true
+
+  const loop = runInteractiveReplLoop({
+    input,
+    output,
+    onPrompt: async (_prompt, control) => {
+      prompts.push(_prompt)
+      await new Promise<void>((resolve, reject) => {
+        control.signal.addEventListener(
+          'abort',
+          () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })),
+          { once: true },
+        )
+      })
+    },
+  })
+
+  input.write('first prompt\n')
+  await waitFor(() => prompts.includes('first prompt'))
+  input.write('/abort\n')
+  await waitFor(() =>
+    outputChunks.join('').includes('Interrupted current response.'),
+  )
+  input.write('/exit\n')
+  input.end()
+
+  await loop
+  assert.match(outputChunks.join(''), /Interrupted current response\./)
+})
+
+test('runInteractiveReplLoop handles immediate local commands without entering busy state', async () => {
+  const input = new PassThrough() as PassThrough & { isTTY?: boolean }
+  const output = new PassThrough() as PassThrough & { isTTY?: boolean }
+  const outputChunks = collectStreamOutput(output)
+  const prompts: string[] = []
+  const immediatePrompts: string[] = []
+
+  input.isTTY = true
+  output.isTTY = true
+
+  const loop = runInteractiveReplLoop({
+    input,
+    output,
+    onImmediatePrompt(prompt, control) {
+      if (prompt === '/runtime') {
+        immediatePrompts.push(prompt)
+        control.writeOutput('current runtime:\n')
+        return true
+      }
+      return false
+    },
+    onPrompt: async prompt => {
+      prompts.push(prompt)
+    },
+  })
+
+  input.write('/runtime\n')
+  await waitFor(() => immediatePrompts.includes('/runtime'))
+  input.write('/exit\n')
+  input.end()
+
+  await loop
+  const text = outputChunks.join('')
+  assert.deepEqual(prompts, [])
+  assert.deepEqual(immediatePrompts, ['/runtime'])
+  assert.match(text, /current runtime:/)
+  assert.doesNotMatch(text, /dclaw\[busy\]>/)
+})
+
 test('runInteractiveReplLoop interrupts the active prompt', async () => {
   const input = new PassThrough() as PassThrough & { isTTY?: boolean }
   const output = new PassThrough() as PassThrough & { isTTY?: boolean }

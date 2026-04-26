@@ -1,10 +1,26 @@
-import type { ToolResult } from '../../types/tool.js'
-import { createImageBlock } from '../../types/message.js'
+import {
+  getToolSupportsImageInput,
+  getToolSupportsPdfInput,
+  getToolVisionRuntime,
+  type ToolContext,
+  type ToolResult,
+} from '../../types/tool.js'
+import { createImageBlock, createPdfBlock } from '../../types/message.js'
 import {
   IMAGE_TARGET_RAW_SIZE,
   optimizeImageForModel,
 } from '../../llm/imageProcessing.js'
 import { runVisionSideQuery } from '../../llm/visionSideQuery.js'
+import {
+  classifyRemoteContent,
+  isSupportedImageMediaType,
+  parseMediaType,
+  SUPPORTED_IMAGE_MEDIA_TYPES,
+} from '../contentTypes.js'
+import {
+  createUnsupportedContentResult,
+  type UnsupportedContentToolOutput,
+} from '../fileHandling.js'
 import { buildTool, type Tool } from '../types.js'
 import { getDefaultReadLimits } from './readLimits.js'
 import { DESCRIPTION, PROMPT } from './webFetchPrompt.js'
@@ -14,12 +30,6 @@ const MAX_METADATA_CHARS = 300
 const MAX_EXCERPTS = 6
 const MAX_SECTION_CHARS = 1_800
 const FETCH_TIMEOUT_MS = 20_000
-const SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-])
 const REDIRECT_STATUS_TEXT: Record<number, string> = {
   301: 'Moved Permanently',
   302: 'Found',
@@ -41,12 +51,12 @@ export type WebFetchToolOutput = {
   durationMs: number
   url: string
   contentType: string
-  contentKind: 'text' | 'image'
+  contentKind: 'text' | 'image' | 'pdf'
   mediaType?: string
   title?: string
   description?: string
   wasTruncated: boolean
-}
+} | UnsupportedContentToolOutput
 
 type RedirectResponse = {
   type: 'redirect'
@@ -99,10 +109,6 @@ function truncateText(
   }
 }
 
-function parseMediaType(contentType: string): string {
-  return contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-}
-
 function normalizeUrl(rawUrl: string): string {
   const parsed = new URL(rawUrl)
   const isLocalhost =
@@ -117,19 +123,31 @@ function normalizeUrl(rawUrl: string): string {
   return parsed.toString()
 }
 
-function isSupportedRemoteImageMediaType(contentType: string): boolean {
-  return SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES.has(parseMediaType(contentType))
+function getFilenameFromUrl(url: string, fallback: string): string {
+  try {
+    const pathname = new URL(url).pathname
+    const candidate = pathname.split('/').at(-1)?.trim()
+    return candidate && candidate.length > 0 ? candidate : fallback
+  } catch {
+    return fallback
+  }
 }
 
-function isImageLikeContentType(contentType: string): boolean {
-  return parseMediaType(contentType).startsWith('image/')
+function shouldUseVisionSideQuery(
+  context: Pick<ToolContext, 'runtimeProfile'>,
+): boolean {
+  return (
+    getToolSupportsImageInput(context) === false &&
+    Boolean(getToolVisionRuntime(context))
+  )
 }
 
-function shouldUseVisionSideQuery(context: {
-  supportsVisionInput?: boolean
-  visionRuntime?: unknown
-}): boolean {
-  return context.supportsVisionInput === false && Boolean(context.visionRuntime)
+function buildPdfResultText(input: {
+  url: string
+  sizeBytes: number
+  filename: string
+}): string {
+  return `Downloaded PDF ${input.url} (${input.sizeBytes} bytes). Attached ${input.filename} below for document analysis.`
 }
 
 function extractHtmlMetadata(rawHtml: string): {
@@ -561,9 +579,9 @@ async function readRemoteImage(
 }> {
   const contentType = response.headers.get('content-type') ?? ''
   const mediaType = parseMediaType(contentType)
-  if (!isSupportedRemoteImageMediaType(contentType)) {
+  if (!isSupportedImageMediaType(contentType)) {
     throw new Error(
-      `WebFetch only supports remote images with media types: ${[...SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES].join(', ')}. Received ${mediaType || '<unknown>'}.`,
+      `WebFetch only supports remote images with media types: ${[...SUPPORTED_IMAGE_MEDIA_TYPES].join(', ')}. Received ${mediaType || '<unknown>'}.`,
     )
   }
 
@@ -636,6 +654,7 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
   },
   outputSchema: {
     type: 'object',
+    additionalProperties: false,
     properties: {
       bytes: { type: 'integer' },
       code: { type: 'integer' },
@@ -649,19 +668,91 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
       title: { type: 'string' },
       description: { type: 'string' },
       wasTruncated: { type: 'boolean' },
+      type: { type: 'string' },
+      error: { type: 'object' },
     },
-    required: [
-      'bytes',
-      'code',
-      'codeText',
-      'result',
-      'durationMs',
-      'url',
-      'contentType',
-      'contentKind',
-      'wasTruncated',
+    anyOf: [
+      {
+        type: 'object',
+        properties: {
+          bytes: { type: 'integer' },
+          code: { type: 'integer' },
+          codeText: { type: 'string' },
+          result: { type: 'string' },
+          durationMs: { type: 'integer' },
+          url: { type: 'string' },
+          contentType: { type: 'string' },
+          contentKind: {
+            type: 'string',
+            enum: ['text', 'image', 'pdf'],
+          },
+          mediaType: { type: 'string' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          wasTruncated: { type: 'boolean' },
+        },
+        required: [
+          'bytes',
+          'code',
+          'codeText',
+          'result',
+          'durationMs',
+          'url',
+          'contentType',
+          'contentKind',
+          'wasTruncated',
+        ],
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['unsupported_content'],
+          },
+          error: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+                enum: [
+                  'unsupported_content_type',
+                  'unsupported_runtime_capability',
+                ],
+              },
+              source: {
+                type: 'string',
+                enum: ['webfetch'],
+              },
+              url: { type: 'string' },
+              detectedMediaType: { type: 'string' },
+              detectedExtension: { type: 'string' },
+              contentKind: {
+                type: 'string',
+                enum: ['image', 'pdf', 'office_document', 'unknown_binary'],
+              },
+              suggestedNextSteps: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  enum: [
+                    'use_skill',
+                    'use_bash_fallback',
+                    'ask_for_text_alternative',
+                    'configure_image_support',
+                  ],
+                },
+              },
+            },
+            required: ['code', 'source', 'contentKind', 'suggestedNextSteps'],
+            additionalProperties: false,
+          },
+        },
+        required: ['type', 'error'],
+        additionalProperties: false,
+      },
     ],
-    additionalProperties: false,
   },
   validate(input) {
     if (!input.url?.trim() || !input.prompt?.trim()) {
@@ -729,7 +820,12 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
       }
 
       const contentType = fetched.headers.get('content-type') ?? ''
-      if (isSupportedRemoteImageMediaType(contentType)) {
+      const classified = classifyRemoteContent({
+        url: fetched.url,
+        contentType,
+      })
+
+      if (classified.kind === 'image') {
         const image = await readRemoteImage(
           fetched,
           limits.maxImageSourceBytes,
@@ -746,15 +842,27 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
           image.estimatedTokens,
         )
 
-        if (context.supportsVisionInput === false && !context.visionRuntime) {
-          throw new Error(
-            'WebFetch image requires either a vision-capable active runtime or a configured vision side query runtime.',
+        const visionRuntime = getToolVisionRuntime(context)
+        if (getToolSupportsImageInput(context) === false && !visionRuntime) {
+          return createUnsupportedContentResult(
+            {
+              code: 'unsupported_runtime_capability',
+              source: 'webfetch',
+              url: fetched.url,
+              detectedMediaType: image.mediaType,
+              contentKind: 'image',
+              suggestedNextSteps: [
+                'ask_for_text_alternative',
+                'configure_image_support',
+              ],
+            },
+            `Fetched image ${fetched.url} requires image-capable runtime support`,
           )
         }
 
         if (shouldUseVisionSideQuery(context)) {
           const analysisText = await runVisionSideQuery({
-            runtime: context.visionRuntime!,
+            runtime: visionRuntime!,
             mediaType: image.mediaType,
             data: image.data,
             sourceLabel: `WebFetch ${fetched.url}`,
@@ -819,9 +927,62 @@ export const webFetchTool: Tool<WebFetchToolInput, WebFetchToolOutput> = buildTo
         }
       }
 
-      if (isImageLikeContentType(contentType)) {
-        throw new Error(
-          `WebFetch only supports remote images with media types: ${[...SUPPORTED_REMOTE_IMAGE_MEDIA_TYPES].join(', ')}. Received ${parseMediaType(contentType) || '<unknown>'}.`,
+      if (classified.kind === 'pdf' && getToolSupportsPdfInput(context) === true) {
+        const pdfBytes = Buffer.from(await fetched.arrayBuffer())
+        if (pdfBytes.length > limits.maxImageSourceBytes) {
+          throw new Error(
+            `WebFetch PDF source is too large (${pdfBytes.length} bytes). Limit is ${limits.maxImageSourceBytes} bytes.`,
+          )
+        }
+
+        const filename = getFilenameFromUrl(fetched.url, 'document.pdf')
+        const resultText = buildPdfResultText({
+          url: fetched.url,
+          sizeBytes: pdfBytes.length,
+          filename,
+        })
+
+        return {
+          ok: true,
+          output: {
+            bytes: pdfBytes.length,
+            code: fetched.status,
+            codeText: fetched.statusText,
+            result: resultText,
+            durationMs: Date.now() - start,
+            url: fetched.url,
+            contentType,
+            contentKind: 'pdf',
+            mediaType: 'application/pdf',
+            wasTruncated: false,
+          },
+          content: [
+            {
+              type: 'text',
+              text: resultText,
+            },
+            createPdfBlock(pdfBytes.toString('base64'), filename),
+          ],
+          summary: `Fetched PDF ${fetched.url}`,
+        }
+      }
+
+      if (
+        classified.kind === 'pdf' ||
+        classified.kind === 'office_document' ||
+        classified.kind === 'unknown_binary'
+      ) {
+        return createUnsupportedContentResult(
+          {
+            code: 'unsupported_content_type',
+            source: 'webfetch',
+            url: fetched.url,
+            detectedMediaType: classified.detectedMediaType,
+            detectedExtension: classified.detectedExtension,
+            contentKind: classified.kind,
+            suggestedNextSteps: ['use_skill', 'use_bash_fallback'],
+          },
+          `WebFetch could not directly process ${fetched.url}`,
         )
       }
 

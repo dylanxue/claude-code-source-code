@@ -11,7 +11,7 @@ export function createToolResultAttachmentMessages(
         block.type !== 'tool_result' ||
         !Array.isArray(block.content) ||
         block.content.length === 0 ||
-        !block.content.some(item => item.type === 'image')
+        !block.content.some(item => item.type === 'image' || item.type === 'pdf')
       ) {
         continue
       }
@@ -26,13 +26,23 @@ export function createToolResultAttachmentMessages(
                   text: item.text,
                   ...(item.annotations ? { annotations: item.annotations } : {}),
                 }
-              : {
+              : item.type === 'image'
+              ? {
                   type: 'image' as const,
                   source: {
                     type: 'base64' as const,
                     mediaType: item.source.mediaType,
                     data: item.source.data,
                   },
+                }
+              : {
+                  type: 'pdf' as const,
+                  source: {
+                    type: 'base64' as const,
+                    mediaType: item.source.mediaType,
+                    data: item.source.data,
+                  },
+                  ...(item.filename ? { filename: item.filename } : {}),
                 },
           ),
         ),

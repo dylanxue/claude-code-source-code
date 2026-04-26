@@ -5,7 +5,7 @@ export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume' | 'history'
 
 export type CommonCliOptions = {
   cwd: string
-  model?: string
+  runtime?: string
   provider?: LlmProviderName
   permissionMode?: PermissionMode
   maxIterations?: number

@@ -96,7 +96,11 @@ export function parseInvokedSkillReminderText(
   const sourceLine = lines[2]
   const pathLine = lines[3]
   if (
-    (sourceLine !== 'source: builtin' && sourceLine !== 'source: project') ||
+    (
+      sourceLine !== 'source: builtin' &&
+      sourceLine !== 'source: user' &&
+      sourceLine !== 'source: project'
+    ) ||
     !pathLine?.startsWith('path: ') ||
     lines[4] !== '' ||
     lines[5] !== '# Skill' ||
@@ -115,7 +119,12 @@ export function parseInvokedSkillReminderText(
   return {
     name: lines[6].slice('name: '.length),
     description: lines[7].slice('description: '.length),
-    source: sourceLine === 'source: builtin' ? 'builtin' : 'project',
+    source:
+      sourceLine === 'source: builtin'
+        ? 'builtin'
+        : sourceLine === 'source: user'
+          ? 'user'
+          : 'project',
     path: pathLine.slice('path: '.length),
     prompt,
   }

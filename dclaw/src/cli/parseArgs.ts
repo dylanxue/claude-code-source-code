@@ -1,6 +1,4 @@
 import { resolve } from 'node:path'
-import { SUPPORTED_LLM_PROVIDERS } from '../llm/client.js'
-import type { LlmProviderName } from '../llm/providerNames.js'
 import type { PermissionMode } from '../types/tool.js'
 import type { ParsedCliCommand } from './types.js'
 
@@ -40,8 +38,7 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   const args = [...argv]
   const options = {
     cwd: baseCwd,
-    model: undefined as string | undefined,
-    provider: undefined as LlmProviderName | undefined,
+    runtime: undefined as string | undefined,
     outputFormat: 'text' as 'text' | 'sse',
     permissionMode: undefined as PermissionMode | undefined,
     maxIterations: undefined as number | undefined,
@@ -90,24 +87,9 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
         i = result.nextIndex
         break
       }
-      case '--model': {
+      case '--runtime': {
         const result = takeValue(args, i, arg)
-        options.model = result.value
-        i = result.nextIndex
-        break
-      }
-      case '--provider': {
-        const result = takeValue(args, i, arg)
-        if (
-          !SUPPORTED_LLM_PROVIDERS.includes(
-            result.value as (typeof SUPPORTED_LLM_PROVIDERS)[number],
-          )
-        ) {
-          throw new CliArgumentError(
-            `Unsupported provider: ${result.value}. Supported providers: ${SUPPORTED_LLM_PROVIDERS.join(', ')}`,
-          )
-        }
-        options.provider = result.value as (typeof SUPPORTED_LLM_PROVIDERS)[number]
+        options.runtime = result.value
         i = result.nextIndex
         break
       }
@@ -211,8 +193,7 @@ export function formatHelp(): string {
     'Options:',
     '  -p, --print               Run in headless print mode',
     '  --doctor                  Show environment diagnostics',
-    `  --provider <name>         Select provider (${SUPPORTED_LLM_PROVIDERS.join(', ')})`,
-    '  --model <name>            Override the model name',
+    '  --runtime <name>          Select runtime profile',
     '  --stream                  Stream assistant output as it arrives (default)',
     '  --no-stream               Disable streaming and wait for the final response',
     '  -d, --verbose             Show reasoning, content, and tool-call events',

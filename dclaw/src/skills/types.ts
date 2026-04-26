@@ -1,4 +1,4 @@
-export type SkillSource = 'builtin' | 'project'
+export type SkillSource = 'builtin' | 'user' | 'project'
 export type SkillExecutionContext = 'inline' | 'fork'
 
 export type SkillDefinition = {

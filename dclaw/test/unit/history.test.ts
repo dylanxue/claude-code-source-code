@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { runHistory } from '../../src/cli/history.js'
 import { compactSession } from '../../src/compact/compactSession.js'
+import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { listSessionHistory } from '../../src/session/history.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import {
@@ -309,6 +310,7 @@ test('runHistory prints compact boundary metadata for compacted sessions', async
       model: 'stub-model',
       trigger: 'manual',
       reason: 'user requested /compact',
+      client: new StubLlmClient(),
       env,
     })
 

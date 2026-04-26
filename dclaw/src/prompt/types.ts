@@ -20,11 +20,17 @@ export type PlanPromptContext = {
   taskSummary?: string[]
 }
 
+export type SkillsRuntimePromptContext = {
+  userSkillsDir: string
+  projectSkillsDir: string
+}
+
 export type PromptContext = {
   cwd: string
   provider: string
   model?: string
   mode: PromptMode
+  skillsRuntime?: SkillsRuntimePromptContext
   permissionMode?: PermissionMode
   currentDate?: PromptEnvironmentContext['currentDate']
   environment?: Omit<PromptEnvironmentContext, 'currentDate' | 'gitStatus'>

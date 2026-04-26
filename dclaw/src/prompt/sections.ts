@@ -45,6 +45,13 @@ export function getContextSection(context: PromptContext): string {
     `- mode: ${context.mode}`,
     `- provider: ${context.provider}`,
     `- model: ${context.model ?? 'default'}`,
+    ...(context.skillsRuntime
+      ? [
+          `- skills user dir: ${context.skillsRuntime.userSkillsDir}`,
+          `- skills project dir: ${context.skillsRuntime.projectSkillsDir}`,
+          '- skills note: dclaw only loads skills from builtin, user, and project .dclaw/skills directories; after installing new skills, call ReloadSkills before using them; if the needed skill is already loaded locally, do not reinstall it and use it directly; for external skill search or installation requests, prefer the builtin install-skills skill before using Bash or WebFetch directly',
+        ]
+      : []),
     ...(context.permissionMode
       ? [`- permission mode: ${context.permissionMode}`]
       : []),

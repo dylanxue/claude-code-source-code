@@ -394,10 +394,17 @@ function summarizeToolResultContent(
           type: 'text',
           textPreview: truncateForTrace(block.text, 240),
         }
-      : {
+      : block.type === 'image'
+      ? {
           type: 'image',
           mediaType: block.source.mediaType,
           dataChars: block.source.data.length,
+        }
+      : {
+          type: 'pdf',
+          mediaType: block.source.mediaType,
+          dataChars: block.source.data.length,
+          filename: block.filename,
         },
   )
 }
@@ -495,10 +502,17 @@ function summarizeMessageForTrace(message: Message): Record<string, unknown> {
                   type: 'text',
                   textPreview: truncateForTrace(item.text, 240),
                 }
-              : {
+              : item.type === 'image'
+              ? {
                   type: 'image',
                   mediaType: item.source.mediaType,
                   dataChars: item.source.data.length,
+                }
+              : {
+                  type: 'pdf',
+                  mediaType: item.source.mediaType,
+                  dataChars: item.source.data.length,
+                  filename: item.filename,
                 },
           ) ?? [],
       })),

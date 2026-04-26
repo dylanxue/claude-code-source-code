@@ -29,6 +29,13 @@ function formatImageSummary(count: number): string {
   return count === 1 ? '[image]' : `[${count} images]`
 }
 
+function formatPdfSummary(count: number): string {
+  if (count <= 0) {
+    return ''
+  }
+  return count === 1 ? '[pdf]' : `[${count} pdfs]`
+}
+
 function truncate(value: string, maxLength: number = 240): string {
   return value.length <= maxLength
     ? value
@@ -60,6 +67,13 @@ function formatMessage(
     const imageCount = message.content.filter(
       block => block.type === 'image',
     ).length
+    const pdfCount = message.content.filter(
+      block => block.type === 'pdf',
+    ).length
+    const attachmentSummary = [
+      formatImageSummary(imageCount),
+      formatPdfSummary(pdfCount),
+    ].filter(Boolean).join(' ')
 
     if (text.length > 0) {
       const reminderText = describeSystemReminderText(text)
@@ -69,12 +83,12 @@ function formatMessage(
           ? snapshotText
           : reminderText
           ? truncate(reminderText)
-          : imageCount > 0
-          ? `user: ${truncate(text)} ${formatImageSummary(imageCount)}`
+          : attachmentSummary.length > 0
+          ? `user: ${truncate(text)} ${attachmentSummary}`
           : `user: ${truncate(text)}`,
       )
-    } else if (imageCount > 0) {
-      lines.push(`user: ${formatImageSummary(imageCount)}`)
+    } else if (attachmentSummary.length > 0) {
+      lines.push(`user: ${attachmentSummary}`)
     }
 
     for (const block of message.content) {
@@ -110,16 +124,23 @@ function formatMessage(
     const imageCount = message.content.filter(
       block => block.type === 'image',
     ).length
+    const pdfCount = message.content.filter(
+      block => block.type === 'pdf',
+    ).length
+    const attachmentSummary = [
+      formatImageSummary(imageCount),
+      formatPdfSummary(pdfCount),
+    ].filter(Boolean).join(' ')
     const hasOtherContent = message.content.some(block => block.type !== 'text')
 
     if (text.length > 0) {
       lines.push(
-        imageCount > 0
-          ? `assistant: ${truncate(text)} ${formatImageSummary(imageCount)}`
+        attachmentSummary.length > 0
+          ? `assistant: ${truncate(text)} ${attachmentSummary}`
           : `assistant: ${truncate(text)}`,
       )
-    } else if (imageCount > 0) {
-      lines.push(`assistant: ${formatImageSummary(imageCount)}`)
+    } else if (attachmentSummary.length > 0) {
+      lines.push(`assistant: ${attachmentSummary}`)
     } else if (hasOtherContent) {
       lines.push('assistant:')
     } else {
@@ -167,6 +188,7 @@ function formatMessage(
           )
           break
         case 'image':
+        case 'pdf':
         case 'text':
         case 'tool_result':
           break

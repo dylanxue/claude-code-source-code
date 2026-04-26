@@ -3,6 +3,7 @@ import {
   type ContentBlock,
   type ImageContentBlock,
   type Message,
+  type PdfContentBlock,
 } from '../../types/message.js'
 import { validateImagesForProvider } from '../imageValidation.js'
 import { resolveModelLimits } from '../modelLimits.js'
@@ -23,9 +24,9 @@ import {
   type SseEvent,
 } from '../providerUtils.js'
 import {
-  resolveAnthropicProviderConfig,
   type AnthropicProviderConfig as AnthropicConfig,
 } from '../providerConfig.js'
+import type { ModelCatalogOverrides } from '../config.js'
 import { resolveModelSelection } from '../modelSelection.js'
 import type {
   CreateMessageRequest,
@@ -35,10 +36,7 @@ import type {
   LlmToolDefinition,
 } from '../types.js'
 const ANTHROPIC_VERSION = '2023-06-01'
-export {
-  resolveAnthropicProviderConfig as resolveAnthropicConfig,
-  type AnthropicConfig,
-}
+export { type AnthropicConfig }
 
 type AnthropicMessage = {
   role: 'user' | 'assistant'
@@ -57,6 +55,15 @@ type AnthropicContentBlock =
         media_type: string
         data: string
       }
+    }
+  | {
+      type: 'document'
+      source: {
+        type: 'base64'
+        media_type: 'application/pdf'
+        data: string
+      }
+      title?: string
     }
   | {
       type: 'thinking'
@@ -169,6 +176,7 @@ export type AnthropicLlmClientOptions = {
   apiKey?: string
   baseUrl?: string
   defaultModel?: string
+  modelCatalogOverrides?: ModelCatalogOverrides
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
   maxRetries?: number
@@ -205,6 +213,18 @@ function toAnthropicImageBlock(block: ImageContentBlock): AnthropicContentBlock 
   }
 }
 
+function toAnthropicPdfBlock(block: PdfContentBlock): AnthropicContentBlock {
+  return {
+    type: 'document',
+    source: {
+      type: 'base64',
+      media_type: block.source.mediaType,
+      data: block.source.data,
+    },
+    ...(block.filename ? { title: block.filename } : {}),
+  }
+}
+
 function toAnthropicContentBlock(
   block: ContentBlock,
   role: 'user' | 'assistant',
@@ -220,6 +240,11 @@ function toAnthropicContentBlock(
         throw new Error('Anthropic image blocks are only supported on user messages')
       }
       return toAnthropicImageBlock(block)
+    case 'pdf':
+      if (role !== 'user') {
+        throw new Error('Anthropic PDF blocks are only supported on user messages')
+      }
+      return toAnthropicPdfBlock(block)
     case 'thinking':
       return {
         type: 'thinking',
@@ -333,6 +358,7 @@ export class AnthropicLlmClient implements LlmClient {
   private readonly apiKey?: string
   private readonly baseUrl: string
   private readonly defaultModel?: string
+  private readonly modelCatalogOverrides?: ModelCatalogOverrides
   private readonly fetchImpl: typeof fetch
   private readonly env: NodeJS.ProcessEnv
   private readonly maxRetries: number
@@ -342,10 +368,10 @@ export class AnthropicLlmClient implements LlmClient {
   private readonly nowImpl: () => number
 
   constructor(options: AnthropicLlmClientOptions = {}) {
-    const config = resolveAnthropicProviderConfig(options.env)
-    this.apiKey = options.apiKey ?? config.apiKey
-    this.baseUrl = options.baseUrl ?? config.baseUrl
-    this.defaultModel = options.defaultModel ?? config.defaultModel
+    this.apiKey = options.apiKey
+    this.baseUrl = options.baseUrl ?? 'https://api.anthropic.com'
+    this.defaultModel = options.defaultModel
+    this.modelCatalogOverrides = options.modelCatalogOverrides
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
     this.maxRetries = options.maxRetries ?? getLlmMaxRetries(this.env)
@@ -564,20 +590,23 @@ export class AnthropicLlmClient implements LlmClient {
   } {
     if (!this.apiKey) {
       throw new Error(
-        'Anthropic API key is required. Set ANTHROPIC_API_KEY or DCLAW_ANTHROPIC_API_KEY, or configure ANTHROPIC_API_KEY in .dclaw/config.json.',
+        'Anthropic API key is required. Configure llm.providers.<name>.apiKey in ~/.dclaw/config.json.',
       )
     }
 
     const { model } = resolveModelSelection(request.model, this.defaultModel)
     if (!model) {
       throw new Error(
-        'Anthropic model is required. Pass --model or set ANTHROPIC_MODEL / DCLAW_ANTHROPIC_MODEL.',
+        'Anthropic model is required. Configure llm.runtimes.<name>.primary.model.',
       )
     }
 
     return {
       model,
-      limits: resolveModelLimits('anthropic', model, this.env),
+      limits: resolveModelLimits('anthropic', model, {
+        env: this.env,
+        overrides: this.modelCatalogOverrides,
+      }),
     }
   }
 

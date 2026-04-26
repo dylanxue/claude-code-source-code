@@ -6,7 +6,7 @@ import {
   type QueryTraceSink,
   shouldEnableQueryTrace,
 } from '../core/queryTrace.js'
-import { createLlmClient } from '../llm/client.js'
+import { loadResolvedLlmConfig } from '../llm/config.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import {
   formatDclawMdLoadOrder,
@@ -29,28 +29,21 @@ import { loadTaskBoardForSession } from '../tasks/store.js'
 import { getCurrentTask } from '../tasks/taskState.js'
 import { createDefaultToolRegistry } from '../tools/index.js'
 import type { Message } from '../types/message.js'
-import type {
-  PermissionMode,
-  VisionRuntime,
-} from '../types/tool.js'
+import type { PermissionMode } from '../types/tool.js'
 import { appendSessionMessages } from '../session/store.js'
+import { getDclawHomeDir } from '../session/paths.js'
 import { askUserQuestionsInteractively } from './askUserQuestions.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import {
   resolvePermissionMode,
   type PermissionModeSource,
 } from './permissionModeConfig.js'
-import {
-  resolveMaxIterations,
-} from './maxIterationsConfig.js'
+import { resolveMaxIterations } from './maxIterationsConfig.js'
 import type { CommonCliOptions } from './types.js'
-import type { LlmProviderName } from '../llm/providerNames.js'
-import { resolveModelCapabilities } from '../llm/modelLimits.js'
+import { join } from 'node:path'
 
 export type PreparedCliRuntime = {
   runtime: ReturnType<typeof resolveLlmRuntimeConfig>
-  supportsVisionInput: boolean
-  visionRuntime?: VisionRuntime
   permissionMode: PermissionMode
   permissionModeSource: PermissionModeSource
   dclawMdEntries: Awaited<ReturnType<typeof loadDclawMdEntries>>
@@ -60,57 +53,14 @@ export type PreparedCliRuntime = {
   drainBackgroundWork: (timeoutMs?: number) => Promise<void>
 }
 
-function normalizeProviderName(
-  value: string | undefined,
-): LlmProviderName | undefined {
-  const normalized = value?.trim().toLowerCase()
-  switch (normalized) {
-    case 'anthropic':
-    case 'anthropic-compatible':
-      return 'anthropic'
-    case 'openai':
-    case 'openai-compatible':
-      return 'openai'
-    case 'stub':
-      return 'stub'
-    default:
-      return undefined
-  }
-}
-
-function resolveVisionRuntime(
-  env: NodeJS.ProcessEnv,
-): VisionRuntime | undefined {
-  const provider = normalizeProviderName(
-    env.DCLAW_VISION_PROVIDER ?? env.VISION_PROVIDER,
-  )
-  if (!provider) {
-    return undefined
-  }
-
-  const model =
-    env.DCLAW_VISION_MODEL?.trim() ||
-    env.VISION_MODEL?.trim() ||
-    undefined
-
-  return {
-    client: createLlmClient(provider, env),
-    provider,
-    model,
-  }
-}
-
 export async function prepareCliRuntime(
   options: CommonCliOptions,
   mode: PromptMode,
   initialMessages: Message[] = [],
 ): Promise<PreparedCliRuntime> {
   const configured = await buildConfigAwareEnvWithSources(options.cwd)
-  const runtime = resolveLlmRuntimeConfig(
-    options,
-    configured.env,
-    key => configured.keySources[key],
-  )
+  const llmConfig = await loadResolvedLlmConfig(options.cwd, configured.env)
+  const runtime = resolveLlmRuntimeConfig(options, llmConfig, configured.env)
   const resolvedPermissionMode = await resolvePermissionMode(options, configured.env)
   const resolvedMaxIterations = await resolveMaxIterations(
     options,
@@ -119,7 +69,7 @@ export async function prepareCliRuntime(
   )
   const dclawMdEntries = await loadDclawMdEntries(options.cwd)
   const promptEnvironment = await loadPromptEnvironmentContext(options.cwd)
-  const skillRegistry = createSkillRegistry(
+  let skillRegistry = createSkillRegistry(
     await loadSkills({
       cwd: options.cwd,
     }),
@@ -129,13 +79,28 @@ export async function prepareCliRuntime(
 
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
-  const client = createLlmClient(runtime.provider, configured.env)
-  const supportsVisionInput = resolveModelCapabilities(
-    runtime.provider,
-    runtime.model,
-    configured.env,
-  ).supportsVisionInput
-  const visionRuntime = resolveVisionRuntime(configured.env)
+  const client = runtime.primary.client
+  const reloadSkills = async () => {
+    skillRegistry = createSkillRegistry(
+      await loadSkills({
+        cwd: options.cwd,
+      }),
+    )
+
+    toolContext.skillRegistry = skillRegistry
+    if (toolContext.agentRuntime) {
+      toolContext.agentRuntime.skillRegistry = skillRegistry
+    }
+
+    return {
+      reloaded: true,
+      totalSkills: skillRegistry.list().length,
+      skillNames: skillRegistry
+        .list()
+        .map(skill => skill.name)
+        .sort((left, right) => left.localeCompare(right)),
+    }
+  }
 
   const resolveSystemPromptForUserPrompt = async (state: {
     sessionId?: string
@@ -155,7 +120,7 @@ export async function prepareCliRuntime(
       configured.env,
       {
         client,
-        model: state.model ?? runtime.model,
+        model: state.model ?? runtime.primary.model,
         queryTraceSink: state.queryTraceSink,
       },
     )
@@ -171,9 +136,13 @@ export async function prepareCliRuntime(
     })
     const promptContext = assemblePromptContext({
       cwd: options.cwd,
-      provider: runtime.provider,
-      model: state.model ?? runtime.model,
+      provider: runtime.primary.provider,
+      model: state.model ?? runtime.primary.model,
       mode,
+      skillsRuntime: {
+        userSkillsDir: join(getDclawHomeDir(configured.env), 'skills'),
+        projectSkillsDir: join(options.cwd, '.dclaw', 'skills'),
+      },
       permissionMode: state.permissionMode,
       currentDate: promptEnvironment.currentDate,
       environment: {
@@ -207,7 +176,7 @@ export async function prepareCliRuntime(
 
   const memoryExtractor = createAutomaticMemoryExtractor({
     client,
-    model: runtime.model,
+    model: runtime.primary.model,
     workspaceRoot: options.cwd,
     env: configured.env,
   })
@@ -232,11 +201,52 @@ export async function prepareCliRuntime(
     ).catch(() => undefined)
   }
 
+  const toolContext = {
+    cwd: options.cwd,
+    availableTools: toolRegistry.list().map(tool => tool.name),
+    permissionMode: resolvedPermissionMode.permissionMode,
+    planFilePath: undefined,
+    readState: new Map(),
+    skillRegistry,
+    invokedSkills,
+    runtimeProfile: runtime,
+    reloadSkills,
+    agentRuntime: {
+      client,
+      provider: runtime.primary.provider,
+      model: runtime.primary.model,
+      cwd: options.cwd,
+      runtimeProfile: runtime,
+      permissionMode: resolvedPermissionMode.permissionMode,
+      availableTools: toolRegistry.list().map(tool => tool.name),
+      planFilePath: undefined,
+      toolRegistry,
+      skillRegistry,
+      reloadSkills,
+      modelLimitsEnv: configured.env,
+      systemPromptResolver: resolveSystemPromptForUserPrompt,
+      dclawMdEntries,
+      env: configured.env,
+      createQueryTraceSink: async (sessionId: string, tracePath?: string) => {
+        if (!queryTraceEnabled) {
+          return undefined
+        }
+
+        return createFileQueryTraceSink(
+          tracePath ?? createQueryTraceFilePath(configured.env, sessionId),
+          sessionId,
+        )
+      },
+    },
+    askUserQuestions: askUserQuestionsInteractively,
+  }
+
   engine = new QueryEngine({
     client,
-    provider: runtime.provider,
+    provider: runtime.primary.provider,
     modelLimitsEnv: configured.env,
-    model: runtime.model,
+    modelCatalogOverrides: llmConfig.modelCatalogOverrides,
+    model: runtime.primary.model,
     systemPromptResolver: resolveSystemPromptForUserPrompt,
     turnCompleteHook: async state => {
       memoryExtractor.scheduleExtractTurn({
@@ -260,45 +270,7 @@ export async function prepareCliRuntime(
     },
     dclawMdEntries,
     toolRegistry,
-    toolContext: {
-      cwd: options.cwd,
-      availableTools: toolRegistry.list().map(tool => tool.name),
-      permissionMode: resolvedPermissionMode.permissionMode,
-      planFilePath: undefined,
-      readState: new Map(),
-      skillRegistry,
-      invokedSkills,
-      agentRuntime: {
-        client,
-        provider: runtime.provider,
-        model: runtime.model,
-        cwd: options.cwd,
-        supportsVisionInput,
-        visionRuntime,
-        permissionMode: resolvedPermissionMode.permissionMode,
-        availableTools: toolRegistry.list().map(tool => tool.name),
-        planFilePath: undefined,
-        toolRegistry,
-        skillRegistry,
-        modelLimitsEnv: configured.env,
-        systemPromptResolver: resolveSystemPromptForUserPrompt,
-        dclawMdEntries,
-        env: configured.env,
-        createQueryTraceSink: async (sessionId: string, tracePath?: string) => {
-          if (!queryTraceEnabled) {
-            return undefined
-          }
-
-          return createFileQueryTraceSink(
-            tracePath ?? createQueryTraceFilePath(configured.env, sessionId),
-            sessionId,
-          )
-        },
-      },
-      supportsVisionInput,
-      visionRuntime,
-      askUserQuestions: askUserQuestionsInteractively,
-    },
+    toolContext,
     initialMessages,
     maxIterations: resolvedMaxIterations.maxIterations,
     sessionMode: mode === 'print' ? 'print' : 'interactive',
@@ -306,8 +278,6 @@ export async function prepareCliRuntime(
 
   return {
     runtime,
-    supportsVisionInput,
-    visionRuntime,
     permissionMode: resolvedPermissionMode.permissionMode,
     permissionModeSource: resolvedPermissionMode.permissionModeSource,
     dclawMdEntries,

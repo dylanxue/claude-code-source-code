@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getDclawHomeDir } from '../session/paths.js'
 import type {
   LoadedSkill,
   SkillFrontmatter,
@@ -10,6 +11,7 @@ import type {
 const FRONTMATTER_DELIMITER = '---'
 const MARKDOWN_EXTENSION = '.md'
 const PROJECT_SKILLS_DIRECTORY = join('.dclaw', 'skills')
+const USER_SKILLS_DIRECTORY = 'skills'
 
 export const DEFAULT_BUILTIN_SKILLS_DIR = fileURLToPath(
   new URL('./builtin', import.meta.url),
@@ -217,14 +219,20 @@ function listAncestorDirectories(cwd: string): string[] {
 
 export async function findProjectSkillDirectories(
   cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<string[]> {
   const directories = listAncestorDirectories(cwd)
   const found: string[] = []
+  const userSkillsDirectory = resolve(getDclawHomeDir(env), USER_SKILLS_DIRECTORY)
 
   for (const directory of directories) {
     const candidate = join(directory, PROJECT_SKILLS_DIRECTORY)
-    if (await isDirectory(candidate)) {
-      found.push(resolve(candidate))
+    const resolvedCandidate = resolve(candidate)
+    if (
+      resolvedCandidate !== userSkillsDirectory &&
+      await isDirectory(resolvedCandidate)
+    ) {
+      found.push(resolvedCandidate)
     }
   }
 
@@ -237,8 +245,20 @@ export async function loadBuiltinSkills(
   return loadSkillsFromDirectory(resolve(builtinSkillsDir), 'builtin')
 }
 
-export async function loadProjectSkills(cwd: string): Promise<LoadedSkill[]> {
-  const directories = await findProjectSkillDirectories(cwd)
+export async function loadUserSkills(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<LoadedSkill[]> {
+  return loadSkillsFromDirectory(
+    resolve(getDclawHomeDir(env), USER_SKILLS_DIRECTORY),
+    'user',
+  )
+}
+
+export async function loadProjectSkills(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<LoadedSkill[]> {
+  const directories = await findProjectSkillDirectories(cwd, env)
   const skills: LoadedSkill[] = []
 
   for (const directory of directories) {
@@ -251,9 +271,11 @@ export async function loadProjectSkills(cwd: string): Promise<LoadedSkill[]> {
 export async function loadSkills(input: {
   cwd: string
   builtinSkillsDir?: string
+  env?: NodeJS.ProcessEnv
 }): Promise<LoadedSkill[]> {
   const builtinSkills = await loadBuiltinSkills(input.builtinSkillsDir)
-  const projectSkills = await loadProjectSkills(input.cwd)
+  const userSkills = await loadUserSkills(input.env)
+  const projectSkills = await loadProjectSkills(input.cwd, input.env)
 
-  return [...builtinSkills, ...projectSkills]
+  return [...builtinSkills, ...userSkills, ...projectSkills]
 }

@@ -1,13 +1,13 @@
 import type {
   ImageContentBlock,
+  PdfContentBlock,
   Message,
   TextContentBlock,
 } from './message.js'
 import type { AgentToolRuntime } from '../agent/types.js'
 import type { SkillRegistry } from '../skills/registry.js'
 import type { InvokedSkillState } from '../skills/state.js'
-import type { LlmClient } from '../llm/types.js'
-import type { LlmProviderName } from '../llm/providerNames.js'
+import type { ResolvedLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import type { QueryTraceSink } from '../core/queryTrace.js'
 
 export type PermissionMode =
@@ -16,7 +16,7 @@ export type PermissionMode =
   | 'bypass-permissions'
   | 'plan'
 
-export type ToolResultContent = TextContentBlock | ImageContentBlock
+export type ToolResultContent = TextContentBlock | ImageContentBlock | PdfContentBlock
 
 export type ToolResult<T = unknown> = {
   ok: boolean
@@ -78,10 +78,15 @@ export type ToolUseIntent = {
   text: string
 }
 
-export type VisionRuntime = {
-  client: LlmClient
-  provider: LlmProviderName
-  model?: string
+export type ToolRuntimeProfile = Pick<
+  ResolvedLlmRuntimeConfig,
+  'primary' | 'imageFallback'
+>
+
+export type ReloadSkillsResult = {
+  reloaded: boolean
+  totalSkills: number
+  skillNames: string[]
 }
 
 export type ToolContext = {
@@ -99,10 +104,10 @@ export type ToolContext = {
   currentUserRequest?: string
   toolUseIntent?: ToolUseIntent
   queryTraceSink?: QueryTraceSink
-  supportsVisionInput?: boolean
-  visionRuntime?: VisionRuntime
+  runtimeProfile?: ToolRuntimeProfile
   setPermissionMode?: (permissionMode: PermissionMode) => void
   setPlanFilePath?: (planFilePath: string | undefined) => void
+  reloadSkills?: () => Promise<ReloadSkillsResult>
   askUserQuestions?: (
     questions: AskUserQuestion[],
     options?: {
@@ -110,4 +115,25 @@ export type ToolContext = {
       allowPreviewActions?: boolean
     },
   ) => Promise<Record<string, string> | AskUserQuestionHostResult>
+}
+
+export function getToolSupportsImageInput(context: {
+  runtimeProfile?: ToolRuntimeProfile
+}): boolean | undefined {
+  return context.runtimeProfile?.primary.modelCapabilities.supportsImageInput
+}
+
+export function getToolSupportsPdfInput(context: {
+  runtimeProfile?: ToolRuntimeProfile
+}): boolean | undefined {
+  return context.runtimeProfile?.primary.modelCapabilities.supportsPdfInput
+}
+
+export function getToolVisionRuntime(context: {
+  runtimeProfile?: ToolRuntimeProfile
+}): ToolRuntimeProfile['imageFallback'] | undefined {
+  if (context.runtimeProfile?.imageFallback) {
+    return context.runtimeProfile.imageFallback
+  }
+  return undefined
 }

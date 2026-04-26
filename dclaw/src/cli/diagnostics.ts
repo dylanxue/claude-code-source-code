@@ -1,6 +1,7 @@
-import { existsSync } from 'node:fs'
 import {
-  getModelLimitsConfigPath,
+  canonicalizeModelName,
+  type ModelResolutionOptions,
+  resolveModelCatalogEntry,
   resolveModelCapabilities,
   resolveModelLimits,
 } from '../llm/modelLimits.js'
@@ -15,6 +16,7 @@ import {
   type RuntimeConfigSource,
 } from '../llm/providerUtils.js'
 import type { LlmProviderName } from '../llm/providerNames.js'
+import type { ResolvedModelRuntimeConfig } from '../llm/runtimeConfig.js'
 
 export type DiagnosticEnvSource = Exclude<RuntimeConfigSource, 'env' | 'default'>
 
@@ -23,17 +25,21 @@ export function statusLine(label: string, value: string): string {
 }
 
 export function getLimitsConfigStatus(): string {
-  const filePath = getModelLimitsConfigPath()
-  return existsSync(filePath) ? filePath : `not found (${filePath})`
+  return 'built-in + llm.modelCatalogOverrides'
 }
 
 export function appendModelLimitLines(
   lines: string[],
   provider: 'anthropic' | 'openai',
   model: string,
+  options?: ModelResolutionOptions,
 ): void {
-  const limits = resolveModelLimits(provider, model)
-  const capabilities = resolveModelCapabilities(provider, model)
+  const canonicalModel = canonicalizeModelName(model)
+  const catalogEntry = resolveModelCatalogEntry(provider, model, options)
+  const limits = resolveModelLimits(provider, model, options)
+  const capabilities = resolveModelCapabilities(provider, model, options)
+  lines.push(statusLine('canonical model', canonicalModel))
+  lines.push(statusLine('catalog match', catalogEntry?.match ?? 'none'))
   lines.push(statusLine('context window', String(limits.contextWindow)))
   lines.push(statusLine('max output', String(limits.maxOutputTokens)))
   lines.push(
@@ -41,57 +47,22 @@ export function appendModelLimitLines(
   )
   lines.push(
     statusLine(
-      'vision input',
-      capabilities.supportsVisionInput ? 'supported' : 'not supported',
+      'image input',
+      capabilities.supportsImageInput ? 'supported' : 'not supported',
+    ),
+  )
+  lines.push(
+    statusLine(
+      'pdf input',
+      capabilities.supportsPdfInput ? 'supported' : 'not supported',
     ),
   )
 }
 
-function normalizeVisionProvider(
-  value: string | undefined,
-): LlmProviderName | undefined {
-  const normalized = value?.trim().toLowerCase()
-  switch (normalized) {
-    case 'anthropic':
-    case 'anthropic-compatible':
-      return 'anthropic'
-    case 'openai':
-    case 'openai-compatible':
-      return 'openai'
-    case 'stub':
-      return 'stub'
-    default:
-      return undefined
-  }
-}
-
-export function getConfiguredVisionRuntimeStatus(
-  env: NodeJS.ProcessEnv,
-): {
-  provider?: LlmProviderName
-  model?: string
-} | undefined {
-  const provider = normalizeVisionProvider(
-    env.DCLAW_VISION_PROVIDER ?? env.VISION_PROVIDER,
-  )
-  if (!provider) {
-    return undefined
-  }
-
-  return {
-    provider,
-    model:
-      env.DCLAW_VISION_MODEL?.trim() ||
-      env.VISION_MODEL?.trim() ||
-      undefined,
-  }
-}
-
 export function appendVisionRuntimeLines(
   lines: string[],
-  env: NodeJS.ProcessEnv,
+  runtime: ResolvedModelRuntimeConfig | undefined,
 ): void {
-  const runtime = getConfiguredVisionRuntimeStatus(env)
   if (!runtime) {
     lines.push(statusLine('vision side query', 'not configured'))
     return

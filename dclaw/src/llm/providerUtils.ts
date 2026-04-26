@@ -6,9 +6,9 @@ import {
 
 type ErrorMessageShape = {
   error?: {
-    message?: string
-    type?: string
-    code?: string
+    message?: unknown
+    type?: unknown
+    code?: unknown
   }
 }
 
@@ -167,17 +167,33 @@ export function stringifyJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
+function coerceHttpErrorToken(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  return undefined
+}
+
 export async function getHttpErrorDetails(
   response: Response,
 ): Promise<HttpErrorDetails> {
   try {
     const text = await response.text()
     const parsed = JSON.parse(text) as ErrorMessageShape
-    if (parsed.error?.message) {
+    const message = coerceHttpErrorToken(parsed.error?.message)
+    const type = coerceHttpErrorToken(parsed.error?.type)
+    const code = coerceHttpErrorToken(parsed.error?.code)
+    if (message) {
       return {
-        message: parsed.error.message,
-        ...(parsed.error.type ? { type: parsed.error.type } : {}),
-        ...(parsed.error.code ? { code: parsed.error.code } : {}),
+        message,
+        ...(type ? { type } : {}),
+        ...(code ? { code } : {}),
       }
     }
     if (text.trim().length > 0) {
@@ -508,7 +524,11 @@ function getShouldRetryDirective(
 }
 
 function normalizeErrorToken(value: string | undefined): string | undefined {
-  return value?.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  return value.trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
 
 function includesAny(text: string, needles: string[]): boolean {
@@ -548,7 +568,7 @@ function buildUserMessage(
     case 'model_not_found':
       return `The selected model is not available on ${providerLabel}. Check the model name and account access.`
     case 'invalid_model':
-      return `The model setting sent to ${providerLabel} is invalid. Check --model and the provider's supported model list.`
+      return `The model setting sent to ${providerLabel} is invalid. Check llm.runtimes.<name>.primary.model and the provider's supported model list.`
     case 'prompt_too_long':
       return `The request sent to ${providerLabel} is too large. Reduce prompt or tool output size, or compact context before retrying.`
     case 'tool_use_mismatch':

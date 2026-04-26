@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { runResume } from '../../src/cli/resume.js'
 import { compactSession } from '../../src/compact/compactSession.js'
+import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import {
   ensureTaskBoardPlanFile,
@@ -158,6 +159,7 @@ test('runResume shows compact boundary metadata for compacted sessions', async (
       model: 'stub-model',
       trigger: 'manual',
       reason: 'user requested /compact',
+      client: new StubLlmClient(),
       env,
     })
 

@@ -98,10 +98,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     return
   }
 
-  const {
+  let {
     runtime,
-    supportsVisionInput,
-    visionRuntime,
     dclawMdEntries,
     toolRegistry,
     engine,
@@ -122,6 +120,53 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     modelSource: runtime.modelSource,
     permissionMode,
     permissionModeSource,
+  }
+  const replOptions = { ...command.options }
+  const replContext = {
+    engine,
+    options: replOptions,
+    session: replSession,
+    rotateQueryTrace,
+    switchRuntime: async (runtimeName: string) => {
+      await drainBackgroundWork()
+      const nextOptions = {
+        ...replOptions,
+        runtime: runtimeName,
+        permissionMode: replSession.permissionMode as typeof replOptions.permissionMode,
+      }
+      const prepared = await prepareCliRuntime(
+        nextOptions,
+        'interactive',
+        replContext.engine.getMessages(),
+      )
+      const nextEngine = prepared.engine
+      nextEngine.setSessionId(replSession.sessionId)
+      nextEngine.setPlanFilePath(replContext.engine.getPlanFilePath())
+      nextEngine.setPermissionMode(replSession.permissionMode as typeof permissionMode)
+      const nextQueryTracePath =
+        await prepared.rotateQueryTrace(replSession.sessionId)
+
+      runtime = prepared.runtime
+      dclawMdEntries = prepared.dclawMdEntries
+      toolRegistry = prepared.toolRegistry
+      engine = nextEngine
+      rotateQueryTrace = prepared.rotateQueryTrace
+      drainBackgroundWork = prepared.drainBackgroundWork
+      permissionMode = replSession.permissionMode as typeof permissionMode
+      permissionModeSource = replSession.permissionModeSource as typeof permissionModeSource
+      replOptions.runtime = runtimeName
+      replContext.engine = nextEngine
+      replContext.rotateQueryTrace = prepared.rotateQueryTrace
+      replSession.provider = runtime.provider
+      replSession.providerSource = runtime.providerSource
+      replSession.model = runtime.model
+      replSession.modelSource = runtime.modelSource
+
+      return {
+        runtime,
+        queryTracePath: nextQueryTracePath,
+      }
+    },
   }
   engine.setSessionId(replSession.sessionId)
   const queryTracePath = await rotateQueryTrace(replSession.sessionId)
@@ -144,8 +189,14 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     `provider source: ${runtime.providerSource}`,
     `model: ${runtime.model ?? 'default'}`,
     `model source: ${runtime.modelSource}`,
-    `vision input: ${supportsVisionInput ? 'supported' : 'not supported'}`,
-    `vision side query: ${visionRuntime ? `${visionRuntime.provider} / ${visionRuntime.model ?? 'default'}` : 'not configured'}`,
+    ...(runtime.model && runtime.canonicalModel && runtime.canonicalModel !== runtime.model
+      ? [`model canonicalized to: ${runtime.canonicalModel}`]
+      : []),
+    ...(runtime.model
+      ? [`catalog match: ${runtime.catalogMatch ?? 'none'}`]
+      : []),
+    `image input: ${runtime.primary.modelCapabilities.supportsImageInput ? 'supported' : 'not supported'}`,
+    `vision side query: ${runtime.imageFallback ? `${runtime.imageFallback.provider} / ${runtime.imageFallback.model ?? 'default'}` : 'not configured'}`,
     `permission mode: ${replSession.permissionMode}`,
     `permission mode source: ${replSession.permissionModeSource}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
@@ -226,30 +277,46 @@ export async function runResume(command: ResumeCommand): Promise<void> {
 
   await runInteractiveReplLoop({
     initialPrompt: command.prompt,
+    async onImmediatePrompt(prompt, control) {
+      try {
+        return await maybeHandleReplCommand(prompt, {
+          engine: replContext.engine,
+          options: replContext.options,
+          session: replContext.session,
+          rotateQueryTrace: replContext.rotateQueryTrace,
+          switchRuntime: replContext.switchRuntime,
+        }, {
+          writeOutput: control.writeOutput,
+        })
+      } finally {
+        control.flushOutput()
+      }
+    },
     onPrompt: async (prompt, control) => {
       if (
         await maybeHandleReplCommand(prompt, {
-          engine,
-          options: command.options,
-          session: replSession,
-          rotateQueryTrace,
+          engine: replContext.engine,
+          options: replContext.options,
+          session: replContext.session,
+          rotateQueryTrace: replContext.rotateQueryTrace,
+          switchRuntime: replContext.switchRuntime,
         })
       ) {
         return
       }
 
       const result = await runInteractiveSessionPrompt({
-        engine,
+        engine: replContext.engine,
         sessionId: replSession.sessionId,
         prompt,
-        stream: command.options.stream,
-        verbose: command.options.verbose,
+        stream: replContext.options.stream,
+        verbose: replContext.options.verbose,
         signal: control.signal,
         writeOutput: control.writeOutput,
         flushOutput: control.flushOutput,
       })
       replSession.sessionId = result.sessionId
-      const runtimePermissionMode = engine.getPermissionMode()
+      const runtimePermissionMode = replContext.engine.getPermissionMode()
       if (runtimePermissionMode !== replSession.permissionMode) {
         replSession.permissionMode = runtimePermissionMode
         replSession.permissionModeSource = 'tool_runtime'
@@ -265,26 +332,22 @@ export async function runResume(command: ResumeCommand): Promise<void> {
       process.stderr.write(output.text)
     },
     async onBusyPrompt(prompt, busy) {
-      const originalWrite = process.stdout.write.bind(process.stdout)
-      process.stdout.write = ((chunk: string | Uint8Array) => {
-        busy.writeOutput(
-          typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-        )
-        return true
-      }) as typeof process.stdout.write
       try {
         return await maybeHandleReplCommand(
           prompt,
           {
-            engine,
-            options: command.options,
-            session: replSession,
-            rotateQueryTrace,
+            engine: replContext.engine,
+            options: replContext.options,
+            session: replContext.session,
+            rotateQueryTrace: replContext.rotateQueryTrace,
+            switchRuntime: replContext.switchRuntime,
           },
-          { allowDuringActivePrompt: true },
+          {
+            allowDuringActivePrompt: true,
+            writeOutput: busy.writeOutput,
+          },
         )
       } finally {
-        process.stdout.write = originalWrite as typeof process.stdout.write
         busy.flushOutput()
       }
     },

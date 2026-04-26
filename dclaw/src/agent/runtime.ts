@@ -84,9 +84,9 @@ export function createSubagentToolContext(
       parentSessionId: input.agent.parentSessionId,
       currentAgentId: input.agent.agentId,
     },
-    supportsVisionInput: input.parent.supportsVisionInput,
-    visionRuntime: input.parent.visionRuntime,
+    runtimeProfile: input.parent.runtimeProfile,
     skillRegistry: input.parent.skillRegistry,
+    reloadSkills: input.parent.reloadSkills,
     invokedSkills: createInvokedSkillState(),
   }
 }

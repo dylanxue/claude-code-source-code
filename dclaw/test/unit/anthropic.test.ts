@@ -5,36 +5,30 @@ import test from 'node:test'
 import {
   createImageBlock,
   createMessage,
+  createPdfBlock,
   createTextMessage,
   createToolResultMessage,
 } from '../../src/types/message.js'
 import type { PersistedToolResultOutput } from '../../src/core/toolResultBudget.js'
-import {
-  AnthropicLlmClient,
-  resolveAnthropicConfig,
-} from '../../src/llm/providers/anthropic.js'
+import { AnthropicLlmClient } from '../../src/llm/providers/anthropic.js'
+import { resolveProviderConfig } from '../../src/llm/providerConfig.js'
 import {
   getProviderErrorKind,
   getProviderErrorSubtype,
   RetryableHttpError,
 } from '../../src/llm/providerUtils.js'
 
-test('resolveAnthropicConfig reads dclaw env vars first', () => {
-  const config = resolveAnthropicConfig({
-    ANTHROPIC_API_KEY: 'fallback-key',
-    ANTHROPIC_BASE_URL: 'https://fallback.example.com/',
-    ANTHROPIC_MODEL: 'fallback-model',
-    DCLAW_ANTHROPIC_API_KEY: 'primary-key',
-    DCLAW_ANTHROPIC_BASE_URL: 'https://primary.example.com/',
-    DCLAW_ANTHROPIC_MODEL: 'primary-model',
+test('resolveProviderConfig builds anthropic provider config from a typed profile', () => {
+  const config = resolveProviderConfig({
+    type: 'anthropic',
+    apiKey: 'primary-key',
+    baseURL: 'https://primary.example.com/',
   })
 
   assert.deepEqual(config, {
     provider: 'anthropic',
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com',
-    defaultModel: 'primary-model',
-    defaultModelSource: 'env',
   })
 })
 
@@ -351,6 +345,77 @@ test('AnthropicLlmClient maps user image blocks to Anthropic image content', asy
   } finally {
     server.closeAllConnections()
     await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
+test('AnthropicLlmClient maps user PDF blocks to Anthropic document content', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'ok' }],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new AnthropicLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+    })
+
+    await client.createMessage({
+      model: 'claude-sonnet-4-5',
+      messages: [
+        createMessage('user', [
+          { type: 'text', text: 'Summarize this PDF' },
+          createPdfBlock('JVBERi0xLjc=', 'report.pdf'),
+        ]),
+      ],
+    })
+
+    assert.deepEqual(capturedBody, {
+      model: 'claude-sonnet-4-5',
+      max_tokens: 32000,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Summarize this PDF' },
+            {
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: 'JVBERi0xLjc=',
+              },
+              title: 'report.pdf',
+            },
+          ],
+        },
+      ],
+    })
+  } finally {
+    server.close()
+    await once(server, 'close')
   }
 })
 

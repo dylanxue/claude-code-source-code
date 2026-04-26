@@ -82,6 +82,10 @@ test('buildSystemPrompt includes current date, environment, and git status conte
       provider: 'stub',
       model: 'stub-model',
       mode: 'interactive',
+      skillsRuntime: {
+        userSkillsDir: '/Users/test/.dclaw/skills',
+        projectSkillsDir: '/tmp/project/.dclaw/skills',
+      },
       permissionMode: 'accept-edits',
       currentDate: '2026-04-22',
       environment: {
@@ -101,6 +105,12 @@ test('buildSystemPrompt includes current date, environment, and git status conte
   assert.match(prompt, /platform: darwin/)
   assert.match(prompt, /shell: bash/)
   assert.match(prompt, /os version: Darwin 25.0.0/)
+  assert.match(prompt, /skills user dir: \/Users\/test\/\.dclaw\/skills/)
+  assert.match(prompt, /skills project dir: \/tmp\/project\/\.dclaw\/skills/)
+  assert.match(
+    prompt,
+    /skills note: dclaw only loads skills from builtin, user, and project \.dclaw\/skills directories; after installing new skills, call ReloadSkills before using them; if the needed skill is already loaded locally, do not reinstall it and use it directly; for external skill search or installation requests, prefer the builtin install-skills skill before using Bash or WebFetch directly/i,
+  )
   assert.match(prompt, /# Git Status/)
   assert.match(prompt, /## main/)
   assert.match(prompt, /M src\/app\.ts/)

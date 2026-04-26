@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runDoctor } from '../../src/cli/doctor.js'
+import { getDclawConfigPath } from '../../src/session/paths.js'
 
 test('runDoctor prints effective retry and timeout diagnostics with sources', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'dclaw-doctor-'))
@@ -14,13 +15,43 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
 
   try {
     await mkdir(join(cwd, '.dclaw'), { recursive: true })
+    await mkdir(join(homeDir, '.dclaw'), { recursive: true })
+    await writeFile(
+      getDclawConfigPath({ HOME: homeDir }),
+      JSON.stringify({
+        llm: {
+          providers: {
+            main: {
+              type: 'openai',
+              apiKey: 'user-key',
+              baseURL: 'https://example.test/v1',
+            },
+          },
+        },
+      }),
+      'utf8',
+    )
     await writeFile(
       join(cwd, '.dclaw', 'config.json'),
       JSON.stringify({
-        OPENAI_MODEL: 'kimi-k2.5',
         DCLAW_LLM_MAX_RETRIES: 7,
         DCLAW_ENABLE_STREAM_WATCHDOG: false,
         maxIterations: 9,
+        llm: {
+          defaultRuntime: 'workspace-default',
+          runtimes: {
+            'workspace-default': {
+              primary: {
+                providerRef: 'main',
+                model: 'anthropic/claude-opus-4.7',
+              },
+              imageFallback: {
+                providerRef: 'main',
+                model: 'gpt-4.1-mini',
+              },
+            },
+          },
+        },
       }),
       'utf8',
     )
@@ -30,8 +61,6 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
       PATH: originalEnv.PATH,
       DCLAW_LLM_TIMEOUT_MS: '12345',
       DCLAW_STREAM_IDLE_TIMEOUT_MS: '45678',
-      DCLAW_VISION_PROVIDER: 'openai',
-      DCLAW_VISION_MODEL: 'gpt-4.1-mini',
     }
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -44,7 +73,6 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
       mode: 'doctor',
       options: {
         cwd,
-        provider: 'openai',
         stream: false,
         verbose: false,
         outputFormat: 'text',
@@ -71,4 +99,7 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
   assert.match(text, /vision side query\s+configured/)
   assert.match(text, /vision provider\s+openai/)
   assert.match(text, /vision model\s+gpt-4\.1-mini/)
+  assert.match(text, /runtime\s+workspace-default/)
+  assert.match(text, /canonical model\s+claude-opus-4-7/)
+  assert.match(text, /catalog match\s+claude-opus-4-7/)
 })

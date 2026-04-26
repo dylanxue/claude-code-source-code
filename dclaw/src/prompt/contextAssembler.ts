@@ -6,6 +6,7 @@ export type PromptContextInput = {
   provider: string
   model?: string
   mode: PromptMode
+  skillsRuntime?: PromptContext['skillsRuntime']
   permissionMode?: PromptContext['permissionMode']
   currentDate?: PromptEnvironmentContext['currentDate']
   environment?: PromptContext['environment']
@@ -23,6 +24,7 @@ export function assemblePromptContext(
     provider: input.provider,
     model: input.model,
     mode: input.mode,
+    skillsRuntime: input.skillsRuntime,
     permissionMode: input.permissionMode,
     currentDate: input.currentDate,
     environment: input.environment,

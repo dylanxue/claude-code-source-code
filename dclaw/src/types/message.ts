@@ -28,6 +28,18 @@ export type ImageContentBlock = {
   source: Base64ImageSource
 }
 
+export type Base64PdfSource = {
+  type: 'base64'
+  mediaType: 'application/pdf'
+  data: string
+}
+
+export type PdfContentBlock = {
+  type: 'pdf'
+  source: Base64PdfSource
+  filename?: string
+}
+
 export type ThinkingContentBlock = {
   type: 'thinking'
   thinking: string
@@ -57,6 +69,7 @@ export type ToolUseContentBlock = {
 export type ToolResultStructuredContentBlock =
   | TextContentBlock
   | ImageContentBlock
+  | PdfContentBlock
 
 export type ToolResultContentBlock = {
   type: 'tool_result'
@@ -69,6 +82,7 @@ export type ToolResultContentBlock = {
 export type ContentBlock =
   | TextContentBlock
   | ImageContentBlock
+  | PdfContentBlock
   | ThinkingContentBlock
   | RedactedThinkingContentBlock
   | ReasoningContentBlock
@@ -113,6 +127,21 @@ export function createImageBlock(
       mediaType,
       data,
     },
+  }
+}
+
+export function createPdfBlock(
+  data: string,
+  filename?: string,
+): PdfContentBlock {
+  return {
+    type: 'pdf',
+    source: {
+      type: 'base64',
+      mediaType: 'application/pdf',
+      data,
+    },
+    ...(filename ? { filename } : {}),
   }
 }
 
@@ -175,6 +204,12 @@ export function getToolUseBlocks(message: Message): ToolUseContentBlock[] {
 export function getImageContentBlocks(message: Message): ImageContentBlock[] {
   return message.content.filter(
     (block): block is ImageContentBlock => block.type === 'image',
+  )
+}
+
+export function getPdfContentBlocks(message: Message): PdfContentBlock[] {
+  return message.content.filter(
+    (block): block is PdfContentBlock => block.type === 'pdf',
   )
 }
 

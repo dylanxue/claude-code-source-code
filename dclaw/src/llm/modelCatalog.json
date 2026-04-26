@@ -1,0 +1,615 @@
+{
+  "entries": [
+    {
+      "match": "bytedance-seed-code",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-code",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-2.0-code",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-1.6",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-1-6",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-1.6",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-1.6-flash",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-1-6-flash",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-1.6-flash",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 32000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-1.8",
+      "contextWindow": 256000,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-1-8",
+      "contextWindow": 256000,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-1.8",
+      "contextWindow": 256000,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "dola-seed-2.0-pro",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-2.0-pro",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-2-0-pro",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-2.0-pro",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "dola-seed-2.0-lite",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-2.0-lite",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-2-0-lite",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-2.0-lite",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-2.0-mini",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "seed-2-0-mini",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "doubao-seed-2.0-mini",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "deepseek-chat",
+      "contextWindow": 131072,
+      "maxOutputTokens": 4096,
+      "maxOutputTokensUpperLimit": 8192,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "deepseek-v3.2",
+      "contextWindow": 131072,
+      "maxOutputTokens": 4096,
+      "maxOutputTokensUpperLimit": 8192,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "deepseek-reasoner",
+      "contextWindow": 131072,
+      "maxOutputTokens": 32768,
+      "maxOutputTokensUpperLimit": 65536,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "kimi-k2.5",
+      "contextWindow": 256000,
+      "maxOutputTokens": 32768,
+      "maxOutputTokensUpperLimit": 32768,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "kimi-k2",
+      "contextWindow": 128000,
+      "maxOutputTokens": 16384,
+      "maxOutputTokensUpperLimit": 16384,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-5.1",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-5-turbo",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-5",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.7-flashx",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.7-flash",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.7",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.6",
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 131072,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.5-airx",
+      "contextWindow": 131072,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 98304,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.5-air",
+      "contextWindow": 131072,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 98304,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.5-x",
+      "contextWindow": 131072,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 98304,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.5-flash",
+      "contextWindow": 131072,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 98304,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.5",
+      "contextWindow": 131072,
+      "maxOutputTokens": 65536,
+      "maxOutputTokensUpperLimit": 98304,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.5v",
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-5v",
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-5v-turbo",
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-4.1v",
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "glm-ocr",
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "minimax-m2.7",
+      "contextWindow": 204800,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "minimax-m2.5",
+      "contextWindow": 204800,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "minimax-m2.1",
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "minimax-m2",
+      "contextWindow": 204800,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "claude-opus-4-7",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-opus-4-6",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-sonnet-4-6",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-opus-4-5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-sonnet-4-5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-sonnet-4",
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-haiku-4-5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-3-7-sonnet",
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "maxOutputTokensUpperLimit": 64000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-3-5-sonnet",
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "maxOutputTokensUpperLimit": 8192,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-3-5-haiku",
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "maxOutputTokensUpperLimit": 8192,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-3-opus",
+      "contextWindow": 200000,
+      "maxOutputTokens": 4096,
+      "maxOutputTokensUpperLimit": 4096,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-3-sonnet",
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "maxOutputTokensUpperLimit": 8192,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "claude-3-haiku",
+      "contextWindow": 200000,
+      "maxOutputTokens": 4096,
+      "maxOutputTokensUpperLimit": 4096,
+      "supportsImageInput": true,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "claude-",
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5.4-pro",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5.4",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5-pro",
+      "contextWindow": 400000,
+      "maxOutputTokens": 272000,
+      "maxOutputTokensUpperLimit": 272000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-4.1-mini",
+      "contextWindow": 1047576,
+      "maxOutputTokens": 32768,
+      "maxOutputTokensUpperLimit": 32768,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-4.1-nano",
+      "contextWindow": 1047576,
+      "maxOutputTokens": 32768,
+      "maxOutputTokensUpperLimit": 32768,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-4.1",
+      "contextWindow": 1047576,
+      "maxOutputTokens": 32768,
+      "maxOutputTokensUpperLimit": 32768,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "codex-mini-latest",
+      "contextWindow": 200000,
+      "maxOutputTokens": 100000,
+      "maxOutputTokensUpperLimit": 100000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "o4-mini",
+      "contextWindow": 200000,
+      "maxOutputTokens": 100000,
+      "maxOutputTokensUpperLimit": 100000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5-codex",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5.1-codex",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5.3",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5.2",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5.1",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5-mini",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5-nano",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    },
+    {
+      "match": "gpt-5",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "maxOutputTokensUpperLimit": 128000,
+      "supportsImageInput": true,
+      "supportsPdfInput": true
+    }
+  ]
+}
