@@ -22,7 +22,6 @@ import {
 import { prepareCliRuntime } from './runtime.js'
 import { getCliErrorOutput } from './errorFormatting.js'
 import type { ResumeCommand } from './types.js'
-import { formatVerboseContextLines } from './verboseEvents.js'
 
 function formatSubagentSummaryLines(
   subagents: SessionSubagentSummary,
@@ -117,6 +116,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
   const replSession: ReplSessionState = {
     sessionId: resumed.meta.sessionId,
     mode: 'resume',
+    runtimeName: runtime.runtimeName,
     provider: runtime.provider,
     providerSource: runtime.providerSource,
     model: runtime.model,
@@ -164,6 +164,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
       replContext.rotateQueryTrace = prepared.rotateQueryTrace
       replContext.listSkillStatuses = prepared.listSkillStatuses
       replContext.setSkillEnabled = prepared.setSkillEnabled
+      replSession.runtimeName = runtime.runtimeName
       replSession.provider = runtime.provider
       replSession.providerSource = runtime.providerSource
       replSession.model = runtime.model
@@ -192,6 +193,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     `session id: ${command.sessionId}`,
     `cwd: ${command.options.cwd}`,
     `restored messages: ${resumed.messages.length}`,
+    `runtime: ${runtime.runtimeName ?? 'stub'}`,
+    `runtime source: ${runtime.runtimeSource}`,
     `provider: ${runtime.provider}`,
     `provider source: ${runtime.providerSource}`,
     `model: ${runtime.model ?? 'default'}`,
@@ -239,25 +242,6 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     lines.push(`query trace: ${queryTracePath}`)
   }
   lines.push(`resume prompt: ${command.prompt ?? '<none>'}`)
-  if (command.options.verbose) {
-    lines.push(
-      ...formatVerboseContextLines({
-        mode: 'resume',
-        cwd: command.options.cwd,
-        provider: runtime.provider,
-        providerSource: runtime.providerSource,
-        model: runtime.model,
-        modelSource: runtime.modelSource,
-        permissionMode,
-        permissionModeSource,
-        stream: command.options.stream,
-        outputFormat: command.options.outputFormat,
-        sessionId: replSession.sessionId,
-        queryTracePath,
-      }),
-    )
-  }
-
   lines.push('')
 
   if (!command.prompt) {
@@ -321,7 +305,6 @@ export async function runResume(command: ResumeCommand): Promise<void> {
         sessionId: replSession.sessionId,
         prompt,
         stream: replContext.options.stream,
-        verbose: replContext.options.verbose,
         signal: control.signal,
         writeOutput: control.writeOutput,
         flushOutput: control.flushOutput,

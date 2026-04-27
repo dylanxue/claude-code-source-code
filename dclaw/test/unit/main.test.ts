@@ -106,57 +106,7 @@ async function runBin(args: string[], cwd: string): Promise<{
   })
 }
 
-test('main emits response.error SSE for print+sse provider failures', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-'))
-  const dclawHome = join(dir, '.dclaw-home-test')
-
-  try {
-    await writeUserConfig(dclawHome, {
-      llm: {
-        defaultRuntime: 'openai-missing-key',
-        providers: {
-          'openai-missing-key': {
-            type: 'openai',
-          },
-        },
-        runtimes: {
-          'openai-missing-key': {
-            primary: {
-              providerRef: 'openai-missing-key',
-              model: 'gpt-5',
-            },
-          },
-        },
-      },
-    })
-
-    const result = await runCli(
-      [
-        '--print',
-        '--stream',
-        '--output-format',
-        'sse',
-        '--runtime',
-        'openai-missing-key',
-        'hello',
-      ],
-      dir,
-    )
-
-    assert.equal(result.exitCode, 1)
-    assert.equal(result.stderr, '')
-    assert.match(result.stdout, /^event: response\.error\n/)
-    assert.match(result.stdout, /"kind":"unknown"/)
-    assert.match(
-      result.stdout,
-      /"message":"OpenAI API key is required\. Configure llm\.providers\.<name>\.apiKey in ~\/\.dclaw\/config\.json\./,
-    )
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('main emits stderr for non-sse provider failures', async () => {
+test('main emits stderr for non-sse exec provider failures', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-'))
   const dclawHome = join(dir, '.dclaw-home-test')
 
@@ -182,7 +132,7 @@ test('main emits stderr for non-sse provider failures', async () => {
 
     const result = await runCli(
       [
-        '--print',
+        'exec',
         '--runtime',
         'anthropic-missing-key',
         'hello',
@@ -210,6 +160,119 @@ test('bin wrapper launches dclaw from outside the repo', async () => {
     assert.equal(result.exitCode, 0)
     assert.equal(result.stderr, '')
     assert.match(result.stdout, /^0\.1\.0\n$/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main dispatches the doctor subcommand', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-doctor-'))
+
+  try {
+    const result = await runCli(['doctor'], dir)
+
+    assert.equal(result.exitCode, 0)
+    assert.equal(result.stderr, '')
+    assert.match(result.stdout, /^dclaw doctor\n/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main reports that the top-level resume command was removed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-resume-'))
+
+  try {
+    const result = await runCli(['resume', 'session-123'], dir)
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stdout, '')
+    assert.match(
+      result.stderr,
+      /Unknown command: resume/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main reports that the top-level history command was removed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-history-'))
+
+  try {
+    const result = await runCli(['history'], dir)
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stdout, '')
+    assert.match(
+      result.stderr,
+      /Unknown command: history/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main reports that the --doctor flag was removed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-doctor-flag-'))
+
+  try {
+    const result = await runCli(['--doctor'], dir)
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stdout, '')
+    assert.match(
+      result.stderr,
+      /Unknown option: --doctor/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main reports that the --print flag was removed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-print-flag-'))
+
+  try {
+    const result = await runCli(['--print', 'hello'], dir)
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stdout, '')
+    assert.match(
+      result.stderr,
+      /Unknown option: --print/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main reports that the --verbose flag was removed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-verbose-flag-'))
+
+  try {
+    const result = await runCli(['exec', '--verbose', 'hello'], dir)
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stdout, '')
+    assert.match(result.stderr, /Unknown option: --verbose/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('main reports that the --output-format flag was removed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-output-format-flag-'))
+
+  try {
+    const result = await runCli(
+      ['exec', '--output-format', 'sse', 'hello'],
+      dir,
+    )
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stdout, '')
+    assert.match(result.stderr, /Unknown option: --output-format/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

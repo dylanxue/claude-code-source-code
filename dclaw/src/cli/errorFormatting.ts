@@ -48,6 +48,10 @@ export type CliErrorOutput = {
   text: string
 }
 
+type ErrorFormattingCommand = {
+  mode: string
+}
+
 function getErrorWithContext(error: unknown): {
   source: unknown
   llmError:
@@ -162,21 +166,11 @@ export function getCliErrorInfo(error: unknown): CliErrorInfo {
 }
 
 export function getCliErrorOutput(
-  command: ParsedCliCommand | undefined,
+  command: ParsedCliCommand | ErrorFormattingCommand | undefined,
   error: unknown,
 ): CliErrorOutput {
   const info = getCliErrorInfo(error)
-  if (
-    command?.mode === 'print' &&
-    command.options.outputFormat === 'sse'
-  ) {
-    return {
-      stream: 'stdout',
-      text:
-        'event: response.error\n' +
-        `data: ${JSON.stringify(info.ssePayload)}\n\n`,
-    }
-  }
+  void command
 
   return {
     stream: 'stderr',

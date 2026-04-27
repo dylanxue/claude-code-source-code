@@ -55,7 +55,7 @@ MVP 只需要重点实现这些目录：
 负责：
 
 - interactive 入口
-- `--print` 入口
+- `exec` 入口
 - `resume`
 - `doctor`
 
@@ -145,7 +145,7 @@ MVP 模式建议：
 ## 6. MVP 验收标准
 
 1. 能跑通一次完整的 tool-use 循环。
-2. `--print` 模式可独立运行。
+2. `exec` 模式可独立运行。
 3. 支持恢复 session，并在恢复后继续执行新的 prompt。
 4. 能读取项目级 `DCLAW.md`。
 5. 危险工具可被权限系统拦截。

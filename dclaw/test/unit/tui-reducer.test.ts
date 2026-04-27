@@ -195,7 +195,7 @@ test('reduceUiEvent keeps tool results attached to their own activity groups', (
   assert.equal(activityGroups[1]?.entries[0]?.text, 'Updated /tmp/example.txt')
 })
 
-test('reduceUiEvent keeps the assistant draft after tool activity when tools start mid-turn', () => {
+test('reduceUiEvent seals pre-tool assistant text in place when tools start mid-turn', () => {
   let state = createInitialUiState()
   state = reduceUiEvent(state, {
     type: 'turn_started',
@@ -225,9 +225,15 @@ test('reduceUiEvent keeps the assistant draft after tool activity when tools sta
   const transcriptKinds = state.transcript.map(item => item.kind)
   assert.deepEqual(transcriptKinds, [
     'user_prompt',
-    'activity_group',
     'assistant_note',
+    'activity_group',
   ])
-  assert.equal(state.transcript[1]?.kind, 'activity_group')
-  assert.equal(state.transcript[2]?.kind, 'assistant_note')
+  assert.equal(state.transcript[1]?.kind, 'assistant_note')
+  assert.equal(state.transcript[2]?.kind, 'activity_group')
+  assert.equal(
+    state.transcript[1]?.kind === 'assistant_note'
+      ? state.transcript[1].text
+      : '',
+    'Current project status:',
+  )
 })

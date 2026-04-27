@@ -3,20 +3,14 @@ import { loadEnvFiles } from '../llm/env.js'
 import { getCliErrorOutput } from './errorFormatting.js'
 import { runDoctor } from './doctor.js'
 import { runHeadless } from './headless.js'
-import { runHistory } from './history.js'
 import { runInteractive } from './interactive.js'
 import { CliArgumentError, formatHelp, parseArgs } from './parseArgs.js'
-import { runResume } from './resume.js'
 import { readStdinIfPiped } from './stdio.js'
 import type { ParsedCliCommand } from './types.js'
 import { readCliVersion } from './version.js'
 
 async function resolvePrompt(command: ParsedCliCommand): Promise<ParsedCliCommand> {
-  if (
-    command.mode !== 'interactive' &&
-    command.mode !== 'print' &&
-    command.mode !== 'resume'
-  ) {
+  if (command.mode !== 'interactive' && command.mode !== 'exec') {
     return command
   }
 
@@ -37,17 +31,11 @@ async function dispatch(command: ParsedCliCommand): Promise<void> {
     case 'interactive':
       await runInteractive(command)
       return
-    case 'print':
+    case 'exec':
       await runHeadless(command)
       return
     case 'doctor':
       await runDoctor(command)
-      return
-    case 'resume':
-      await runResume(command)
-      return
-    case 'history':
-      await runHistory(command)
       return
   }
 }

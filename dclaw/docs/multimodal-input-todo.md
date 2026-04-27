@@ -115,7 +115,7 @@
 - 本地图片读取工具
 - `QueryEngine` 公开结构化用户输入接口
 - interactive 对话的图片输入
-- `--print --image`
+- `exec --image`
 
 ## 5. 任务拆解
 
@@ -330,7 +330,7 @@
 
 当前边界：
 
-- 还没有扩到用户直接附图、interactive 图片输入、`--print --image`
+- 还没有扩到用户直接附图、interactive 图片输入、`exec --image`
 - 还没有扩成通用“任何图片来源都自动 side query”的全局机制
 - 还没有为 side query 引入更复杂的任务分类器；当前只保留最小 intent fallback
 - 还没有像 Claude Code 那样提供一套“主模型天然多模态”的统一假设；这条链路本质上是 `dclaw` 针对 text-only runtime 的受控降级
@@ -371,7 +371,7 @@
 
 这条能力保留，但当前不进入近期主线。
 
-- [ ] 为 `--print` 模式增加显式图片输入参数
+- [ ] 为 `exec` 模式增加显式图片输入参数
 - [ ] 首版建议采用重复参数形式：
   - `--image <path>`
 - [ ] 支持多张图片，保持输入顺序
@@ -394,7 +394,7 @@
 8. 已完成：text-only 主 runtime 的 `vision side query` 降级路径
 9. 待做：`QueryEngine` 公开结构化用户输入
 10. 待做：interactive 输入层重构准备
-11. 待做：`--print --image`
+11. 待做：`exec --image`
 
 ## 7. 测试状态
 
@@ -460,7 +460,7 @@
 - `tool result budget / compact` 与多模态结果进一步向 Claude Code 靠拢
 - `QueryEngine` 已支持公开的结构化用户输入
 - interactive 对话中的图片输入主路径具备明确实现
-- `--print --image <path>` 可以工作
+- `exec --image <path>` 可以工作
 
 ## 9. 后续扩展入口
 

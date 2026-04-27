@@ -59,11 +59,7 @@ import {
 import {
   appendModelLimitLines,
   appendVisionRuntimeLines,
-  appendReliabilityConfigLines,
-  getLimitsConfigStatus,
-  statusLine,
 } from './diagnostics.js'
-import { resolveMaxIterations } from './maxIterationsConfig.js'
 import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { CommonCliOptions } from './types.js'
 
@@ -71,9 +67,18 @@ function getCurrentModelVisibleMessages(engine: QueryEngine): Message[] {
   return getModelVisibleMessages(engine.getMessages())
 }
 
+function formatRuntimeLabel(runtimeName: string | undefined): string {
+  return runtimeName ?? 'stub'
+}
+
+function formatProviderModelLabel(provider: string, model?: string): string {
+  return `${provider}${model ? ` / ${model}` : ''}`
+}
+
 export type ReplSessionState = {
   sessionId: string
   mode: 'interactive' | 'resume'
+  runtimeName?: string
   provider: string
   providerSource: string
   model?: string
@@ -225,6 +230,8 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     `session id: ${context.session.sessionId}`,
     `mode: ${context.session.mode}`,
     `cwd: ${context.options.cwd}`,
+    `runtime: ${context.session.runtimeName ?? runtime.runtimeName ?? 'stub'}`,
+    `runtime source: ${runtime.runtimeSource}`,
     `provider: ${context.session.provider}`,
     `provider source: ${context.session.providerSource}`,
     `model: ${context.session.model ?? 'default'}`,
@@ -299,6 +306,7 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   const nextSession = await createSession({
     cwd: context.options.cwd,
     mode: 'interactive',
+    runtimeName: context.session.runtimeName,
     provider: context.session.provider,
     model: context.session.model,
   })
@@ -582,126 +590,6 @@ async function compactConversation(
   ])
 }
 
-async function printDoctor(context: ReplCommandContext): Promise<void> {
-  const cwd = context.options.cwd
-  const configured = await buildConfigAwareEnvWithSources(cwd)
-  const resolvedMaxIterations = await resolveMaxIterations(
-    {
-      cwd,
-      maxIterations: context.options.maxIterations,
-    },
-    configured.env,
-    key => configured.keySources[key],
-  )
-  const llmConfig = await loadResolvedLlmConfig(cwd, configured.env)
-  const runtime = resolveLlmRuntimeConfig(
-    {
-      runtime: context.options.runtime,
-      model: context.session.model,
-    },
-    llmConfig,
-    configured.env,
-  )
-  const compactRecommendation = context.engine.getCompactRecommendation()
-  const compactPressureValue =
-    compactRecommendation.percentLeft === undefined
-      ? `${compactRecommendation.level} (thresholds unavailable)`
-      : `${compactRecommendation.level} (${compactRecommendation.percentLeft}% until auto-compact)`
-  const lines = [
-    'dclaw doctor',
-    '',
-    statusLine('node', process.version),
-    statusLine('platform', process.platform),
-    statusLine('cwd', cwd),
-    statusLine('cwd exists', existsSync(cwd) ? 'yes' : 'no'),
-    statusLine('mode', 'repl'),
-    statusLine('session id', context.session.sessionId),
-    statusLine('session mode', context.session.mode),
-    statusLine('permission mode', context.session.permissionMode),
-    statusLine('permission source', context.session.permissionModeSource),
-    statusLine(
-      'max iterations',
-      `${resolvedMaxIterations.maxIterations} (${resolvedMaxIterations.maxIterationsSource})`,
-    ),
-    statusLine('compact pressure', compactPressureValue),
-    statusLine(
-      'compact recommendation',
-      compactRecommendation.shouldCompact ? 'compact soon (dry-run)' : 'none',
-    ),
-    statusLine(
-      'compact tokens',
-      compactRecommendation.autoCompactThresholdTokens === undefined
-        ? `${compactRecommendation.tokenUsage} (thresholds unavailable)`
-        : `${compactRecommendation.tokenUsage}/${compactRecommendation.autoCompactThresholdTokens}`,
-    ),
-    statusLine(
-      'compact remaining',
-      compactRecommendation.percentLeft === undefined
-        ? 'unknown'
-        : `${compactRecommendation.percentLeft}% until auto-compact`,
-    ),
-    statusLine(
-      'compact used',
-      compactRecommendation.percentUsed === undefined
-        ? 'unknown'
-        : `${compactRecommendation.percentUsed}% of effective window`,
-    ),
-    statusLine(
-      'compact thresholds',
-      compactRecommendation.autoCompactThresholdTokens === undefined ||
-        compactRecommendation.warningThresholdTokens === undefined ||
-        compactRecommendation.blockingLimitTokens === undefined
-        ? 'unavailable'
-        : `warn ${compactRecommendation.warningThresholdTokens} / auto ${compactRecommendation.autoCompactThresholdTokens} / block ${compactRecommendation.blockingLimitTokens}`,
-    ),
-    statusLine('provider', runtime.provider),
-    statusLine('provider source', context.session.providerSource),
-  ]
-  if (compactRecommendation.reasons.length > 0) {
-    lines.push(
-      statusLine('compact reasons', compactRecommendation.reasons.join('; ')),
-    )
-  }
-
-  if (runtime.providerConfig.provider === 'anthropic') {
-    const config = runtime.providerConfig
-    lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
-    lines.push(statusLine('base url', config.baseUrl))
-    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
-    lines.push(statusLine('model source', context.session.modelSource))
-    lines.push(statusLine('limits config', getLimitsConfigStatus()))
-    if (runtime.model) {
-      appendModelLimitLines(lines, 'anthropic', runtime.model, {
-        env: configured.env,
-        overrides: llmConfig.modelCatalogOverrides,
-      })
-    }
-    appendVisionRuntimeLines(lines, runtime.imageFallback)
-  } else if (runtime.providerConfig.provider === 'openai') {
-    const config = runtime.providerConfig
-    lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
-    lines.push(statusLine('base url', config.baseUrl))
-    lines.push(statusLine('api style', config.apiStyle))
-    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
-    lines.push(statusLine('model source', context.session.modelSource))
-    lines.push(statusLine('limits config', getLimitsConfigStatus()))
-    if (runtime.model) {
-      appendModelLimitLines(lines, 'openai', runtime.model, {
-        env: configured.env,
-        overrides: llmConfig.modelCatalogOverrides,
-      })
-    }
-    appendVisionRuntimeLines(lines, runtime.imageFallback)
-  } else {
-    lines.push(statusLine('resolved model', runtime.model ?? 'none'))
-    lines.push(statusLine('model source', context.session.modelSource))
-    appendVisionRuntimeLines(lines, runtime.imageFallback)
-  }
-
-  appendReliabilityConfigLines(lines, configured.env, key => configured.keySources[key])
-  printLines(lines)
-}
-
 function formatRuntimeSummaryLines(
   runtime: ResolvedLlmRuntimeConfig,
   queryTracePath?: string,
@@ -808,8 +696,10 @@ async function setCurrentRuntime(
   }
 
   const { runtime, queryTracePath } = await context.switchRuntime(nextRuntime)
+  context.session.runtimeName = runtime.runtimeName
   await updateSessionMeta(context.session.sessionId, meta => ({
     ...meta,
+    runtimeName: runtime.runtimeName,
     provider: runtime.provider,
     model: runtime.model,
     updatedAt: new Date().toISOString(),
@@ -922,8 +812,9 @@ async function printResumeSuggestions(): Promise<void> {
       `${index + 1}. ${session.meta.sessionId}  ${session.meta.mode}  ${session.meta.updatedAt}`,
     )
     lines.push(`   cwd: ${session.meta.cwd}`)
+    lines.push(`   runtime: ${formatRuntimeLabel(session.meta.runtimeName)}`)
     lines.push(
-      `   provider: ${session.meta.provider}${session.meta.model ? ` / ${session.meta.model}` : ''}`,
+      `   provider/model: ${formatProviderModelLabel(session.meta.provider, session.meta.model)}`,
     )
     if (session.lastUserText) {
       lines.push(`   last user: ${session.lastUserText}`)
@@ -958,18 +849,41 @@ async function resumeConversation(
     return
   }
 
+  if (!resumed.meta.runtimeName) {
+    printLines([
+      `Session ${sessionId} is missing runtime metadata and cannot be resumed in this build.`,
+      '',
+    ])
+    return
+  }
+
   context.engine.resetMessages(resumed.messages)
-  context.engine.setSessionId(resumed.meta.sessionId)
   context.session.sessionId = resumed.meta.sessionId
   context.session.mode = 'resume'
-  const queryTracePath = await context.rotateQueryTrace?.(resumed.meta.sessionId)
-  const taskBoard = await syncPlanModeRuntime(context)
+  context.engine.setSessionId(resumed.meta.sessionId)
+  context.options.runtime = resumed.meta.runtimeName
 
-  if (resumed.meta.provider === context.session.provider && resumed.meta.model) {
-    context.engine.setModel(resumed.meta.model)
+  let queryTracePath: string | undefined
+  if (context.switchRuntime) {
+    const switched = await context.switchRuntime(resumed.meta.runtimeName)
+    queryTracePath = switched.queryTracePath
+  } else {
+    context.session.runtimeName = resumed.meta.runtimeName
+    context.session.provider = resumed.meta.provider
     context.session.model = resumed.meta.model
-    context.session.modelSource = 'resumed_session'
+    queryTracePath = await context.rotateQueryTrace?.(resumed.meta.sessionId)
   }
+
+  context.engine.resetMessages(resumed.messages)
+  context.engine.setSessionId(resumed.meta.sessionId)
+  const taskBoard = await syncPlanModeRuntime(context)
+  await updateSessionMeta(context.session.sessionId, meta => ({
+    ...meta,
+    runtimeName: context.session.runtimeName,
+    provider: context.session.provider,
+    model: context.session.model,
+    updatedAt: new Date().toISOString(),
+  }))
   const transcriptLines = formatTranscript(resumed.messages, {
     includeThinking: false,
     maxMessages: 10,
@@ -979,12 +893,11 @@ async function resumeConversation(
 
   printLines([
     `Resumed session: ${resumed.meta.sessionId}`,
-    `stored provider/model: ${resumed.meta.provider}${resumed.meta.model ? ` / ${resumed.meta.model}` : ''}`,
-    ...(resumed.meta.provider !== context.session.provider
-      ? [
-          `continuing with current provider: ${context.session.provider}`,
-        ]
-      : []),
+    `restored runtime: ${formatRuntimeLabel(context.session.runtimeName)}`,
+    `restored provider/model: ${formatProviderModelLabel(
+      context.session.provider,
+      context.session.model,
+    )}`,
     ...(compactBoundaries.length > 0
       ? [`compact boundaries: ${compactBoundaries.length}`]
       : []),
@@ -1024,18 +937,6 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     presentationTitle: 'Status',
     async handle(_args, context) {
       await printSessionInfo(context)
-    },
-  },
-  {
-    name: '/doctor',
-    displayName: 'Doctor',
-    description: 'Show diagnostics for the current REPL session.',
-    argKind: 'none',
-    canRunWhileBusy: true,
-    presentationKind: 'structured_card',
-    presentationTitle: 'Diagnostics',
-    async handle(_args, context) {
-      await printDoctor(context)
     },
   },
   {

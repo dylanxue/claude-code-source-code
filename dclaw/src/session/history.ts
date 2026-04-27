@@ -3,7 +3,7 @@ import {
   loadSessionSubagentSummary,
   type SessionSubagentSummary,
 } from '../agent/observability.js'
-import { formatToolUseLine } from '../cli/verboseEvents.js'
+import { formatToolUseLine } from '../cli/outputFormatting.js'
 import {
   getCompactBoundaryMessages,
   getLastCompactBoundary,

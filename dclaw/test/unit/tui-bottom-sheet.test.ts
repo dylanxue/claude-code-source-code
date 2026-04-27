@@ -39,6 +39,7 @@ test('createBottomSheetForInput opens enum command sheets without arguments', ()
   )
   assert.ok(permissionsSheet)
   assert.equal(permissionsSheet.command.name, '/permissions')
+  assert.equal(permissionsSheet.dismissInputValue, '')
   assert.deepEqual(
     permissionsSheet.options.map(option => option.value),
     ['default', 'bypass-permissions'],
@@ -53,6 +54,7 @@ test('createBottomSheetForInput opens enum command sheets without arguments', ()
   assert.equal(runtimeSheet.command.name, '/runtime')
   assert.equal(runtimeSheet.title, 'Select Runtime')
   assert.match(runtimeSheet.description, /takes effect immediately/)
+  assert.equal(runtimeSheet.dismissInputValue, '')
 })
 
 test('createBottomSheetForInput skips enum commands once an argument is typed', () => {

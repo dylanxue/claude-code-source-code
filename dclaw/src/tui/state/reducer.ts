@@ -144,6 +144,20 @@ function finalizeAssistantDraft(state: UiState, outputText: string): UiState {
       return state
     }
 
+    const lastAssistantText = [...state.transcript]
+      .reverse()
+      .find(
+        item =>
+          item.kind === 'assistant_note' || item.kind === 'assistant_draft',
+      )
+    if (
+      lastAssistantText &&
+      normalizeInlineText(lastAssistantText.text) ===
+        normalizeInlineText(normalizedOutput)
+    ) {
+      return state
+    }
+
     return appendTranscriptItem(state, {
       kind: 'assistant_note',
       text: normalizedOutput,
@@ -165,6 +179,37 @@ function finalizeAssistantDraft(state: UiState, outputText: string): UiState {
         id: item.id,
         kind: 'assistant_note',
         text: nextText,
+      }
+    },
+  )
+
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    activeTurn: {
+      ...state.activeTurn,
+      assistantDraftId: undefined,
+    },
+  }
+}
+
+function sealAssistantDraftInPlace(state: UiState): UiState {
+  if (!state.activeTurn.assistantDraftId) {
+    return state
+  }
+
+  const updatedTranscript = updateTranscriptItem(
+    state.transcript,
+    state.activeTurn.assistantDraftId,
+    item => {
+      if (item.kind !== 'assistant_draft') {
+        return item
+      }
+
+      return {
+        id: item.id,
+        kind: 'assistant_note',
+        text: item.text.trimEnd(),
       }
     },
   )
@@ -276,53 +321,51 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
     }
 
     case 'tool_use_started': {
+      const stateBeforeToolUse = sealAssistantDraftInPlace(state)
       const title = event.title ?? 'Activity'
       const recentActivityGroup = getRecentActivityGroupForTitle(
-        state.transcript,
+        stateBeforeToolUse.transcript,
         title,
-        state.activeTurn.assistantDraftId,
+        stateBeforeToolUse.activeTurn.assistantDraftId,
       )
 
       if (recentActivityGroup) {
-        const updatedTranscript = moveTranscriptItemToEnd(
-          updateTranscriptItem(
-            state.transcript,
-            recentActivityGroup.id,
-            item => {
-              if (item.kind !== 'activity_group') {
-                return item
-              }
+        const updatedTranscript = updateTranscriptItem(
+          stateBeforeToolUse.transcript,
+          recentActivityGroup.id,
+          item => {
+            if (item.kind !== 'activity_group') {
+              return item
+            }
 
-              return {
-                ...item,
-                entries: [
-                  ...item.entries,
-                  {
-                    toolUseId: event.toolUseId,
-                    status: 'started',
-                    text: event.text,
-                  },
-                ],
-              }
-            },
-          ),
-          state.activeTurn.assistantDraftId,
+            return {
+              ...item,
+              entries: [
+                ...item.entries,
+                {
+                  toolUseId: event.toolUseId,
+                  status: 'started',
+                  text: event.text,
+                },
+              ],
+            }
+          },
         )
 
         return {
-          ...state,
+          ...stateBeforeToolUse,
           transcript: updatedTranscript,
           activeTurn: {
-            ...state.activeTurn,
+            ...stateBeforeToolUse.activeTurn,
             activityToolGroupIds: {
-              ...(state.activeTurn.activityToolGroupIds ?? {}),
+              ...(stateBeforeToolUse.activeTurn.activityToolGroupIds ?? {}),
               [event.toolUseId]: recentActivityGroup.id,
             },
           },
         }
       }
 
-      const nextState = appendTranscriptItem(state, {
+      const nextState = appendTranscriptItem(stateBeforeToolUse, {
         kind: 'activity_group',
         title,
         entries: [
@@ -334,14 +377,9 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
         ],
       })
       const activityGroup = getLastTranscriptItem(nextState.transcript)
-      const updatedTranscript = moveTranscriptItemToEnd(
-        nextState.transcript,
-        state.activeTurn.assistantDraftId,
-      )
 
       return {
         ...nextState,
-        transcript: updatedTranscript,
         activeTurn: {
           ...nextState.activeTurn,
           activityToolGroupIds: {
@@ -373,33 +411,26 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
 
         return {
           ...nextState,
-          transcript: moveTranscriptItemToEnd(
-            nextState.transcript,
-            state.activeTurn.assistantDraftId,
-          ),
         }
       }
 
-      const updatedTranscript = moveTranscriptItemToEnd(
-        updateTranscriptItem(
-          state.transcript,
-          activityGroupId,
-          item => {
-            if (item.kind !== 'activity_group') {
-              return item
-            }
+      const updatedTranscript = updateTranscriptItem(
+        state.transcript,
+        activityGroupId,
+        item => {
+          if (item.kind !== 'activity_group') {
+            return item
+          }
 
-            return {
-              ...item,
-              entries: getActivityEntriesForToolResult(
-                item.entries,
-                event.toolUseId,
-                event.text,
-              ),
-            }
-          },
-        ),
-        state.activeTurn.assistantDraftId,
+          return {
+            ...item,
+            entries: getActivityEntriesForToolResult(
+              item.entries,
+              event.toolUseId,
+              event.text,
+            ),
+          }
+        },
       )
 
       return {

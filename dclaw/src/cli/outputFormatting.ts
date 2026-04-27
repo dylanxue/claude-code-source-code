@@ -4,58 +4,7 @@ import type {
   ToolUseContentBlock,
 } from '../types/message.js'
 
-export type VerboseRuntimeInfo = {
-  mode: 'interactive' | 'print' | 'resume'
-  cwd: string
-  provider: string
-  providerSource?: string
-  model?: string
-  modelSource?: string
-  permissionMode: string
-  permissionModeSource?: string
-  stream: boolean
-  outputFormat: 'text' | 'sse'
-  sessionId?: string
-  queryTracePath?: string
-}
-
-export type VerboseLlmErrorEvent = {
-  iteration: number
-  streaming: boolean
-  phase: 'before_response' | 'during_stream'
-  kind: string
-  subtype: string
-  message: string
-  errorName?: string
-  streamedTextChars: number
-  streamedReasoningChars: number
-  lastTextDelta?: string
-  lastReasoningDelta?: {
-    kind: 'reasoning' | 'thinking'
-    text: string
-  }
-}
-
-export type VerboseCompactDryRunEvent = {
-  iteration: number
-  phase: 'iteration_start' | 'post_tool_results'
-  recommendation: {
-    level: string
-    shouldCompact: boolean
-    reasons: string[]
-    tokenUsage: number
-    effectiveContextWindowTokens?: number
-    autoCompactThresholdTokens?: number
-    percentLeft?: number
-    percentUsed?: number
-    isAboveWarningThreshold: boolean
-    isAboveErrorThreshold: boolean
-    isAboveAutoCompactThreshold: boolean
-    isAtBlockingLimit: boolean
-  }
-}
-
-export type VerboseAutoCompactEvent = {
+export type AutoCompactNotice = {
   sessionId: string
   boundaryId: string
   reason: string
@@ -853,54 +802,15 @@ export function formatProgressToolResultDisplayLine(
   return `Tool result: ${formatProgressToolResultLine(toolUse, output)}`
 }
 
-export function formatVerboseToolResultLine(
+export function formatToolResultSummaryLine(
   toolUse: ToolUseSummary | undefined,
   output: unknown,
 ): string {
   return formatProgressToolResultLine(toolUse, output)
 }
 
-export function formatLlmErrorLine(error: VerboseLlmErrorEvent): string {
-  const parts = [
-    `[llm_error] phase=${error.phase}`,
-    `kind=${error.kind}`,
-    `subtype=${error.subtype}`,
-    `message=${error.message}`,
-  ]
-  if (error.streamedReasoningChars > 0) {
-    parts.push(`streamed_reasoning_chars=${error.streamedReasoningChars}`)
-  }
-  if (error.streamedTextChars > 0) {
-    parts.push(`streamed_text_chars=${error.streamedTextChars}`)
-  }
-  return parts.join(' ')
-}
-
-export function formatCompactDryRunLine(
-  event: VerboseCompactDryRunEvent,
-): string {
-  const parts = [
-    `[compact_dry_run] phase=${event.phase}`,
-    `pressure=${event.recommendation.level}`,
-    `tokens=${event.recommendation.tokenUsage}`,
-    `threshold=${event.recommendation.autoCompactThresholdTokens ?? 'unknown'}`,
-    `remaining=${event.recommendation.percentLeft === undefined ? 'unknown' : `${event.recommendation.percentLeft}%`}`,
-    `used=${event.recommendation.percentUsed === undefined ? 'unknown' : `${event.recommendation.percentUsed}%`}`,
-    `warning=${event.recommendation.isAboveWarningThreshold}`,
-    `auto=${event.recommendation.isAboveAutoCompactThreshold}`,
-    `blocking=${event.recommendation.isAtBlockingLimit}`,
-    `recommendation=${event.recommendation.shouldCompact ? 'compact_soon' : 'none'}`,
-  ]
-
-  if (event.recommendation.reasons.length > 0) {
-    parts.push(`reasons=${event.recommendation.reasons.join('; ')}`)
-  }
-
-  return parts.join(' ')
-}
-
 export function formatAutoCompactLine(
-  event: VerboseAutoCompactEvent,
+  event: AutoCompactNotice,
 ): string {
   return [
     '[autocompact]',
@@ -911,39 +821,7 @@ export function formatAutoCompactLine(
   ].join(' ')
 }
 
-export function formatVerboseContextLines(
-  info: VerboseRuntimeInfo,
-): string[] {
-  const lines = [
-    `[meta] mode=${info.mode}`,
-    `[meta] cwd=${info.cwd}`,
-    `[meta] provider=${info.provider}`,
-    `[meta] model=${info.model ?? 'default'}`,
-    `[meta] permission_mode=${info.permissionMode}`,
-    `[meta] stream=${info.stream}`,
-    `[meta] output_format=${info.outputFormat}`,
-  ]
-
-  if (info.providerSource) {
-    lines.push(`[meta] provider_source=${info.providerSource}`)
-  }
-  if (info.modelSource) {
-    lines.push(`[meta] model_source=${info.modelSource}`)
-  }
-  if (info.permissionModeSource) {
-    lines.push(`[meta] permission_mode_source=${info.permissionModeSource}`)
-  }
-  if (info.sessionId) {
-    lines.push(`[meta] session_id=${info.sessionId}`)
-  }
-  if (info.queryTracePath) {
-    lines.push(`[meta] query_trace=${info.queryTracePath}`)
-  }
-
-  return lines
-}
-
-export function formatVerboseLines(
+export function formatMessageEventLines(
   messages: Message[],
   options: {
     includeToolCalls?: boolean
@@ -968,7 +846,7 @@ export function formatVerboseLines(
           continue
         }
         lines.push(
-          formatVerboseToolResultLine(
+          formatToolResultSummaryLine(
             toolUses.get(block.toolUseId),
             block.rawOutput ?? block.output,
           ),
@@ -1012,25 +890,6 @@ export function formatVerboseLines(
   }
 
   return lines
-}
-
-export function formatVerboseMessageLines(
-  message: Pick<Message, 'id' | 'role' | 'content'>,
-  options: {
-    includeToolCalls?: boolean
-    includeReasoning?: boolean
-    includeContent?: boolean
-  } = {},
-): string[] {
-  return formatVerboseLines(
-    [
-      {
-        ...message,
-        createdAt: '',
-      },
-    ],
-    options,
-  )
 }
 
 export function formatProgressReasoningLines(
@@ -1129,25 +988,6 @@ export function collectProgressAssistantTexts(
   }
 
   return collectProgressReasoningTexts(message)
-}
-
-export function getVerboseReasoningBlocks(
-  content: ContentBlock[],
-): Array<ContentBlock> {
-  return content.filter(
-    block =>
-      block.type === 'reasoning' ||
-      block.type === 'thinking' ||
-      block.type === 'redacted_thinking',
-  )
-}
-
-export function getVerboseContentBlocks(
-  content: ContentBlock[],
-): Array<ContentBlock> {
-  return content.filter(
-    block => block.type === 'text' || block.type === 'image',
-  )
 }
 
 export function collectToolCalls(messages: Message[]): ToolUseContentBlock[] {

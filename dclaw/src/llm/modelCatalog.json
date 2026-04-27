@@ -201,6 +201,22 @@
       "supportsPdfInput": false
     },
     {
+      "match": "deepseek-v4-pro",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 100000,
+      "maxOutputTokensUpperLimit": 100000,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
+      "match": "deepseek/deepseek-v4-pro",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 100000,
+      "maxOutputTokensUpperLimit": 100000,
+      "supportsImageInput": false,
+      "supportsPdfInput": false
+    },
+    {
       "match": "deepseek-reasoner",
       "contextWindow": 131072,
       "maxOutputTokens": 32768,

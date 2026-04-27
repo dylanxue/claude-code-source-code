@@ -1,7 +1,7 @@
 import type { LlmProviderName } from '../llm/providerNames.js'
 import type { PermissionMode } from '../types/tool.js'
 
-export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume' | 'history'
+export type CliMode = 'interactive' | 'exec' | 'doctor'
 
 export type InteractiveUiMode = 'auto' | 'tui' | 'legacy-repl'
 
@@ -13,8 +13,6 @@ export type CommonCliOptions = {
   maxIterations?: number
   systemPrompt?: string
   stream: boolean
-  verbose: boolean
-  outputFormat: 'text' | 'sse'
   interactiveUi?: InteractiveUiMode
 }
 
@@ -24,8 +22,8 @@ export type InteractiveCommand = {
   options: CommonCliOptions
 }
 
-export type PrintCommand = {
-  mode: 'print'
+export type ExecCommand = {
+  mode: 'exec'
   prompt?: string
   options: CommonCliOptions
 }
@@ -49,7 +47,5 @@ export type HistoryCommand = {
 
 export type ParsedCliCommand =
   | InteractiveCommand
-  | PrintCommand
+  | ExecCommand
   | DoctorCommand
-  | ResumeCommand
-  | HistoryCommand

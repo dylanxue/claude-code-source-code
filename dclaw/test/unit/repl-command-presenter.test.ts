@@ -11,6 +11,8 @@ test('presentReplCommandResult renders /status output as a structured card', () 
       'status:',
       'session id: abc123',
       'mode: interactive',
+      'runtime: review',
+      'runtime source: workspace_config',
       'provider: openai',
       '',
       'query trace: /tmp/query-trace.ndjson',
@@ -28,6 +30,8 @@ test('presentReplCommandResult renders /status output as a structured card', () 
   assert.deepEqual(cardEvent.entries, [
     { kind: 'row', label: 'session id', value: 'abc123' },
     { kind: 'row', label: 'mode', value: 'interactive' },
+    { kind: 'row', label: 'runtime', value: 'review' },
+    { kind: 'row', label: 'runtime source', value: 'workspace_config' },
     { kind: 'row', label: 'provider', value: 'openai' },
     { kind: 'separator' },
     { kind: 'row', label: 'query trace', value: '/tmp/query-trace.ndjson' },
@@ -39,7 +43,8 @@ test('presentReplCommandResult renders /resume output as transcript prose', () =
     '/resume session-123',
     [
       'Resumed session: session-123',
-      'stored provider/model: stub / restored-model',
+      'restored runtime: historic-runtime',
+      'restored provider/model: stub / restored-model',
       '',
       'restored transcript preview:',
       'user: restored user',
@@ -98,10 +103,6 @@ test('status-style REPL commands are cataloged for structured card presentation'
     kind: 'structured_card',
     title: 'Status',
   })
-  assert.deepEqual(commandPresentation.get('/doctor'), {
-    kind: 'structured_card',
-    title: 'Diagnostics',
-  })
   assert.deepEqual(commandPresentation.get('/runtime'), {
     kind: 'structured_card',
     title: 'Runtime',
@@ -128,6 +129,7 @@ test('status-style REPL commands are cataloged for structured card presentation'
   })
   assert.equal(commandPresentation.has('/help'), false)
   assert.equal(commandPresentation.has('/history'), false)
+  assert.equal(commandPresentation.has('/doctor'), false)
   assert.equal(commandPresentation.has('/interrupt'), false)
   assert.equal(commandPresentation.has('/plan'), false)
   assert.equal(commandPresentation.has('/transcript'), false)
@@ -179,6 +181,7 @@ test('REPL command catalog includes TUI metadata for slash controls', () => {
   })
   assert.equal(commandMetadata.has('/help'), false)
   assert.equal(commandMetadata.has('/history'), false)
+  assert.equal(commandMetadata.has('/doctor'), false)
   assert.equal(commandMetadata.has('/interrupt'), false)
   assert.equal(commandMetadata.has('/plan'), false)
   assert.equal(commandMetadata.has('/transcript'), false)

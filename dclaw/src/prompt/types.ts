@@ -3,7 +3,7 @@ import type { PlanModeStatus } from '../tasks/types.js'
 import type { PromptMemoryContext } from '../memory/prompt.js'
 import type { PromptEnvironmentContext } from './environment.js'
 
-export type PromptMode = 'interactive' | 'print'
+export type PromptMode = 'interactive' | 'exec'
 
 export type PlanPromptContext = {
   boardId?: string

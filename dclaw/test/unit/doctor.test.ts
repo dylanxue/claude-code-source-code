@@ -74,8 +74,6 @@ test('runDoctor prints effective retry and timeout diagnostics with sources', as
       options: {
         cwd,
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {

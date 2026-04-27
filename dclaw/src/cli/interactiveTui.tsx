@@ -94,8 +94,10 @@ export async function runInteractiveTui(
   )
   const welcomeCard = createWelcomeCardData({
     version: interactiveContext.version,
-    modelLabel:
-      interactiveContext.runtime.model ?? interactiveContext.runtime.provider,
+    runtimeLabel:
+      interactiveContext.runtime.runtimeName ??
+      interactiveContext.runtime.model ??
+      interactiveContext.runtime.provider,
     cwd: interactiveContext.replOptions.cwd,
   })
 
@@ -165,7 +167,6 @@ export async function runInteractiveTui(
           sessionId: interactiveContext.replSession.sessionId,
           prompt,
           stream: interactiveContext.replOptions.stream,
-          verbose: false,
           signal: options.signal,
           writeOutput() {},
           flushOutput() {},

@@ -10,7 +10,7 @@ import {
   getSessionsDir,
 } from './paths.js'
 
-export type SessionMode = 'interactive' | 'print'
+export type SessionMode = 'interactive' | 'exec'
 
 export type SessionPersistedToolResultRecord = {
   toolUseId: string
@@ -24,6 +24,7 @@ export type SessionMeta = {
   sessionId: string
   cwd: string
   mode: SessionMode
+  runtimeName?: string
   provider: string
   model?: string
   taskBoardId?: string
@@ -35,6 +36,7 @@ export type SessionMeta = {
 export type CreateSessionInput = {
   cwd: string
   mode: SessionMode
+  runtimeName?: string
   provider: string
   model?: string
   taskBoardId?: string
@@ -58,6 +60,10 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
 function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
   return {
     ...meta,
+    runtimeName:
+      typeof meta.runtimeName === 'string' && meta.runtimeName.trim().length > 0
+        ? meta.runtimeName
+        : undefined,
     taskBoardId:
       typeof meta.taskBoardId === 'string' && meta.taskBoardId.trim().length > 0
         ? meta.taskBoardId
@@ -131,6 +137,7 @@ export async function createSession(
     sessionId,
     cwd: input.cwd,
     mode: input.mode,
+    runtimeName: input.runtimeName,
     provider: input.provider,
     model: input.model,
     taskBoardId: input.taskBoardId,

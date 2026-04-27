@@ -35,6 +35,7 @@ export async function createInteractiveContext(
   const session = await createSession({
     cwd: command.options.cwd,
     mode: 'interactive',
+    runtimeName: prepared.runtime.runtimeName,
     provider: prepared.runtime.provider,
     model: prepared.runtime.model,
   })
@@ -44,6 +45,7 @@ export async function createInteractiveContext(
   const replSession: ReplSessionState = {
     sessionId: session.sessionId,
     mode: 'interactive',
+    runtimeName: prepared.runtime.runtimeName,
     provider: prepared.runtime.provider,
     providerSource: prepared.runtime.providerSource,
     model: prepared.runtime.model,
@@ -110,6 +112,7 @@ export async function createInteractiveContext(
       state.replContext.rotateQueryTrace = nextPrepared.rotateQueryTrace
       state.replContext.listSkillStatuses = nextPrepared.listSkillStatuses
       state.replContext.setSkillEnabled = nextPrepared.setSkillEnabled
+      state.replSession.runtimeName = nextPrepared.runtime.runtimeName
       state.replSession.provider = nextPrepared.runtime.provider
       state.replSession.providerSource = nextPrepared.runtime.providerSource
       state.replSession.model = nextPrepared.runtime.model
@@ -127,9 +130,12 @@ export async function createInteractiveContext(
 
 export function getInteractiveRuntimeLabel(state: Pick<
   InteractiveContextState,
-  'replOptions' | 'replSession'
+  'runtime' | 'replSession'
 >): string {
-  return state.replSession.model
-    ? `${state.replSession.model}${state.replOptions.stream ? '' : ' no-stream'}`
-    : state.replSession.provider
+  return (
+    state.runtime.runtimeName ??
+    state.replSession.runtimeName ??
+    state.replSession.model ??
+    state.replSession.provider
+  )
 }

@@ -45,8 +45,6 @@ function createOptions(): CommonCliOptions {
   return {
     cwd: '/tmp/project',
     stream: false,
-    verbose: false,
-    outputFormat: 'text',
   }
 }
 
@@ -75,6 +73,7 @@ function createCommandContextBase(): ReplCommandContext {
     session: {
       sessionId: 'session-123',
       mode: 'interactive',
+      runtimeName: 'default',
       provider: 'stub',
       providerSource: 'default',
       model: 'stub-model',
@@ -102,6 +101,10 @@ test('maybeHandleReplCommand rejects unknown slash commands locally', async () =
       true,
     )
     assert.equal(
+      await maybeHandleReplCommand('/doctor', createCommandContext()),
+      true,
+    )
+    assert.equal(
       await maybeHandleReplCommand('/session', createCommandContext()),
       true,
     )
@@ -115,6 +118,7 @@ test('maybeHandleReplCommand rejects unknown slash commands locally', async () =
 
   const text = output.join('')
   assert.match(text, /Unknown REPL command: \/model/)
+  assert.match(text, /Unknown REPL command: \/doctor/)
   assert.match(text, /Unknown REPL command: \/session/)
   assert.match(text, /Unknown REPL command: \/info/)
   assert.match(text, /Type \/ to browse available commands\./)
@@ -203,6 +207,7 @@ test('maybeHandleReplCommand shows the current runtime for /runtime', async () =
         session: {
           sessionId: 'session-123',
           mode: 'interactive',
+          runtimeName: 'default',
           provider: 'openai',
           providerSource: 'user_config',
           model: 'gpt-5.4',
@@ -395,6 +400,7 @@ test('maybeHandleReplCommand switches runtime for /runtime <name>', async () => 
   const text = output.join('')
   assert.equal(switchedTo, 'anthropic-main')
   assert.equal(context.options.runtime, 'anthropic-main')
+  assert.equal(context.session.runtimeName, 'anthropic-main')
   assert.equal(context.session.provider, 'anthropic')
   assert.equal(context.session.model, 'claude-sonnet-4-6')
   assert.match(text, /Runtime updated for this REPL session: anthropic-main/)
@@ -402,50 +408,6 @@ test('maybeHandleReplCommand switches runtime for /runtime <name>', async () => 
   assert.match(text, /provider: anthropic/)
   assert.match(text, /model: claude-sonnet-4-6/)
   assert.match(text, /query trace: \/tmp\/query-traces\/runtime-switch\.ndjson/)
-})
-
-test('maybeHandleReplCommand prints diagnostics for /doctor', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-doctor-'))
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-  const originalEnv = process.env
-
-  try {
-    process.env = {
-      HOME: homeDir,
-      PATH: originalEnv.PATH,
-    } as NodeJS.ProcessEnv
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand('/doctor', createCommandContext())
-
-    assert.equal(handled, true)
-  } finally {
-    process.env = originalEnv
-    process.stdout.write = originalWrite as typeof process.stdout.write
-    await rm(homeDir, { recursive: true, force: true })
-  }
-
-  const text = output.join('')
-  assert.match(text, /dclaw doctor/)
-  assert.match(text, /session id/)
-  assert.match(text, /compact pressure\s+low \(thresholds unavailable\)/)
-  assert.match(text, /compact recommendation/)
-  assert.match(text, /compact tokens\s+\d+ \(thresholds unavailable\)/)
-  assert.match(text, /compact remaining\s+unknown/)
-  assert.match(text, /compact used\s+unknown/)
-  assert.match(text, /compact thresholds\s+unavailable/)
-  assert.match(text, /max iterations\s+\d+ \((default|user_config)\)/)
-  assert.match(text, /provider/)
-  assert.match(text, /resolved model/)
-  assert.match(text, /vision side query\s+not configured/)
-  assert.match(text, /max retries/)
-  assert.match(text, /retry backoff/)
 })
 
 test('maybeHandleReplCommand shows and updates the current permission mode for /permissions', async () => {
@@ -559,6 +521,8 @@ test('maybeHandleReplCommand prints current status for /status', async () => {
   assert.match(text, /status:/)
   assert.match(text, /session id: session-123/)
   assert.match(text, /mode: interactive/)
+  assert.match(text, /runtime: default/)
+  assert.match(text, /runtime source: default/)
   assert.match(text, /provider: stub/)
   assert.match(text, /model: stub-model/)
   assert.match(text, /vision side query\s+not configured/)
@@ -622,6 +586,7 @@ test('maybeHandleReplCommand shows canonicalized model details in /status', asyn
         session: {
           sessionId: 'session-123',
           mode: 'interactive',
+          runtimeName: 'canonical',
           provider: 'openai',
           providerSource: 'user_config',
           model: 'anthropic/claude-opus-4.7',
@@ -849,19 +814,72 @@ test('maybeHandleReplCommand resumes a saved session and restores its messages',
   const output: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
   const context = createCommandContext()
+  let resumedSessionId = ''
+  let switchedToRuntime: string | undefined
+  let resumedMeta:
+    | Awaited<ReturnType<typeof loadSessionMeta>>
+    | undefined
+    | null
 
   try {
     process.env = env
     const session = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
+      runtimeName: 'historic-runtime',
       provider: 'stub',
       model: 'restored-model',
       env,
     })
+    resumedSessionId = session.sessionId
 
-    context.session.model = 'stub-model'
-    context.session.modelSource = 'default'
+    context.switchRuntime = async runtimeName => {
+      switchedToRuntime = runtimeName
+      context.options.runtime = runtimeName
+      context.session.runtimeName = runtimeName
+      context.session.provider = 'stub'
+      context.session.providerSource = 'resume_runtime'
+      context.session.model = 'restored-model'
+      context.session.modelSource = 'resume_runtime'
+      ;(context.engine as unknown as { model?: string }).model = 'restored-model'
+
+      return {
+        runtime: {
+          runtimeName,
+          runtimeSource: 'default',
+          provider: 'stub',
+          providerSource: 'default',
+          providerRef: 'stub-default',
+          providerConfig: { provider: 'stub' } as never,
+          model: 'restored-model',
+          canonicalModel: 'restored-model',
+          catalogMatch: 'restored-model',
+          modelSource: 'user_config',
+          modelLimits: undefined,
+          modelCapabilities: {
+            supportsImageInput: false,
+            supportsPdfInput: false,
+          },
+          primary: {
+            providerRef: 'stub-default',
+            provider: 'stub',
+            providerConfig: { provider: 'stub' } as never,
+            model: 'restored-model',
+            canonicalModel: 'restored-model',
+            catalogMatch: 'restored-model',
+            modelSource: 'user_config',
+            modelLimits: undefined,
+            modelCapabilities: {
+              supportsImageInput: false,
+              supportsPdfInput: false,
+            },
+            client: new StubLlmClient(),
+          },
+          imageFallback: undefined,
+        },
+        queryTracePath: undefined,
+      }
+    }
 
     context.engine.resetMessages([
       createTextMessage('user', 'before resume'),
@@ -889,6 +907,7 @@ test('maybeHandleReplCommand resumes a saved session and restores its messages',
     )
 
     assert.equal(handled, true)
+    resumedMeta = await loadSessionMeta(resumedSessionId, env)
   } finally {
     process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write
@@ -897,12 +916,22 @@ test('maybeHandleReplCommand resumes a saved session and restores its messages',
 
   const text = output.join('')
   assert.match(text, /Resumed session:/)
+  assert.match(text, /restored runtime: historic-runtime/)
+  assert.match(text, /restored provider\/model: stub \/ restored-model/)
   assert.doesNotMatch(text, /last compact boundary:/)
   assert.match(text, /restored transcript preview:/)
   assert.equal(context.session.mode, 'resume')
+  assert.equal(switchedToRuntime, 'historic-runtime')
+  assert.equal(context.options.runtime, 'historic-runtime')
+  assert.equal(context.session.runtimeName, 'historic-runtime')
   assert.equal(context.engine.getMessages().length, 2)
   assert.equal(context.session.model, 'restored-model')
-  assert.equal(context.session.modelSource, 'resumed_session')
+  assert.equal(context.session.modelSource, 'resume_runtime')
+  assert.equal((context.engine as unknown as { model?: string }).model, 'restored-model')
+  assert.ok(resumedMeta)
+  assert.equal(resumedMeta?.runtimeName, 'historic-runtime')
+  assert.equal(resumedMeta?.provider, 'stub')
+  assert.equal(resumedMeta?.model, 'restored-model')
 })
 
 test('maybeHandleReplCommand rotates query trace paths when switching sessions', async () => {
@@ -927,6 +956,7 @@ test('maybeHandleReplCommand rotates query trace paths when switching sessions',
     const resumedSession = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
+      runtimeName: 'historic-runtime',
       provider: 'stub',
       model: 'trace-model',
       env,
@@ -984,6 +1014,7 @@ test('maybeHandleReplCommand does not materialize a plan file when resuming a ta
     const session = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
+      runtimeName: 'historic-runtime',
       provider: 'stub',
       model: 'task-only-model',
       sessionId: 'task-only-session',
@@ -1050,6 +1081,7 @@ test('maybeHandleReplCommand shows recent sessions when /resume has no session i
     const session = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
+      runtimeName: 'historic-runtime',
       provider: 'stub',
       model: 'resume-model',
       env,

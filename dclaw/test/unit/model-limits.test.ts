@@ -49,6 +49,12 @@ test('built-in openai model limits support modern responses models', () => {
     maxOutputTokensUpperLimit: 65_536,
   })
 
+  assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek-v4-pro'), {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 384_000,
+    maxOutputTokensUpperLimit: 384_000,
+  })
+
   assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.5-airx'), {
     contextWindow: 131_072,
     maxOutputTokens: 65_536,
@@ -81,6 +87,10 @@ test('built-in model capabilities expose image/pdf support by provider family', 
 test('built-in model capabilities distinguish multimodal and text-only compatibility families', () => {
   assert.deepEqual(
     getBuiltInModelCapabilities('openai', 'deepseek-chat'),
+    { supportsImageInput: false, supportsPdfInput: false },
+  )
+  assert.deepEqual(
+    getBuiltInModelCapabilities('openai', 'deepseek-v4-pro'),
     { supportsImageInput: false, supportsPdfInput: false },
   )
   assert.deepEqual(
@@ -141,6 +151,12 @@ test('built-in model catalog supports official Claude IDs and dotted OpenRouter-
     contextWindow: 1_000_000,
     maxOutputTokens: 64_000,
     maxOutputTokensUpperLimit: 64_000,
+  })
+
+  assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek/deepseek-v4-pro'), {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 384_000,
+    maxOutputTokensUpperLimit: 384_000,
   })
 })
 

@@ -2,8 +2,6 @@ import type { QueryStreamHandlers } from '../../core/queryEngine.js'
 import {
   collectProgressAssistantTexts,
   formatAutoCompactLine,
-  formatCompactDryRunLine,
-  formatLlmErrorLine,
   formatProgressAssistantLines,
   formatProgressAssistantOutputLines,
   formatProgressThinkingLine,
@@ -11,11 +9,7 @@ import {
   formatProgressToolResultLine,
   formatProgressToolUseDisplayLine,
   formatProgressToolUseLine,
-  formatReasoningDeltaPrefix,
-  formatToolUseLine,
-  formatVerboseMessageLines,
-  formatVerboseToolResultLine,
-} from '../../cli/verboseEvents.js'
+} from '../../cli/outputFormatting.js'
 import type { LineRenderer } from '../renderers/lineRenderer.js'
 import type { UiEvent } from '../state/types.js'
 import { getActivityGroupTitle } from './activityPresenter.js'
@@ -27,7 +21,6 @@ type PendingAssistantProgress = {
 
 export type TurnPresenterOptions = {
   stream: boolean
-  verbose: boolean
   lineRenderer: LineRenderer
   onUiEvent?: (event: UiEvent) => void
 }
@@ -47,7 +40,6 @@ export function createTurnPresenter(
     { name: string; input: Record<string, unknown> }
   >()
   const displayedAssistantTexts = new Set<string>()
-  const streamedReasoningIterations = new Set<number>()
   let pendingAssistantProgress: PendingAssistantProgress | undefined
   let genericThinkingTimer: ReturnType<typeof setTimeout> | undefined
   let pendingReasoningTimer: ReturnType<typeof setTimeout> | undefined
@@ -122,7 +114,7 @@ export function createTurnPresenter(
   }
 
   const scheduleGenericThinking = (): void => {
-    if (options.verbose || hasConcreteProgress || genericThinkingTimer) {
+    if (hasConcreteProgress || genericThinkingTimer) {
       return
     }
 
@@ -147,7 +139,6 @@ export function createTurnPresenter(
     clearGenericThinkingTimer()
     clearPendingReasoningTimer()
     displayedAssistantTexts.clear()
-    streamedReasoningIterations.clear()
     activeToolUses.clear()
 
     emit({
@@ -156,9 +147,7 @@ export function createTurnPresenter(
       promptKind: prompt.trimStart().startsWith('/') ? 'slash' : 'prompt',
     })
 
-    if (!options.verbose) {
-      scheduleGenericThinking()
-    }
+    scheduleGenericThinking()
   }
 
   const streamHandlers: QueryStreamHandlers = {
@@ -168,46 +157,15 @@ export function createTurnPresenter(
       }
 
       options.lineRenderer.writeAssistantTextDelta(text, {
-        includeAssistantPrefix: !options.verbose,
+        includeAssistantPrefix: true,
       })
       emit({
         type: 'assistant_text_delta',
         text,
       })
     },
-    onReasoningDelta(delta) {
-      if (!options.verbose || delta.text.length === 0) {
-        return
-      }
-
-      streamedReasoningIterations.add(delta.iteration)
-      options.lineRenderer.writeReasoningDelta(
-        formatReasoningDeltaPrefix(delta.kind),
-        delta,
-      )
-    },
+    onReasoningDelta() {},
     onAssistantMessage(message) {
-      if (options.verbose) {
-        if (streamedReasoningIterations.has(message.iteration)) {
-          return
-        }
-
-        markConcreteProgress()
-        const lines = formatVerboseMessageLines(message, {
-          includeToolCalls: false,
-          includeReasoning: true,
-          includeContent: false,
-        })
-        options.lineRenderer.writeEventTextLines(lines)
-        for (const text of collectProgressAssistantTexts(message)) {
-          emit({
-            type: 'assistant_progress_message',
-            text,
-          })
-        }
-        return
-      }
-
       const progressLines = formatProgressAssistantLines(message)
       const progressTexts = collectProgressAssistantTexts(message)
       for (const text of progressTexts) {
@@ -225,17 +183,12 @@ export function createTurnPresenter(
         name: toolUse.name,
         input: toolUse.input,
       })
-
-      if (options.verbose) {
-        options.lineRenderer.writeEventTextLines([formatToolUseLine(toolUse)])
-      } else {
-        flushPendingReasoning()
-        markConcreteProgress()
-        options.lineRenderer.resetAssistantStreamState()
-        options.lineRenderer.writeEventTextLines([
-          formatProgressToolUseDisplayLine(toolUse),
-        ])
-      }
+      flushPendingReasoning()
+      markConcreteProgress()
+      options.lineRenderer.resetAssistantStreamState()
+      options.lineRenderer.writeEventTextLines([
+        formatProgressToolUseDisplayLine(toolUse),
+      ])
 
       emit({
         type: 'tool_use_started',
@@ -247,25 +200,14 @@ export function createTurnPresenter(
     onToolResult(toolResult) {
       clearPendingReasoningTimer()
       clearPendingAssistantProgress()
-
-      if (options.verbose) {
-        markConcreteProgress()
-        options.lineRenderer.writeEventTextLines([
-          formatVerboseToolResultLine(
-            activeToolUses.get(toolResult.toolUseId),
-            toolResult.output,
-          ),
-        ])
-      } else {
-        markConcreteProgress()
-        options.lineRenderer.resetAssistantStreamState()
-        options.lineRenderer.writeEventTextLines([
-          formatProgressToolResultDisplayLine(
-            activeToolUses.get(toolResult.toolUseId),
-            toolResult.output,
-          ),
-        ])
-      }
+      markConcreteProgress()
+      options.lineRenderer.resetAssistantStreamState()
+      options.lineRenderer.writeEventTextLines([
+        formatProgressToolResultDisplayLine(
+          activeToolUses.get(toolResult.toolUseId),
+          toolResult.output,
+        ),
+      ])
 
       emit({
         type: 'tool_result_received',
@@ -276,30 +218,8 @@ export function createTurnPresenter(
         ),
       })
     },
-    onLlmError(error) {
-      if (!options.verbose) {
-        return
-      }
-
-      const line = formatLlmErrorLine(error)
-      options.lineRenderer.writeEventTextLines([line])
-      emit({
-        type: 'system_notice',
-        text: line,
-      })
-    },
-    onCompactDryRun(event) {
-      if (!options.verbose) {
-        return
-      }
-
-      const line = formatCompactDryRunLine(event)
-      options.lineRenderer.writeEventTextLines([line])
-      emit({
-        type: 'system_notice',
-        text: line,
-      })
-    },
+    onLlmError() {},
+    onCompactDryRun() {},
     onAutoCompact(event) {
       const line = formatAutoCompactLine(event)
       options.lineRenderer.writeEventTextLines([line])
@@ -313,9 +233,7 @@ export function createTurnPresenter(
   const complete = (outputText: string): void => {
     clearGenericThinkingTimer()
     clearPendingReasoningTimer()
-    if (!options.verbose) {
-      flushPendingReasoning()
-    }
+    flushPendingReasoning()
 
     const normalizedOutputText = outputText.replace(/\s+/g, ' ').trim()
     if (options.stream) {

@@ -1,8 +1,8 @@
 import type { Message } from '../types/message.js'
 import {
   formatToolUseLine,
-  formatVerboseToolResultLine,
-} from '../cli/verboseEvents.js'
+  formatToolResultSummaryLine,
+} from '../cli/outputFormatting.js'
 import {
   formatCompactBoundaryLabel,
 } from '../compact/types.js'
@@ -109,7 +109,7 @@ function formatMessage(
         ? block.output
         : block.rawOutput ?? block.output
       lines.push(
-        formatVerboseToolResultLine(toolUse, displayOutput),
+        formatToolResultSummaryLine(toolUse, displayOutput),
       )
     }
 

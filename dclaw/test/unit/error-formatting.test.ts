@@ -45,7 +45,7 @@ test('getCliErrorInfo formats provider rate-limit errors with structured metadat
   })
 })
 
-test('getCliErrorInfo formats network failures for CLI and SSE output', () => {
+test('getCliErrorInfo formats network failures with structured metadata', () => {
   const info = getCliErrorInfo(new TypeError('fetch failed'))
 
   assert.equal(
@@ -103,40 +103,6 @@ test('getCliErrorInfo preserves partial stream context for wrapped llm failures'
   })
 })
 
-test('getCliErrorOutput emits response.error SSE events for print+sse mode', () => {
-  const error = new RetryableHttpError(
-    'Anthropic',
-    429,
-    'Too Many Requests',
-    {
-      message: 'rate limit reached',
-      type: 'rate_limit_error',
-    },
-    new Headers(),
-  )
-
-  const output = getCliErrorOutput(
-    {
-      mode: 'print',
-      prompt: 'hello',
-      options: {
-        cwd: '/tmp',
-        permissionMode: 'default',
-        stream: true,
-        verbose: false,
-        outputFormat: 'sse',
-      },
-    },
-    error,
-  )
-
-  assert.equal(output.stream, 'stdout')
-  assert.match(output.text, /^event: response\.error\n/)
-  assert.match(output.text, /"kind":"rate_limit"/)
-  assert.match(output.text, /"subtype":"rate_limited"/)
-  assert.match(output.text, /"provider":"anthropic"/)
-})
-
 test('getCliErrorOutput emits stderr text for non-sse commands', () => {
   const output = getCliErrorOutput(
     {
@@ -146,8 +112,6 @@ test('getCliErrorOutput emits stderr text for non-sse commands', () => {
         cwd: '/tmp',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     },
     new TypeError('fetch failed'),

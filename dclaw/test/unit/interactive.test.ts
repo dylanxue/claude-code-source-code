@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { runInteractive } from '../../src/cli/interactive.js'
+import { getInteractiveRuntimeLabel } from '../../src/cli/interactiveContext.js'
 import { getDclawConfigPath } from '../../src/session/paths.js'
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -32,8 +33,6 @@ test('runInteractive reports that a TTY is required when started without a promp
       options: {
         cwd: '/tmp/project',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -43,15 +42,15 @@ test('runInteractive reports that a TTY is required when started without a promp
   }
 
   const text = output.join('')
-  assert.match(text, /dclaw interactive mode is ready\./)
-  assert.match(text, /initial prompt: <none>/)
+  assert.match(text, /:: DCLAW \(v0\.1\.0\)/)
+  assert.match(text, /runtime:\s+stub\s+\/runtime to change/)
   assert.match(
     text,
     /Interactive REPL requires a TTY when no prompt is provided\./,
   )
 })
 
-test('runInteractive shows model canonicalization details in the startup header', async () => {
+test('runInteractive keeps the startup header concise after runtime resolution', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-canonical-'))
   const workspaceDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-workspace-'))
   const env = { ...process.env, HOME: homeDir }
@@ -94,8 +93,6 @@ test('runInteractive shows model canonicalization details in the startup header'
       options: {
         cwd: workspaceDir,
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -106,9 +103,31 @@ test('runInteractive shows model canonicalization details in the startup header'
   }
 
   const text = output.join('')
-  assert.match(text, /model: anthropic\/claude-opus-4\.7/)
-  assert.match(text, /model canonicalized to: claude-opus-4-7/)
-  assert.match(text, /catalog match: claude-opus-4-7/)
+  assert.match(text, /runtime:\s+openrouter-claude\s+\/runtime to change/)
+  assert.match(text, /permission mode: default/)
+  assert.doesNotMatch(text, /\[meta\]/)
+})
+
+test('getInteractiveRuntimeLabel prefers the resolved runtime name', () => {
+  assert.equal(
+    getInteractiveRuntimeLabel({
+      runtime: {
+        runtimeName: 'gpt-5.4-mini',
+      } as Parameters<typeof getInteractiveRuntimeLabel>[0]['runtime'],
+      replSession: {
+        sessionId: 'session-123',
+        mode: 'interactive',
+        runtimeName: 'legacy-runtime',
+        provider: 'openai',
+        providerSource: 'user_config',
+        model: 'gpt-5.4',
+        modelSource: 'user_config',
+        permissionMode: 'default',
+        permissionModeSource: 'default',
+      },
+    }),
+    'gpt-5.4-mini',
+  )
 })
 
 test('runInteractive routes to the TUI runner when requested', async () => {
@@ -120,8 +139,6 @@ test('runInteractive routes to the TUI runner when requested', async () => {
       options: {
         cwd: '/tmp/project',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
         interactiveUi: 'tui',
       },
     },
@@ -147,8 +164,6 @@ test('runInteractive keeps the legacy REPL as the default path during phase 0', 
       options: {
         cwd: '/tmp/project',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     },
     {

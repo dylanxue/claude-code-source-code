@@ -90,8 +90,6 @@ test('runResume prints restored transcript when no prompt is provided', async ()
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -170,8 +168,6 @@ test('runResume shows compact boundary metadata for compacted sessions', async (
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -260,8 +256,6 @@ test('runResume prints planning summary for sessions with an attached task board
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -343,8 +337,6 @@ test('runResume recovers a missing plan file for inactive sessions from transcri
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
 

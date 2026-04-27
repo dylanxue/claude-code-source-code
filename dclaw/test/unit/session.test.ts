@@ -707,7 +707,7 @@ test('session store persists transcript messages for resume', async () => {
   try {
     const session = await createSession({
       cwd: '/tmp/project',
-      mode: 'print',
+      mode: 'exec',
       provider: 'stub',
       model: 'stub-model',
       env,

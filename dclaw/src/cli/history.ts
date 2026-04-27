@@ -53,8 +53,9 @@ export async function runHistory(
       `${index + 1}. ${session.meta.sessionId}  ${session.meta.mode}  ${session.meta.updatedAt}`,
     )
     lines.push(`   cwd: ${session.meta.cwd}`)
+    lines.push(`   runtime: ${session.meta.runtimeName ?? 'stub'}`)
     lines.push(
-      `   provider: ${session.meta.provider}${session.meta.model ? ` / ${session.meta.model}` : ''}`,
+      `   provider/model: ${session.meta.provider}${session.meta.model ? ` / ${session.meta.model}` : ''}`,
     )
     lines.push(`   messages: ${session.messageCount}`)
 

@@ -4,8 +4,8 @@ import {
   formatProgressAssistantLines,
   formatProgressToolResultLine,
   formatProgressToolUseLine,
-  formatVerboseLines,
-} from '../../src/cli/verboseEvents.js'
+  formatMessageEventLines,
+} from '../../src/cli/outputFormatting.js'
 import {
   createTextMessage,
   createToolResultMessage,
@@ -93,7 +93,7 @@ test('formatProgressAssistantLines preserves full assistant explanations before 
   ])
 })
 
-test('formatVerboseLines includes tool result previews after tool calls', () => {
+test('formatMessageEventLines includes tool result previews after tool calls', () => {
   const toolUse = createToolUseMessage('assistant', 'Read', {
     file_path: '/tmp/example.ts',
     offset: 1,
@@ -102,7 +102,7 @@ test('formatVerboseLines includes tool result previews after tool calls', () => 
   const toolUseId =
     toolUse.content[0]?.type === 'tool_use' ? toolUse.content[0].id : ''
 
-  const lines = formatVerboseLines([
+  const lines = formatMessageEventLines([
     createTextMessage('assistant', 'I will inspect the file first.'),
     toolUse,
     createToolResultMessage(
@@ -173,16 +173,16 @@ test('formatProgressToolResultLine summarizes Edit and Bash results naturally', 
       {
         name: 'Bash',
         input: {
-          command: 'npx tsx --test test/unit/interactive-session.test.ts test/unit/verbose-events.test.ts',
+          command: 'npx tsx --test test/unit/interactive-session.test.ts test/unit/output-formatting.test.ts',
         },
       },
       {
         ok: true,
         summary:
-          'Ran npx tsx --test test/unit/interactive-session.test.ts test/unit/verbose-events.test.ts',
+          'Ran npx tsx --test test/unit/interactive-session.test.ts test/unit/output-formatting.test.ts',
         output: {
           command:
-            'npx tsx --test test/unit/interactive-session.test.ts test/unit/verbose-events.test.ts',
+            'npx tsx --test test/unit/interactive-session.test.ts test/unit/output-formatting.test.ts',
           stdout: '5 tests passed\nall good\n',
           stderr: '',
           exitCode: 0,
@@ -190,7 +190,7 @@ test('formatProgressToolResultLine summarizes Edit and Bash results naturally', 
         },
       },
     ),
-    'Ran npx tsx --test test/unit/interactive-session.test.ts test/unit/verbose-events.test.ts (exit 0; 5 tests passed)',
+    'Ran npx tsx --test test/unit/interactive-session.test.ts test/unit/output-formatting.test.ts (exit 0; 5 tests passed)',
   )
 })
 

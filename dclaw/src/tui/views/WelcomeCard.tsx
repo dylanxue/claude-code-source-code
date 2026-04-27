@@ -17,7 +17,7 @@ export function WelcomeCard({ card }: Props) {
       </Box>
       <Box marginTop={1}>
         <Text dimColor>{'runtime:    '}</Text>
-        <Text>{card.modelLabel}</Text>
+        <Text>{card.runtimeLabel}</Text>
         <Text color="cyan">{`   ${card.runtimeHint}`}</Text>
       </Box>
       <Box>

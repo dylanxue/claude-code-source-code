@@ -32,7 +32,7 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
 
     const second = await createSession({
       cwd: '/tmp/two',
-      mode: 'print',
+      mode: 'exec',
       provider: 'stub',
       model: 'stub-model',
       sessionId: 'session-two',
@@ -163,6 +163,7 @@ test('runHistory prints recent sessions', async () => {
     const session = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
+      runtimeName: 'default',
       provider: 'stub',
       model: 'stub-model',
       sessionId: 'session-history',
@@ -211,8 +212,6 @@ test('runHistory prints recent sessions', async () => {
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -224,6 +223,8 @@ test('runHistory prints recent sessions', async () => {
   const text = output.join('')
   assert.match(text, /dclaw history/)
   assert.match(text, /session-history/)
+  assert.match(text, /runtime: default/)
+  assert.match(text, /provider\/model: stub \/ stub-model/)
   assert.match(text, /last user: Inspect the file/)
   assert.match(text, /last assistant: Inspect before using Read\./)
   assert.match(text, /last bash sandbox: danger-full-access/)
@@ -246,6 +247,7 @@ test('runHistory can write to a provided output writer', async () => {
     const session = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
+      runtimeName: 'default',
       provider: 'stub',
       model: 'stub-model',
       sessionId: 'session-history-writer',
@@ -264,8 +266,6 @@ test('runHistory can write to a provided output writer', async () => {
           cwd: '/tmp/project',
           permissionMode: 'default',
           stream: false,
-          verbose: false,
-          outputFormat: 'text',
         },
       },
       {
@@ -358,8 +358,6 @@ test('runHistory prints planning summary when a task board is attached', async (
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {
@@ -427,8 +425,6 @@ test('runHistory prints compact boundary metadata for compacted sessions', async
         cwd: '/tmp/project',
         permissionMode: 'default',
         stream: false,
-        verbose: false,
-        outputFormat: 'text',
       },
     })
   } finally {

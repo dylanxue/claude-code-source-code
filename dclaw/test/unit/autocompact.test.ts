@@ -61,7 +61,6 @@ test('autocompact appends a boundary and follow-up messages in the current sessi
       sessionId: session.sessionId,
       prompt: 'follow up after autocompact',
       stream: false,
-      verbose: false,
       env,
     })
 

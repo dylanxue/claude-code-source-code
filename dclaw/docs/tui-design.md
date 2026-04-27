@@ -246,7 +246,6 @@ slash 命令不走灰条，而是单独高亮成一行。
 - `/status`
 - `/runtime`
 - `/skills`
-- 环境诊断摘要
 - 结构化计划摘要
 
 示例：
@@ -849,7 +848,7 @@ QueryEngine
 
 - [x] reducer 对 `assistant_text_delta` 的聚合单测
 - [x] `toolUse -> toolResult` 合并为 activity draft 的单测
-- [x] presenter 在当前 `stream / non-stream / verbose` 主路径下保持现有交互测试通过
+- [x] presenter 在当前 `stream / non-stream` 主路径下保持现有交互测试通过
 - [ ] interrupt 后 partial turn 状态一致性的独立 reducer/presenter 单测
 
 阶段验收：
@@ -949,7 +948,7 @@ QueryEngine
 建议改动文件：
 
 - `dclaw/src/cli/replCommands.ts`
-- `dclaw/src/cli/verboseEvents.ts`
+- `dclaw/src/cli/outputFormatting.ts`
 - `dclaw/src/tui/views/items/*`
 - `dclaw/src/tui/presenters/replCommandPresenter.ts`
 - `dclaw/src/tui/presenters/activityPresenter.ts`
@@ -958,7 +957,6 @@ QueryEngine
 
 - [x] 普通 prompt 与 slash 命令渲染分流正确
 - [x] `/status`、`/runtime`、`/permissions` 这类结构化命令渲染为 card 的单测
-- [x] `/doctor` 这类本地命令仍可进入 activity/prose 的单测
 - [ ] assistant streaming 文本不混入 activity 的单测
 
 阶段验收：

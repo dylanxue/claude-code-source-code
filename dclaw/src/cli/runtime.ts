@@ -285,7 +285,7 @@ export async function prepareCliRuntime(
     toolContext,
     initialMessages,
     maxIterations: resolvedMaxIterations.maxIterations,
-    sessionMode: mode === 'print' ? 'print' : 'interactive',
+    sessionMode: mode === 'exec' ? 'exec' : 'interactive',
   })
 
   return {

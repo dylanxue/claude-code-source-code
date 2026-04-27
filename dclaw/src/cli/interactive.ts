@@ -1,5 +1,4 @@
 import type { InteractiveCommand } from './types.js'
-import { formatVerboseContextLines } from './verboseEvents.js'
 import { runInteractiveReplLoop } from './repl.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { getCliErrorOutput } from './errorFormatting.js'
@@ -48,39 +47,19 @@ export async function runInteractiveLegacyRepl(
 
   const welcomeCard = createWelcomeCardData({
     version,
-    modelLabel: runtime.model ?? runtime.provider,
+    runtimeLabel: runtime.runtimeName ?? runtime.model ?? runtime.provider,
     cwd: command.options.cwd,
   })
   const lines = [formatWelcomeBanner(welcomeCard), '']
 
-  if (command.options.verbose) {
-    lines.push(
-      ...formatVerboseContextLines({
-        mode: 'interactive',
-        cwd: command.options.cwd,
-        provider: runtime.provider,
-        providerSource: runtime.providerSource,
-        model: runtime.model,
-        modelSource: runtime.modelSource,
-        permissionMode,
-        permissionModeSource,
-        stream: command.options.stream,
-        outputFormat: command.options.outputFormat,
-        sessionId: replSession.sessionId,
-        queryTracePath,
-      }),
-    )
-    lines.push('')
-  } else {
-    lines.push(`permission mode: ${permissionMode}`)
-    if (!command.options.stream) {
-      lines.push('stream: disabled')
-    }
-    if (queryTracePath) {
-      lines.push(`query trace: ${queryTracePath}`)
-    }
-    lines.push('')
+  lines.push(`permission mode: ${permissionMode}`)
+  if (!command.options.stream) {
+    lines.push('stream: disabled')
   }
+  if (queryTracePath) {
+    lines.push(`query trace: ${queryTracePath}`)
+  }
+  lines.push('')
 
   process.stdout.write(lines.join('\n') + '\n')
 
@@ -130,7 +109,6 @@ export async function runInteractiveLegacyRepl(
         sessionId: replSession.sessionId,
         prompt,
         stream: replContext.options.stream,
-        verbose: replContext.options.verbose,
         signal: control.signal,
         writeOutput: control.writeOutput,
         flushOutput: control.flushOutput,

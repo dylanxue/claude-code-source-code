@@ -39,11 +39,9 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   const options = {
     cwd: baseCwd,
     runtime: undefined as string | undefined,
-    outputFormat: 'text' as 'text' | 'sse',
     permissionMode: undefined as PermissionMode | undefined,
     maxIterations: undefined as number | undefined,
     stream: true,
-    verbose: false,
     systemPrompt: undefined as string | undefined,
     interactiveUi: 'auto' as InteractiveUiMode,
   }
@@ -64,20 +62,23 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   }
 
   let mode: ParsedCliCommand['mode'] = 'interactive'
-  let sessionId: string | undefined
   const positionals: string[] = []
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
 
     switch (arg) {
+      case 'exec':
+        if (mode === 'doctor') {
+          throw new CliArgumentError('exec cannot be combined with doctor')
+        }
+        mode = 'exec'
+        break
       case '--print':
       case '-p':
-        mode = 'print'
-        break
+        throw new CliArgumentError('Unknown option: --print')
       case '--doctor':
-        mode = 'doctor'
-        break
+        throw new CliArgumentError('Unknown option: --doctor')
       case '--stream':
         options.stream = true
         break
@@ -90,25 +91,6 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
       case '--legacy-repl':
         setInteractiveUiMode('legacy-repl', '--legacy-repl')
         break
-      case '--verbose':
-      case '-d':
-        options.verbose = true
-        break
-      case '--output-format': {
-        const result = takeValue(args, i, arg)
-        if (result.value !== 'text' && result.value !== 'sse') {
-          throw new CliArgumentError(
-            'Unsupported output format: ' +
-              `${result.value}. Supported formats: text, sse`,
-          )
-        }
-        options.outputFormat = result.value
-        if (result.value === 'sse') {
-          options.stream = true
-        }
-        i = result.nextIndex
-        break
-      }
       case '--runtime': {
         const result = takeValue(args, i, arg)
         options.runtime = result.value
@@ -149,21 +131,14 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
         break
       }
       case 'resume':
-        if (mode === 'print' || mode === 'doctor' || mode === 'history') {
-          throw new CliArgumentError('resume cannot be combined with the current mode')
-        }
-        mode = 'resume'
-        sessionId = args[i + 1]
-        if (!sessionId || sessionId.startsWith('-')) {
-          throw new CliArgumentError('Missing session ID for resume')
-        }
-        i += 1
-        break
+        throw new CliArgumentError('Unknown command: resume')
       case 'history':
-        if (mode === 'print' || mode === 'doctor' || mode === 'resume') {
-          throw new CliArgumentError('history cannot be combined with the current mode')
+        throw new CliArgumentError('Unknown command: history')
+      case 'doctor':
+        if (mode === 'exec') {
+          throw new CliArgumentError('doctor cannot be combined with exec')
         }
-        mode = 'history'
+        mode = 'doctor'
         break
       case '--help':
       case '-h':
@@ -182,18 +157,12 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
   const prompt = positionals.length > 0 ? positionals.join(' ') : undefined
 
   if (mode === 'doctor') {
-    return { mode, options }
-  }
-  if (mode === 'history') {
     if (positionals.length > 0) {
-      throw new CliArgumentError('history does not accept a prompt')
+      throw new CliArgumentError('doctor does not accept a prompt')
     }
     return { mode, options }
   }
-  if (mode === 'resume') {
-    return { mode, sessionId: sessionId!, prompt, options }
-  }
-  if (mode === 'print') {
+  if (mode === 'exec') {
     return { mode, prompt, options }
   }
 
@@ -206,21 +175,15 @@ export function formatHelp(): string {
     '',
     'Usage:',
     '  dclaw [prompt]',
-    '  dclaw --print [prompt]',
-    '  dclaw history',
-    '  dclaw resume <session-id> [prompt]',
-    '  dclaw --doctor',
+    '  dclaw exec [prompt]',
+    '  dclaw doctor',
     '',
     'Options:',
-    '  -p, --print               Run in headless print mode',
-    '  --doctor                  Show environment diagnostics',
     '  --tui                     Start the experimental Ink + React TUI',
     '  --legacy-repl             Force the legacy readline REPL',
     '  --runtime <name>          Select runtime profile',
     '  --stream                  Stream assistant output as it arrives (default)',
     '  --no-stream               Disable streaming and wait for the final response',
-    '  -d, --verbose             Show reasoning, content, and tool-call events',
-    '  --output-format <format>  Output format for --print (text, sse)',
     '  --permission-mode <mode>  Select permission mode (default, accept-edits, bypass-permissions)',
     '  --max-iterations <n>      Override the per-turn tool/LLM iteration cap',
     '  --system-prompt <text>    Append a one-off system prompt',

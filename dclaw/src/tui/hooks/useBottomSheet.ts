@@ -10,6 +10,7 @@ export type BottomSheetState = {
   command: ReplCommandCatalogItem
   title: string
   description: string
+  dismissInputValue: string
   options: BottomSheetOption[]
   selectedIndex: number
 }
@@ -81,6 +82,7 @@ export function createBottomSheetForInput(
     command,
     title: getBottomSheetTitle(command),
     description: getBottomSheetDescription(command),
+    dismissInputValue: '',
     options,
     selectedIndex: 0,
   }

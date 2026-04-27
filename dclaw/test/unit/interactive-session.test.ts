@@ -120,7 +120,6 @@ test('runInteractiveSessionPrompt shows coarse progress in default mode', async 
       sessionId: session.sessionId,
       prompt: 'inspect the file',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -215,7 +214,6 @@ test('runInteractiveSessionPrompt emits UI events for transcript rendering', asy
       sessionId: session.sessionId,
       prompt: 'inspect the file',
       stream: true,
-      verbose: false,
       env,
       writeOutput() {},
       flushOutput() {},
@@ -315,7 +313,6 @@ test('runInteractiveSessionPrompt falls back to generic thinking only when no co
       sessionId: session.sessionId,
       prompt: 'inspect the file',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -409,7 +406,6 @@ test('runInteractiveSessionPrompt shows reasoning progress when no tool result a
       sessionId: session.sessionId,
       prompt: 'inspect the file',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -534,7 +530,6 @@ test('runInteractiveSessionPrompt prefers assistant text over reasoning when exp
       sessionId: session.sessionId,
       prompt: 'inspect the file',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -658,7 +653,6 @@ test('runInteractiveSessionPrompt preserves full assistant text before tool use'
       sessionId: session.sessionId,
       prompt: 'continue',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -772,7 +766,6 @@ test('runInteractiveSessionPrompt falls back to thinking when a tool call has no
       sessionId: session.sessionId,
       prompt: 'inspect the file',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -825,7 +818,6 @@ test('runInteractiveSessionPrompt persists partial turn messages before rethrowi
         sessionId: session.sessionId,
         prompt: 'continue',
         stream: true,
-        verbose: false,
         env,
       }),
       /network failed/,
@@ -939,7 +931,6 @@ test('runInteractiveSessionPrompt does not print duplicate assistant text when o
       sessionId: session.sessionId,
       prompt: 'continue',
       stream: false,
-      verbose: false,
       env,
     })
   } finally {
@@ -1093,7 +1084,6 @@ test('runInteractiveSessionPrompt does not duplicate streamed assistant text and
       sessionId: session.sessionId,
       prompt: '你好',
       stream: true,
-      verbose: false,
       env,
     })
   } finally {

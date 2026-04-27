@@ -26,8 +26,7 @@
 交付：
 
 - `dclaw`
-- `dclaw --print`
-- `dclaw resume`
+- `dclaw exec`
 - `dclaw doctor`
 
 ### 阶段 2：Query Engine 与消息协议

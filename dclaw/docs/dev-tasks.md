@@ -11,7 +11,7 @@
 - 阶段 11 在 `v0.3` 只做 `subagent`，`worktree / coordinator / 多 worker 调度` 统一后置到 `v0.4`
 - 阶段 12 在 `v0.3` 只做 `skills`，`MCP / plugins / remote bridge` 统一后置到 `v0.4`
 - 阶段 11-1 已有真实代码落地：`src/agent/` 已具备最小 `types/store/runtime/session` 骨架，支持 agent store、parent turn links、独立 child transcript，以及独立 `maxTurns/maxIterations`；下一步应直接进入 `Agent` tool 闭环，而不是继续停留在“未开始”
-- 多模态输入首轮已真实落地，但不进入当前 `v0.2` 主线：共享 `image block`、Anthropic / OpenAI 用户图片输入、`WebFetch` 远程图片读取，以及“工具结果图片 -> runtime 临时图片消息 -> 后续继续推理”的统一桥接链路都已存在；`compact / resume` 当前也可恢复这类图片上下文。剩余未做项主要是本地图片读取工具、`QueryEngine` 公开结构化输入、interactive 图片输入与 `--print --image`
+- 多模态输入首轮已真实落地，但不进入当前 `v0.2` 主线：共享 `image block`、Anthropic / OpenAI 用户图片输入、`WebFetch` 远程图片读取，以及“工具结果图片 -> runtime 临时图片消息 -> 后续继续推理”的统一桥接链路都已存在；`compact / resume` 当前也可恢复这类图片上下文。剩余未做项主要是本地图片读取工具、`QueryEngine` 公开结构化输入、interactive 图片输入与 `exec --image`
 - 多模态链路又补了一层受控降级：当当前主 runtime 不支持视觉输入、但额外配置了 vision runtime 时，`Read/WebFetch(image)` 会走最小 `vision side query`，并把图片转成文本结果继续喂回主流程；这条 side query 只吃当前用户请求与当前这次 tool use 的局部意图，不把整段会话搬过去
 
 ## Todo
@@ -194,7 +194,7 @@
 
 - [ ] `v0.4`：阶段 11 的 `worktree isolation / coordinator mode / 多 worker 调度 / mailbox` 继续后置
 - [ ] `v0.4`：阶段 12 的 `MCP / plugins / remote bridge` 继续后置
-- [ ] `v0.4`：多模态剩余项继续后置，包括 `QueryEngine` 结构化输入、interactive 图片输入与 `--print --image`
+- [ ] `v0.4`：多模态剩余项继续后置，包括 `QueryEngine` 结构化输入、interactive 图片输入与 `exec --image`
 - [ ] `v0.4`：继续评估 `vision side query` 的后续扩展边界；当前只覆盖 `Read/WebFetch(image)`，且 `toolUseIntent` 仅按 `assistant text -> reasoning/thinking -> latest user request` 的顺序提取，不扩成通用 provider failover 或全局多模态路由
 
 - [ ] backlog：继续细化 `Bash / Glob / Grep` 的统计、分页、结果映射与模型侧结果收口
@@ -559,7 +559,7 @@
 - [x] 定义 CLI 命令结构
 - [x] 实现参数解析模块
 - [x] 实现 interactive 入口
-- [x] 实现 headless `--print` 入口
+- [x] 实现 headless `exec` 入口
 - [x] 实现 `doctor` 入口
 - [x] 实现 `resume` 入口占位
 - [x] 增加 `package.json` 运行脚本
@@ -642,7 +642,7 @@
 - [x] 为 `OpenAI` provider 增加 `chat/completions` 兼容调用
 - [x] 增加 `.env` / `.env.local` 自动加载
 - [x] 为 `Anthropic` 与 `OpenAI` provider 补上基础 streaming
-- [x] 为 CLI 增加 `--stream` 与 `--output-format sse`
+- [x] CLI 目前保留 `--stream`；旧的 `--output-format sse` 已移除
 - [x] 为 `OpenAI Responses API` 补上更完整的流式事件兼容，包括 `response.output_text.*`、`response.reasoning_summary_text.*`、`response.function_call_arguments.*`、`response.output_item.*` 与 `response.done` 回退收尾
 - [x] 为 `OpenAI Responses API` 补上首批更细 request 参数支持，包括 `text.verbosity`、`reasoning.effort`、`store`、`previous_response_id`、`parallel_tool_calls` 与 `max_tool_calls`
 - [x] 为 `OpenAI Responses API` 补上第二批 request 参数支持，包括 `include`、`truncation`、`metadata` 与 `text.format`
@@ -662,9 +662,9 @@
   - `DCLAW_ENABLE_STREAM_WATCHDOG`
   - `DCLAW_STREAM_IDLE_TIMEOUT_MS`
 - [x] 为 provider 错误补上结构化分类：`auth / rate_limit / overloaded / bad_request / server_error / network / unknown`
-- [x] 为 CLI 补上结构化 provider 错误格式化与 `response.error` SSE 事件输出
+- [x] 为 CLI 补上结构化 provider 错误格式化
 - [x] 将 `main.ts` 收紧为仅在直接执行时自启动，避免导入测试时副作用执行
-- [x] 为 CLI 失败路径补上子进程级集成测试，覆盖普通 stderr 与 SSE `response.error`
+- [x] 为 CLI 失败路径补上子进程级集成测试，覆盖普通 stderr 输出
 - [x] 为 `MiniMax / Kimi / GLM` 补上内置 model limits
 - [x] 用本地 provider 配置完成基础 smoke test
 - [x] 为 `Read` 补上明确 input schema，并兼容 `path` 作为 `file_path` 别名
@@ -689,7 +689,7 @@
   - `src/session/paths.ts`
   - `src/session/store.ts`
   - `src/session/resume.ts`
-- [x] 让 `interactive / --print / resume` 接入最小 session 持久化与恢复链路
+- [x] 让 `interactive / exec / resume` 接入最小 session 持久化与恢复链路
 - [x] 让 `resume` 从占位输出推进到可在恢复历史消息后继续执行新的 prompt
 - [x] 将 `QueryEngine` 扩展为支持从恢复的 `initialMessages` 继续执行
 - [x] 把 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
@@ -697,7 +697,6 @@
   - `/help`
   - `/session` / `/info`
   - `/history`
-  - `/doctor`
   - `/model [model]`
   - `/permissions [mode]`
   - `/config`

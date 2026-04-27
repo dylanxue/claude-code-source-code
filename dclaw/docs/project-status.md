@@ -38,7 +38,7 @@
 - 建立文档编号版入口
 - 初始化进展跟踪文档
 - 实现最小 CLI 运行入口
-- 跑通 `interactive / --print / --doctor / resume` 四条入口
+- 跑通 `interactive / exec / doctor` 三条入口
 - 实现最小消息协议
 - 实现最小 LLM client/provider 抽象
 - 接入第一个真实 LLM provider：`Anthropic`
@@ -59,7 +59,7 @@
 - 增加模型 token limit 配置层，支持内置默认值、环境变量覆盖和外部 JSON 覆盖
 - 为 `MiniMax / Kimi / GLM` 补上内置 model limits，并让兼容模型可同时命中 `openai / anthropic` 两侧 provider
 - 将 `doctor` 扩展为输出解析后的 model limits
-- 将 `doctor` 与 REPL `/doctor` 扩展为输出 provider reliability 诊断，包括 `max retries / retry backoff / request timeout / stream watchdog / stream idle timeout`
+- 将 `dclaw doctor` 扩展为输出 provider reliability 诊断，包括 `max retries / retry backoff / request timeout / stream watchdog / stream idle timeout`
 - 将 `OpenAI` provider 扩展为支持 `responses / chat-completions` 两种 API style 自动适配
 - 为 `Anthropic` 与 `OpenAI` provider 补上基础 streaming
 - 为 `OpenAI Responses API` 补上更完整的流式事件兼容，包括 `response.output_text.*`、`response.reasoning_summary_text.*`、`response.function_call_arguments.*`、`response.output_item.*` 与 `response.done` 回退收尾
@@ -68,9 +68,9 @@
 - 为 `OpenAI Responses API` 补上基于 message item 的流式文本回退路径，避免只依赖 `response.output_text.*`
 - 为 `OpenAI Responses API` 补上 `response.content_part.*` 与 `response.refusal.*` 事件兼容，并接到实时文本增量回调
 - 为 `OpenAI Responses API` 补上 `output_text.annotations` 与 `response.output_text.annotation.added` 兼容，并将 annotation 保留到 `text` 内容块
-- 为 CLI 增加 `--stream` 与 `--output-format sse`
+- CLI 当前保留 `--stream`；旧的 `--output-format sse` 已移除
 - 为 headless 输出增加 SSE 事件流
-- 为 CLI 补上结构化 provider 错误格式化，并在 `--print --output-format sse` 下输出 `response.error`
+- 为 CLI 补上结构化 provider 错误格式化，失败统一走 stderr 文本输出
 - 将 `main.ts` 收紧为仅在直接执行时自启动，并为 CLI 失败路径补上子进程级集成测试
 - 使用本地 `.env.local` 配置完成 `OpenAI` 与 `Anthropic` 的真实 smoke test
 - 实现最小 QueryEngine 并接入 CLI
@@ -136,7 +136,7 @@
   - 默认：`~/.dclaw/sessions/<session-id>/meta.json`
   - 默认：`~/.dclaw/sessions/<session-id>/messages.jsonl`
   - 若设置 `DCLAW_HOME`，则改为 `<DCLAW_HOME>/sessions/<session-id>/...`
-- 让 `interactive / --print / resume` 接入最小 session 持久化与恢复链路
+- 让 `interactive / exec / resume` 接入最小 session 持久化与恢复链路
 - 让 `resume` 支持在恢复历史消息后继续执行新的 prompt
 - 将 `QueryEngine` 扩展为支持从恢复的 `initialMessages` 继续执行
 - 将 `interactive` 从“单次 prompt 入口”推进到真正的 REPL 交互循环
@@ -144,7 +144,7 @@
   - `/help`
   - `/session` / `/info`
   - `/history`
-  - `/doctor`
+  - `dclaw doctor`
   - `/model [model]`
   - `/permissions [mode]`
   - `/config`
@@ -289,5 +289,5 @@
 - 其余 backlog 中的工具契约、provider 错误提示、`session / resume` 体验收口项与多模态剩余项统一排入 `v0.4`
 - 多模态后续推进也继续收口在 `v0.4`：
   - `QueryEngine` 公开结构化输入
-  - interactive 图片输入与 `--print --image`
+  - interactive 图片输入与 `exec --image`
   - 是否继续把 `vision side query` 扩到更多图片来源与更完整的恢复链路

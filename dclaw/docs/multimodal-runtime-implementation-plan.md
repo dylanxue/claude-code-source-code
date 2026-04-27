@@ -253,7 +253,7 @@ export type ResolvedRuntimeProfile = {
   - `runtimeProfile`
 - [x] `AgentRuntime` / subagent context 接入 `runtimeProfile`
 - [x] `QueryEngine` 统一接入 `runtimeProfile.primary`
-- [x] `doctor` 和 `/doctor` 输出：
+- [x] `doctor` 输出：
   - `primary`
   - `imageFallback`
   - 当前能力位
@@ -313,7 +313,7 @@ export type ResolvedRuntimeProfile = {
 - `src/types/tool.ts`
 - `src/tools/builtin/readFilePrompt.ts`
 - `src/tools/builtin/webFetchPrompt.ts`
-- `src/cli/verboseEvents.ts`
+- `src/cli/outputFormatting.ts`
 
 ### 6.3 建议类型
 
@@ -366,7 +366,7 @@ export type UnsupportedContentError = {
 - `test/unit/read.test.ts`
 - `test/unit/read-limits.test.ts`
 - `test/unit/webfetch-ask.test.ts`
-- `test/unit/verbose-events.test.ts`
+- `test/unit/output-formatting.test.ts`
 
 覆盖点：
 
@@ -523,7 +523,7 @@ export type UnsupportedContentError = {
 
 - `src/cli/doctor.ts`
 - `src/cli/replCommands.ts`
-- `src/cli/verboseEvents.ts`
+- `src/cli/outputFormatting.ts`
 - `src/cli/parseArgs.ts`
 - `docs/multimodal-runtime-design.md`
 - `docs/multimodal-input-todo.md`
@@ -537,8 +537,8 @@ export type UnsupportedContentError = {
   - image fallback
   - supports image/pdf
   - resolved token limits
-- [ ] `/config` 或 `/doctor` 输出用户覆盖是否生效
-- [ ] `/config` 或 `/doctor` 输出当前 runtime 来自：
+- [ ] `/config` 或 `doctor` 输出用户覆盖是否生效
+- [ ] `/config` 或 `doctor` 输出当前 runtime 来自：
   - user config
   - workspace config
   - CLI override

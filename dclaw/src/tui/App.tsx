@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks'
 import React, { useEffect, useReducer, useRef, useState } from 'react'
 import { Box, useApp, useInput, useStdin } from 'ink'
 import { getCliErrorInfo } from '../cli/errorFormatting.js'
-import { formatProgressThinkingLine } from '../cli/verboseEvents.js'
+import { formatProgressThinkingLine } from '../cli/outputFormatting.js'
 import {
   createInitialUiState,
   DEFAULT_COMPOSER_PLACEHOLDER,
@@ -126,6 +126,13 @@ function getInputChars(value: string): string[] {
 
 function clampCursorIndex(value: string, cursorIndex: number): number {
   return Math.min(Math.max(0, cursorIndex), getInputChars(value).length)
+}
+
+function createComposerInputState(value: string): ComposerInputState {
+  return {
+    value,
+    cursorIndex: getInputChars(value).length,
+  }
 }
 
 function moveComposerCursor(
@@ -1242,6 +1249,8 @@ export function TuiApp({
       }
 
       if (bottomSheet) {
+        setComposerInput(createComposerInputState(bottomSheet.dismissInputValue))
+        setActiveSuggestionIndex(0)
         setBottomSheet(undefined)
         return
       }
@@ -1250,7 +1259,7 @@ export function TuiApp({
         return
       }
 
-      setComposerInput({ value: '', cursorIndex: 0 })
+      setComposerInput(createComposerInputState(''))
       return
     }
 
