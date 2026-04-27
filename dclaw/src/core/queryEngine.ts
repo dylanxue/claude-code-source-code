@@ -30,6 +30,7 @@ import {
 } from '../types/message.js'
 import { loadTaskBoardForSession } from '../tasks/store.js'
 import type { ToolRegistry } from '../tools/registry.js'
+import type { SkillRegistry } from '../skills/registry.js'
 import {
   DEFAULT_QUERY_MAX_ITERATIONS,
   executeSingleTurn,
@@ -239,6 +240,12 @@ export class QueryEngine {
     this.toolContext.permissionMode = permissionMode
   }
 
+  setAskUserQuestions(
+    askUserQuestions: ToolContext['askUserQuestions'] | undefined,
+  ): void {
+    this.toolContext.askUserQuestions = askUserQuestions
+  }
+
   setPlanFilePath(planFilePath: string | undefined): void {
     this.toolContext.planFilePath = planFilePath
   }
@@ -250,6 +257,15 @@ export class QueryEngine {
   setQueryTraceSink(queryTraceSink: QueryTraceSink | undefined): void {
     this.queryTraceSink = queryTraceSink
     this.toolContext.queryTraceSink = queryTraceSink
+  }
+
+  setSkillRegistry(skillRegistry: SkillRegistry): void {
+    this.toolContext.skillRegistry = skillRegistry
+    if (this.toolContext.agentRuntime) {
+      this.toolContext.agentRuntime.skillRegistry = skillRegistry
+    }
+    this.sentSkillNames.clear()
+    this.suppressNextSkillListing = false
   }
 
   getSessionId(): string | undefined {

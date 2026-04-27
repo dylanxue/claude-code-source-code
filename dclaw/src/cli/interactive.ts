@@ -7,6 +7,7 @@ import { maybeHandleReplCommand } from './replCommands.js'
 import { resolveInteractiveUiMode } from './interactiveUi.js'
 import { runInteractiveTui } from './interactiveTui.js'
 import { createInteractiveContext } from './interactiveContext.js'
+import { createWelcomeCardData, formatWelcomeBanner } from './welcome.js'
 
 type InteractiveRunners = {
   runLegacyRepl: (command: InteractiveCommand) => Promise<void>
@@ -37,8 +38,7 @@ export async function runInteractiveLegacyRepl(
   const interactiveContext = await createInteractiveContext(command)
   const {
     runtime,
-    dclawMdEntries,
-    toolRegistry,
+    version,
     replSession,
     replOptions,
     replContext,
@@ -46,36 +46,12 @@ export async function runInteractiveLegacyRepl(
   } = interactiveContext
   const { permissionMode, permissionModeSource } = interactiveContext
 
-  const lines = [
-    'dclaw interactive mode is ready.',
-    `cwd: ${command.options.cwd}`,
-    `provider: ${runtime.provider}`,
-    `provider source: ${runtime.providerSource}`,
-    `model: ${runtime.model ?? 'default'}`,
-    `model source: ${runtime.modelSource}`,
-    ...(runtime.model && runtime.canonicalModel && runtime.canonicalModel !== runtime.model
-      ? [`model canonicalized to: ${runtime.canonicalModel}`]
-      : []),
-    ...(runtime.model
-      ? [`catalog match: ${runtime.catalogMatch ?? 'none'}`]
-      : []),
-    `image input: ${runtime.primary.modelCapabilities.supportsImageInput ? 'supported' : 'not supported'}`,
-    `vision side query: ${runtime.imageFallback ? `${runtime.imageFallback.provider} / ${runtime.imageFallback.model ?? 'default'}` : 'not configured'}`,
-    `permission mode: ${permissionMode}`,
-    `permission mode source: ${permissionModeSource}`,
-    `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
-  ]
-
-  if (command.options.systemPrompt) {
-    lines.push('system prompt override: enabled')
-  }
-  lines.push(`dclaw.md files loaded: ${dclawMdEntries.length}`)
-  lines.push(`tools loaded: ${toolRegistry.list().length}`)
-  if (queryTracePath) {
-    lines.push(`query trace: ${queryTracePath}`)
-  }
-  lines.push(`initial prompt: ${command.prompt ?? '<none>'}`)
-  lines.push('')
+  const welcomeCard = createWelcomeCardData({
+    version,
+    modelLabel: runtime.model ?? runtime.provider,
+    cwd: command.options.cwd,
+  })
+  const lines = [formatWelcomeBanner(welcomeCard), '']
 
   if (command.options.verbose) {
     lines.push(
@@ -94,6 +70,15 @@ export async function runInteractiveLegacyRepl(
         queryTracePath,
       }),
     )
+    lines.push('')
+  } else {
+    lines.push(`permission mode: ${permissionMode}`)
+    if (!command.options.stream) {
+      lines.push('stream: disabled')
+    }
+    if (queryTracePath) {
+      lines.push(`query trace: ${queryTracePath}`)
+    }
     lines.push('')
   }
 
@@ -116,6 +101,8 @@ export async function runInteractiveLegacyRepl(
           session: replContext.session,
           rotateQueryTrace: replContext.rotateQueryTrace,
           switchRuntime: replContext.switchRuntime,
+          listSkillStatuses: replContext.listSkillStatuses,
+          setSkillEnabled: replContext.setSkillEnabled,
         }, {
           writeOutput: control.writeOutput,
         })
@@ -131,6 +118,8 @@ export async function runInteractiveLegacyRepl(
           session: replContext.session,
           rotateQueryTrace: replContext.rotateQueryTrace,
           switchRuntime: replContext.switchRuntime,
+          listSkillStatuses: replContext.listSkillStatuses,
+          setSkillEnabled: replContext.setSkillEnabled,
         })
       ) {
         return
@@ -172,6 +161,8 @@ export async function runInteractiveLegacyRepl(
             session: replContext.session,
             rotateQueryTrace: replContext.rotateQueryTrace,
             switchRuntime: replContext.switchRuntime,
+            listSkillStatuses: replContext.listSkillStatuses,
+            setSkillEnabled: replContext.setSkillEnabled,
           },
           {
             allowDuringActivePrompt: true,

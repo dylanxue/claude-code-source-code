@@ -126,11 +126,10 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
         if (
           result.value !== 'default' &&
           result.value !== 'accept-edits' &&
-          result.value !== 'bypass-permissions' &&
-          result.value !== 'plan'
+          result.value !== 'bypass-permissions'
         ) {
           throw new CliArgumentError(
-            `Unsupported permission mode: ${result.value}. Supported modes: default, accept-edits, bypass-permissions, plan`,
+            `Unsupported permission mode: ${result.value}. Supported modes: default, accept-edits, bypass-permissions`,
           )
         }
         options.permissionMode = result.value
@@ -222,7 +221,7 @@ export function formatHelp(): string {
     '  --no-stream               Disable streaming and wait for the final response',
     '  -d, --verbose             Show reasoning, content, and tool-call events',
     '  --output-format <format>  Output format for --print (text, sse)',
-    '  --permission-mode <mode>  Select permission mode',
+    '  --permission-mode <mode>  Select permission mode (default, accept-edits, bypass-permissions)',
     '  --max-iterations <n>      Override the per-turn tool/LLM iteration cap',
     '  --system-prompt <text>    Append a one-off system prompt',
     '  --cwd <path>              Override working directory',

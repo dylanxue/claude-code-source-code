@@ -5,6 +5,7 @@ import {
   type PreparedCliRuntime,
 } from './runtime.js'
 import type { CommonCliOptions, InteractiveCommand } from './types.js'
+import { readCliVersion } from './version.js'
 
 export type InteractiveContextState = Pick<
   PreparedCliRuntime,
@@ -16,7 +17,10 @@ export type InteractiveContextState = Pick<
   | 'drainBackgroundWork'
   | 'permissionMode'
   | 'permissionModeSource'
+  | 'listSkillStatuses'
+  | 'setSkillEnabled'
 > & {
+  version: string
   queryTracePath?: string
   replSession: ReplSessionState
   replOptions: CommonCliOptions
@@ -27,6 +31,7 @@ export async function createInteractiveContext(
   command: InteractiveCommand,
 ): Promise<InteractiveContextState> {
   const prepared = await prepareCliRuntime(command.options, 'interactive')
+  const version = await readCliVersion()
   const session = await createSession({
     cwd: command.options.cwd,
     mode: 'interactive',
@@ -50,6 +55,7 @@ export async function createInteractiveContext(
 
   const state: InteractiveContextState = {
     ...prepared,
+    version,
     queryTracePath,
     replSession,
     replOptions,
@@ -61,6 +67,8 @@ export async function createInteractiveContext(
     options: state.replOptions,
     session: state.replSession,
     rotateQueryTrace: state.rotateQueryTrace,
+    listSkillStatuses: state.listSkillStatuses,
+    setSkillEnabled: state.setSkillEnabled,
     switchRuntime: async (runtimeName: string) => {
       await state.drainBackgroundWork()
       const nextOptions = {
@@ -90,6 +98,8 @@ export async function createInteractiveContext(
       state.engine = nextEngine
       state.rotateQueryTrace = nextPrepared.rotateQueryTrace
       state.drainBackgroundWork = nextPrepared.drainBackgroundWork
+      state.listSkillStatuses = nextPrepared.listSkillStatuses
+      state.setSkillEnabled = nextPrepared.setSkillEnabled
       state.permissionMode =
         state.replSession.permissionMode as typeof nextPrepared.permissionMode
       state.permissionModeSource =
@@ -98,6 +108,8 @@ export async function createInteractiveContext(
       state.replOptions.runtime = runtimeName
       state.replContext.engine = nextEngine
       state.replContext.rotateQueryTrace = nextPrepared.rotateQueryTrace
+      state.replContext.listSkillStatuses = nextPrepared.listSkillStatuses
+      state.replContext.setSkillEnabled = nextPrepared.setSkillEnabled
       state.replSession.provider = nextPrepared.runtime.provider
       state.replSession.providerSource = nextPrepared.runtime.providerSource
       state.replSession.model = nextPrepared.runtime.model

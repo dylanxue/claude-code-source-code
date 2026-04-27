@@ -15,6 +15,7 @@ import {
   describePlanModeToolUse,
   describeSystemReminderText,
   getTaskBoardObservationLines,
+  isSystemReminderText,
 } from '../tasks/observability.js'
 import { loadTaskBoard } from '../tasks/store.js'
 import { getSessionsDir } from './paths.js'
@@ -25,9 +26,13 @@ import {
   type SessionMeta,
 } from './store.js'
 
+const MAX_TITLE_LENGTH = 80
+const MAX_TITLE_SOURCE_MESSAGES = 8
+
 export type SessionHistoryEntry = {
   meta: SessionMeta
   messageCount: number
+  conversationTitle: string
   lastUserText?: string
   lastAssistantText?: string
   lastBashSandboxMode?: string
@@ -43,6 +48,71 @@ function truncate(value: string, maxLength: number = 120): string {
   return value.length <= maxLength
     ? value
     : `${value.slice(0, maxLength)}...`
+}
+
+function normalizeTitleText(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/^["'`]+|["'`]+$/gu, '')
+    .trim()
+}
+
+function isLowInformationContinuation(value: string): boolean {
+  const normalized = normalizeTitleText(value).toLowerCase()
+  return /^(继续|继续吧|接着|接着来|下一步|好的|好|嗯|可以|是的|继续|continue|go on|next|ok|yes)$/iu.test(
+    normalized,
+  )
+}
+
+function summarizeUserMessageForTitle(message: Message): string | undefined {
+  const text = normalizeTitleText(getTextContent(message))
+  if (text.length > 0 && isSystemReminderText(text)) {
+    return undefined
+  }
+
+  if (text.length === 0) {
+    return summarizeMessage(message)
+  }
+
+  return truncate(text, MAX_TITLE_LENGTH)
+}
+
+function getConversationTitle(messages: Message[]): string {
+  const recentUserTitles = [...messages]
+    .reverse()
+    .filter(
+      message =>
+        message.role === 'user' &&
+        isVisibleConversationMessage(message) &&
+        hasUserTitleContent(message),
+    )
+    .slice(0, MAX_TITLE_SOURCE_MESSAGES)
+    .map(summarizeUserMessageForTitle)
+    .filter((title): title is string => Boolean(title))
+
+  const informativeTitle = recentUserTitles.find(
+    title => !isLowInformationContinuation(title),
+  )
+  if (informativeTitle) {
+    return informativeTitle
+  }
+
+  const fallbackTitle = recentUserTitles[0]
+  if (fallbackTitle) {
+    return fallbackTitle
+  }
+
+  const lastAssistantMessage = [...messages]
+    .reverse()
+    .find(
+      message =>
+        message.role === 'assistant' && isVisibleConversationMessage(message),
+    )
+  const assistantTitle = lastAssistantMessage
+    ? summarizeMessage(lastAssistantMessage)
+    : undefined
+
+  return assistantTitle ?? '<empty session>'
 }
 
 function summarizeMessage(message: Message): string | undefined {
@@ -90,10 +160,13 @@ function summarizeMessage(message: Message): string | undefined {
   return undefined
 }
 
-function hasTextContent(message: Message): boolean {
-  return message.content.some(
-    block => block.type === 'text' && block.text.trim().length > 0,
-  )
+function hasUserTitleContent(message: Message): boolean {
+  const text = getTextContent(message).trim()
+  if (text.length === 0) {
+    return false
+  }
+
+  return !isSystemReminderText(text)
 }
 
 function isVisibleConversationMessage(message: Message): boolean {
@@ -201,9 +274,13 @@ export async function listSessionHistory(
 ): Promise<SessionHistoryEntry[]> {
   const metas = await listSessionMetas(env)
 
-  return Promise.all(
-    metas.map(async meta => {
+  const sessions: Array<SessionHistoryEntry | null> = await Promise.all(
+    metas.map(async (meta): Promise<SessionHistoryEntry | null> => {
       const messages = await loadSessionMessages(meta.sessionId, env)
+      if (messages.length === 0) {
+        return null
+      }
+
       const compactBoundaries = getCompactBoundaryMessages(messages)
       const lastCompactBoundary = getLastCompactBoundary(messages)
       const persistedToolResultInfo =
@@ -218,7 +295,7 @@ export async function listSessionHistory(
           message =>
             message.role === 'user' &&
             isVisibleConversationMessage(message) &&
-            hasTextContent(message),
+            hasUserTitleContent(message),
         )
       const lastAssistantMessage = [...messages]
         .reverse()
@@ -226,26 +303,37 @@ export async function listSessionHistory(
           message =>
             message.role === 'assistant' && isVisibleConversationMessage(message),
         )
+      const lastUserText = lastUserMessage
+        ? summarizeMessage(lastUserMessage)
+        : undefined
+      const lastAssistantText = lastAssistantMessage
+        ? summarizeMessage(lastAssistantMessage)
+        : undefined
+      const lastBashSandboxMode = getLastBashSandboxMode(messages)
+      const lastCompactBoundaryLabel = lastCompactBoundary
+        ? formatCompactBoundaryLabel(lastCompactBoundary)
+        : undefined
 
       return {
         meta,
         messageCount: messages.length,
-        lastUserText: lastUserMessage
-          ? summarizeMessage(lastUserMessage)
-          : undefined,
-        lastAssistantText: lastAssistantMessage
-          ? summarizeMessage(lastAssistantMessage)
-          : undefined,
-        lastBashSandboxMode: getLastBashSandboxMode(messages),
+        conversationTitle: getConversationTitle(messages),
+        ...(lastUserText ? { lastUserText } : {}),
+        ...(lastAssistantText ? { lastAssistantText } : {}),
+        ...(lastBashSandboxMode ? { lastBashSandboxMode } : {}),
         persistedToolResultCount: persistedToolResultInfo.count,
-        lastPersistedToolResultPath: persistedToolResultInfo.lastPath,
+        ...(persistedToolResultInfo.lastPath
+          ? { lastPersistedToolResultPath: persistedToolResultInfo.lastPath }
+          : {}),
         compactBoundaryCount: compactBoundaries.length,
-        lastCompactBoundaryLabel: lastCompactBoundary
-          ? formatCompactBoundaryLabel(lastCompactBoundary)
-          : undefined,
+        ...(lastCompactBoundaryLabel ? { lastCompactBoundaryLabel } : {}),
         planningSummary: board ? getTaskBoardObservationLines(board) : [],
         subagents,
       }
     }),
+  )
+
+  return sessions.filter(
+    (session): session is SessionHistoryEntry => Boolean(session),
   )
 }

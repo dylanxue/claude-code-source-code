@@ -48,13 +48,13 @@ import {
 import type { TaskBoard } from '../tasks/types.js'
 import { formatTranscript } from '../session/transcript.js'
 import type { PermissionMode } from '../types/tool.js'
+import type { SkillStatus } from '../skills/enablement.js'
 import {
   getModelVisibleMessages,
   type Message,
 } from '../types/message.js'
 import {
   buildConfigAwareEnvWithSources,
-  loadDclawConfigFiles,
 } from './configFile.js'
 import {
   appendModelLimitLines,
@@ -64,7 +64,6 @@ import {
   statusLine,
 } from './diagnostics.js'
 import { resolveMaxIterations } from './maxIterationsConfig.js'
-import { runHistory } from './history.js'
 import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { CommonCliOptions } from './types.js'
 
@@ -94,17 +93,29 @@ export type ReplCommandContext = {
     runtime: ResolvedLlmRuntimeConfig
     queryTracePath?: string
   }>
+  listSkillStatuses?: () => Promise<SkillStatus[]>
+  setSkillEnabled?: (
+    skillName: string,
+    enabled: boolean,
+  ) => Promise<SkillStatus[]>
 }
 
 export type ReplCommandPresentationKind =
   | 'assistant_note'
   | 'structured_card'
 
+export type ReplCommandArgKind =
+  | 'none'
+  | 'freeform'
+  | 'enum'
+
 type ReplCommandDefinition = {
   name: string
   aliases?: string[]
+  displayName?: string
   description: string
   argumentHint?: string
+  argKind?: ReplCommandArgKind
   canRunWhileBusy?: boolean
   presentationKind?: ReplCommandPresentationKind
   presentationTitle?: string
@@ -117,8 +128,10 @@ type ReplCommandDefinition = {
 export type ReplCommandCatalogItem = {
   name: string
   aliases?: string[]
+  displayName: string
   description: string
   argumentHint?: string
+  argKind: ReplCommandArgKind
   canRunWhileBusy?: boolean
   presentationKind: ReplCommandPresentationKind
   presentationTitle?: string
@@ -137,19 +150,6 @@ function writeReplOutput(text: string): void {
 
 function printLines(lines: string[]): void {
   writeReplOutput(lines.join('\n') + '\n')
-}
-
-function parsePositiveInteger(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined
-  }
-
-  const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    return undefined
-  }
-
-  return parsed
 }
 
 async function ensureBoardPlanFile(board: TaskBoard): Promise<TaskBoard> {
@@ -221,7 +221,7 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
   const lastCompactBoundary = getLastCompactBoundary(messages)
 
   const lines = [
-    'current session:',
+    'status:',
     `session id: ${context.session.sessionId}`,
     `mode: ${context.session.mode}`,
     `cwd: ${context.options.cwd}`,
@@ -288,10 +288,6 @@ async function printTranscript(
     ...(transcriptLines.length > 0 ? transcriptLines : ['<empty>']),
     '',
   ])
-}
-
-function clearTerminal(): void {
-  process.stdout.write('\x1b[2J\x1b[H')
 }
 
 async function clearConversation(context: ReplCommandContext): Promise<void> {
@@ -835,6 +831,52 @@ function printCurrentPermissionMode(context: ReplCommandContext): void {
   ])
 }
 
+function formatSkillStatusLines(skills: SkillStatus[]): string[] {
+  if (skills.length === 0) {
+    return ['No skills are currently available.']
+  }
+
+  return skills
+    .sort((left, right) => {
+      if (left.enabled !== right.enabled) {
+        return left.enabled ? -1 : 1
+      }
+      return left.name.localeCompare(right.name)
+    })
+    .map(skill => {
+      const status = skill.enabled ? 'enabled' : 'disabled'
+      const context = skill.context ? ` ${skill.context}` : ''
+      return `${status.padEnd(8)} ${skill.name} (${skill.source}${context})  ${skill.description}`
+    })
+}
+
+async function handleSkillsCommand(
+  args: string[],
+  context: ReplCommandContext,
+): Promise<void> {
+  if (args.length > 0) {
+    printLines([
+      'Usage: /skills',
+      '',
+    ])
+    return
+  }
+
+  if (!context.listSkillStatuses) {
+    printLines([
+      'Skills are not available in this REPL context.',
+      '',
+    ])
+    return
+  }
+
+  printLines([
+    'Skills:',
+    ...formatSkillStatusLines(await context.listSkillStatuses()),
+    '',
+  ])
+}
+
 function setCurrentPermissionMode(
   args: string[],
   context: ReplCommandContext,
@@ -860,31 +902,6 @@ function setCurrentPermissionMode(
 
   printLines([
     `Permission mode updated for this REPL session: ${nextPermissionMode}`,
-    '',
-  ])
-}
-
-async function printConfig(context: ReplCommandContext): Promise<void> {
-  const cwd = context.options.cwd
-  const [configFiles, configured] = await Promise.all([
-    loadDclawConfigFiles(cwd),
-    buildConfigAwareEnvWithSources(cwd),
-  ])
-  const configKeyLines = Object.entries(configured.keySources)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, source]) => `${key} (${source})`)
-
-  printLines([
-    'dclaw config',
-    '',
-    `user config path: ${configFiles.userConfigPath}`,
-    `user config: ${configFiles.userConfig ? 'loaded' : 'not found'}`,
-    `workspace config path: ${configFiles.workspaceConfigPath}`,
-    `workspace config: ${configFiles.workspaceConfig ? 'loaded' : 'not found'}`,
-    `active permission mode: ${context.session.permissionMode} (${context.session.permissionModeSource})`,
-    ...(configKeyLines.length > 0
-      ? ['', 'config-backed env keys:', ...configKeyLines.map(line => `- ${line}`)]
-      : ['', 'config-backed env keys: none']),
     '',
   ])
 }
@@ -998,67 +1015,22 @@ async function resumeConversation(
 
 const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
-    name: '/help',
-    description: 'Show available REPL commands.',
+    name: '/status',
+    displayName: 'Status',
+    description: 'Show current DCLAW status.',
+    argKind: 'none',
     canRunWhileBusy: true,
     presentationKind: 'structured_card',
-    presentationTitle: 'REPL Commands',
-    handle() {
-      printLines([
-        'REPL commands:',
-        ...REPL_COMMANDS.map(command => {
-          const aliases =
-            command.aliases && command.aliases.length > 0
-              ? ` (${command.aliases.join(', ')})`
-              : ''
-          const argumentHint = command.argumentHint
-            ? ` ${command.argumentHint}`
-            : ''
-          return `${command.name}${argumentHint}${aliases}  ${command.description}`
-        }),
-        '',
-      ])
-    },
-  },
-  {
-    name: '/plan',
-    argumentHint: '[start <title>|exit]',
-    description: 'Enter plan mode, show the current plan state, or exit plan mode.',
-    presentationKind: 'structured_card',
-    presentationTitle: 'Plan Mode',
-    async handle(args, context) {
-      await handlePlanCommand(args, context)
-    },
-  },
-  {
-    name: '/session',
-    aliases: ['/info'],
-    description: 'Show current session info.',
-    canRunWhileBusy: true,
-    presentationKind: 'structured_card',
-    presentationTitle: 'Current Session',
+    presentationTitle: 'Status',
     async handle(_args, context) {
       await printSessionInfo(context)
     },
   },
   {
-    name: '/history',
-    description: 'Show recent saved sessions.',
-    canRunWhileBusy: true,
-    presentationKind: 'structured_card',
-    presentationTitle: 'Session History',
-    async handle(_args, context) {
-      await runHistory({
-        mode: 'history',
-        options: context.options,
-      }, {
-        writeOutput: writeReplOutput,
-      })
-    },
-  },
-  {
     name: '/doctor',
+    displayName: 'Doctor',
     description: 'Show diagnostics for the current REPL session.',
+    argKind: 'none',
     canRunWhileBusy: true,
     presentationKind: 'structured_card',
     presentationTitle: 'Diagnostics',
@@ -1068,7 +1040,9 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   },
   {
     name: '/runtime',
+    displayName: 'Runtime',
     argumentHint: '[name|list]',
+    argKind: 'enum',
     description: 'Show the current runtime, list available runtimes, or switch to one.',
     presentationKind: 'structured_card',
     presentationTitle: 'Runtime',
@@ -1078,7 +1052,9 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   },
   {
     name: '/permissions',
+    displayName: 'Permissions',
     argumentHint: '[mode]',
+    argKind: 'enum',
     description:
       'Show or change the active permission mode for this REPL session.',
     presentationKind: 'structured_card',
@@ -1088,56 +1064,35 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     },
   },
   {
-    name: '/config',
-    description: 'Show loaded dclaw config files and config-backed env keys.',
+    name: '/skills',
+    displayName: 'Skills',
+    argKind: 'none',
+    description: 'Open the skills menu.',
     canRunWhileBusy: true,
     presentationKind: 'structured_card',
-    presentationTitle: 'DCLAW Config',
-    async handle(_args, context) {
-      await printConfig(context)
-    },
-  },
-  {
-    name: '/transcript',
-    argumentHint: '[N]',
-    description:
-      'Show the current conversation transcript, optionally limited to the latest N messages.',
-    canRunWhileBusy: true,
-    presentationKind: 'structured_card',
-    presentationTitle: 'Transcript',
+    presentationTitle: 'Skills',
     async handle(args, context) {
-      if (args.length === 0) {
-        await printTranscript(context)
-        return
-      }
-
-      const maxMessages = parsePositiveInteger(args[0])
-      if (maxMessages === undefined) {
-        printLines([
-          'Invalid transcript limit. Use /transcript or /transcript <positive integer>.',
-          '',
-        ])
-        return
-      }
-
-      await printTranscript(context, maxMessages)
+      await handleSkillsCommand(args, context)
     },
   },
   {
     name: '/resume',
     aliases: ['/continue'],
+    displayName: 'Resume',
     argumentHint: '[session-id]',
+    argKind: 'freeform',
     description:
       'Resume a saved session inside the current REPL, or list recent sessions when no id is provided.',
-    presentationKind: 'structured_card',
-    presentationTitle: 'Resume Session',
+    presentationKind: 'assistant_note',
     async handle(args, context) {
       await resumeConversation(args, context)
     },
   },
   {
     name: '/compact',
+    displayName: 'Compact',
     argumentHint: '[instructions]',
+    argKind: 'freeform',
     description:
       'Compact the current conversation into a local summary and continue in a fresh session.',
     presentationKind: 'structured_card',
@@ -1148,7 +1103,9 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   },
   {
     name: '/clear',
+    displayName: 'Clear Session',
     description: 'Clear conversation history and start a new empty session.',
+    argKind: 'none',
     presentationKind: 'structured_card',
     presentationTitle: 'Session Reset',
     async handle(_args, context) {
@@ -1156,29 +1113,11 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     },
   },
   {
-    name: '/cls',
-    description: 'Clear the terminal screen.',
-    canRunWhileBusy: true,
-    handle() {
-      clearTerminal()
-    },
-  },
-  {
-    name: '/interrupt',
-    aliases: ['/cancel'],
-    description: 'Interrupt the active response.',
-    canRunWhileBusy: true,
-    handle() {
-      printLines([
-        'No active response to interrupt.',
-        '',
-      ])
-    },
-  },
-  {
     name: '/exit',
     aliases: ['/quit'],
+    displayName: 'Exit',
     description: 'Exit the REPL.',
+    argKind: 'none',
     handle() {
       // The REPL loop intercepts /exit before command dispatch.
     },
@@ -1198,8 +1137,10 @@ export function listReplCommands(): ReplCommandCatalogItem[] {
   return REPL_COMMANDS.map(command => ({
     name: command.name,
     ...(command.aliases ? { aliases: [...command.aliases] } : {}),
+    displayName: command.displayName ?? command.name.replace(/^\//u, ''),
     description: command.description,
     ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
+    argKind: command.argKind ?? (command.argumentHint ? 'freeform' : 'none'),
     ...(command.canRunWhileBusy ? { canRunWhileBusy: true } : {}),
     presentationKind: command.presentationKind ?? 'assistant_note',
     ...(command.presentationTitle
@@ -1227,7 +1168,7 @@ export async function maybeHandleReplCommand(
       if (commandName.startsWith('/')) {
         printLines([
           `Unknown REPL command: ${commandName}`,
-          'Use /help to list available commands.',
+          'Type / to browse available commands.',
           '',
         ])
         return true
@@ -1237,7 +1178,7 @@ export async function maybeHandleReplCommand(
 
     if (options.allowDuringActivePrompt && !command.canRunWhileBusy) {
       printLines([
-        `${command.name} cannot run while a response is active. Use /interrupt to stop the response, or wait for it to finish.`,
+        `${command.name} cannot run while a response is active. Press Esc to stop the response, or wait for it to finish.`,
         '',
       ])
       return true

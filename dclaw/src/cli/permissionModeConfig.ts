@@ -14,15 +14,13 @@ export const ALL_PERMISSION_MODES: PermissionMode[] = [
   'default',
   'accept-edits',
   'bypass-permissions',
-  'plan',
 ]
 
 function isPermissionMode(value: unknown): value is PermissionMode {
   return (
     value === 'default' ||
     value === 'accept-edits' ||
-    value === 'bypass-permissions' ||
-    value === 'plan'
+    value === 'bypass-permissions'
   )
 }
 

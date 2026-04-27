@@ -21,6 +21,13 @@ import type { PromptMode } from '../prompt/types.js'
 import { createSkillRegistry } from '../skills/registry.js'
 import { loadSkills } from '../skills/loader.js'
 import {
+  filterEnabledSkills,
+  getSkillStatuses,
+  loadDisabledSkillNames,
+  setSkillEnabled as persistSkillEnabled,
+  type SkillStatus,
+} from '../skills/enablement.js'
+import {
   createInvokedSkillState,
   restoreInvokedSkillsFromMessages,
 } from '../skills/state.js'
@@ -51,6 +58,8 @@ export type PreparedCliRuntime = {
   engine: QueryEngine
   rotateQueryTrace: (sessionId?: string) => Promise<string | undefined>
   drainBackgroundWork: (timeoutMs?: number) => Promise<void>
+  listSkillStatuses: () => Promise<SkillStatus[]>
+  setSkillEnabled: (skillName: string, enabled: boolean) => Promise<SkillStatus[]>
 }
 
 export async function prepareCliRuntime(
@@ -69,11 +78,18 @@ export async function prepareCliRuntime(
   )
   const dclawMdEntries = await loadDclawMdEntries(options.cwd)
   const promptEnvironment = await loadPromptEnvironmentContext(options.cwd)
-  let skillRegistry = createSkillRegistry(
-    await loadSkills({
-      cwd: options.cwd,
-    }),
-  )
+  const loadAllSkills = () => loadSkills({
+    cwd: options.cwd,
+    env: configured.env,
+  })
+  const buildSkillRegistry = async () => {
+    const [skills, disabledSkillNames] = await Promise.all([
+      loadAllSkills(),
+      loadDisabledSkillNames(configured.env),
+    ])
+    return createSkillRegistry(filterEnabledSkills(skills, disabledSkillNames))
+  }
+  let skillRegistry = await buildSkillRegistry()
   const invokedSkills = createInvokedSkillState()
   restoreInvokedSkillsFromMessages(initialMessages, invokedSkills)
 
@@ -81,11 +97,7 @@ export async function prepareCliRuntime(
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
   const client = runtime.primary.client
   const reloadSkills = async () => {
-    skillRegistry = createSkillRegistry(
-      await loadSkills({
-        cwd: options.cwd,
-      }),
-    )
+    skillRegistry = await buildSkillRegistry()
 
     toolContext.skillRegistry = skillRegistry
     if (toolContext.agentRuntime) {
@@ -299,6 +311,22 @@ export async function prepareCliRuntime(
     drainBackgroundWork: async (timeoutMs?: number) => {
       await memoryExtractor.drainPendingExtraction(timeoutMs)
       await drainAgentRuns(timeoutMs)
+    },
+    listSkillStatuses: async () => {
+      const [skills, disabledSkillNames] = await Promise.all([
+        loadAllSkills(),
+        loadDisabledSkillNames(configured.env),
+      ])
+      return getSkillStatuses(skills, disabledSkillNames)
+    },
+    setSkillEnabled: async (skillName: string, enabled: boolean) => {
+      await persistSkillEnabled(skillName, enabled, configured.env)
+      skillRegistry = await buildSkillRegistry()
+      engine.setSkillRegistry(skillRegistry)
+      return getSkillStatuses(
+        await loadAllSkills(),
+        await loadDisabledSkillNames(configured.env),
+      )
     },
   }
 }

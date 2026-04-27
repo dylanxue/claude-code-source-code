@@ -16,6 +16,7 @@ import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { runInteractiveReplLoop } from './repl.js'
 import {
   maybeHandleReplCommand,
+  type ReplCommandContext,
   type ReplSessionState,
 } from './replCommands.js'
 import { prepareCliRuntime } from './runtime.js'
@@ -107,6 +108,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     drainBackgroundWork,
     permissionMode,
     permissionModeSource,
+    listSkillStatuses,
+    setSkillEnabled,
   } = await prepareCliRuntime(command.options, 'interactive', resumed.messages)
   const persistedToolResultInfo =
     getPersistedToolResultInfoFromMeta(resumed.meta.persistedToolResults) ??
@@ -122,7 +125,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     permissionModeSource,
   }
   const replOptions = { ...command.options }
-  const replContext = {
+  const replContext: ReplCommandContext = {
     engine,
     options: replOptions,
     session: replSession,
@@ -152,11 +155,15 @@ export async function runResume(command: ResumeCommand): Promise<void> {
       engine = nextEngine
       rotateQueryTrace = prepared.rotateQueryTrace
       drainBackgroundWork = prepared.drainBackgroundWork
+      listSkillStatuses = prepared.listSkillStatuses
+      setSkillEnabled = prepared.setSkillEnabled
       permissionMode = replSession.permissionMode as typeof permissionMode
       permissionModeSource = replSession.permissionModeSource as typeof permissionModeSource
       replOptions.runtime = runtimeName
       replContext.engine = nextEngine
       replContext.rotateQueryTrace = prepared.rotateQueryTrace
+      replContext.listSkillStatuses = prepared.listSkillStatuses
+      replContext.setSkillEnabled = prepared.setSkillEnabled
       replSession.provider = runtime.provider
       replSession.providerSource = runtime.providerSource
       replSession.model = runtime.model
@@ -285,6 +292,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
           session: replContext.session,
           rotateQueryTrace: replContext.rotateQueryTrace,
           switchRuntime: replContext.switchRuntime,
+          listSkillStatuses: replContext.listSkillStatuses,
+          setSkillEnabled: replContext.setSkillEnabled,
         }, {
           writeOutput: control.writeOutput,
         })
@@ -300,6 +309,8 @@ export async function runResume(command: ResumeCommand): Promise<void> {
           session: replContext.session,
           rotateQueryTrace: replContext.rotateQueryTrace,
           switchRuntime: replContext.switchRuntime,
+          listSkillStatuses: replContext.listSkillStatuses,
+          setSkillEnabled: replContext.setSkillEnabled,
         })
       ) {
         return

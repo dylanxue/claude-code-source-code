@@ -1,10 +1,13 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import type { WelcomeCardData } from '../../cli/welcome.js'
 import type { StructuredCardEntry, TranscriptItem } from '../state/index.js'
+import { WelcomeCard } from './WelcomeCard.js'
 
 type Props = {
   activeStatusText?: string
   entries: TranscriptItem[]
+  welcomeCard: WelcomeCardData
 }
 
 type MultilineTextBlockProps = {
@@ -61,10 +64,10 @@ function StructuredCard({ title, entries }: {
         }
 
         return (
-          <Box key={`row-${index}`}>
+          <Text key={`row-${index}`} wrap="truncate-end">
             <Text dimColor>{`${entry.label.padEnd(rowLabelWidth)}  `}</Text>
-            <Text>{entry.value}</Text>
-          </Box>
+            {entry.value}
+          </Text>
         )
       })}
     </Box>
@@ -77,14 +80,17 @@ function TimeSeparator({ text }: { text: string }) {
   )
 }
 
-export function TranscriptPane({ activeStatusText, entries }: Props) {
+export function TranscriptPane({ activeStatusText, entries, welcomeCard }: Props) {
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1} paddingTop={1}>
+      <Box marginBottom={1} flexDirection="column">
+        <WelcomeCard card={welcomeCard} />
+      </Box>
       {entries.map(entry => (
         <Box key={entry.id} flexDirection="column" marginBottom={1}>
           {entry.kind === 'user_prompt' ? (
-            <Box backgroundColor="gray" paddingX={1}>
-              <Text>{`› ${entry.text}`}</Text>
+            <Box backgroundColor="#f2f2f2" paddingX={1} paddingY={1}>
+              <Text color="black">{`› ${entry.text}`}</Text>
             </Box>
           ) : entry.kind === 'user_command' ? (
             <Text color="cyan">{entry.text}</Text>

@@ -4,11 +4,11 @@ import { listReplCommands } from '../../src/cli/replCommands.js'
 import { getActivityGroupTitle } from '../../src/tui/presenters/activityPresenter.js'
 import { presentReplCommandResult } from '../../src/tui/presenters/replCommandPresenter.js'
 
-test('presentReplCommandResult renders /session output as a structured card', () => {
+test('presentReplCommandResult renders /status output as a structured card', () => {
   const presentation = presentReplCommandResult(
-    '/session',
+    '/status',
     [
-      'current session:',
+      'status:',
       'session id: abc123',
       'mode: interactive',
       'provider: openai',
@@ -24,7 +24,7 @@ test('presentReplCommandResult renders /session output as a structured card', ()
   const cardEvent = presentation.events[1]
   assert.ok(cardEvent)
   assert.equal(cardEvent.type, 'structured_card_added')
-  assert.equal(cardEvent.title, 'Current Session')
+  assert.equal(cardEvent.title, 'Status')
   assert.deepEqual(cardEvent.entries, [
     { kind: 'row', label: 'session id', value: 'abc123' },
     { kind: 'row', label: 'mode', value: 'interactive' },
@@ -34,33 +34,58 @@ test('presentReplCommandResult renders /session output as a structured card', ()
   ])
 })
 
-test('presentReplCommandResult renders /help output as a structured card', () => {
+test('presentReplCommandResult renders /resume output as transcript prose', () => {
   const presentation = presentReplCommandResult(
-    '/help',
+    '/resume session-123',
     [
-      'REPL commands:',
-      '/help  Show available REPL commands.',
-      '/session (/info)  Show current session info.',
+      'Resumed session: session-123',
+      'stored provider/model: stub / restored-model',
+      '',
+      'restored transcript preview:',
+      'user: restored user',
+      '',
+      'assistant: restored assistant',
     ].join('\n'),
   )
 
   assert.deepEqual(
     presentation.events.map(event => event.type),
-    ['command_logged', 'structured_card_added'],
+    ['command_logged', 'assistant_progress_message'],
+  )
+  const noteEvent = presentation.events[1]
+  assert.ok(noteEvent)
+  assert.equal(noteEvent.type, 'assistant_progress_message')
+  assert.match(noteEvent.text, /restored transcript preview:/)
+  assert.match(noteEvent.text, /assistant: restored assistant/)
+})
+
+test('presentReplCommandResult keeps long structured card rows on one line', () => {
+  const longSessionId = '86509d3c-082f-4f34-a70a-0118b5e76194'
+  const presentation = presentReplCommandResult(
+    '/status',
+    [
+      'status:',
+      `session id: ${longSessionId}`,
+      'stored provider/model: openai / gpt-5.4',
+    ].join('\n'),
   )
   const cardEvent = presentation.events[1]
   assert.ok(cardEvent)
   assert.equal(cardEvent.type, 'structured_card_added')
-  assert.equal(cardEvent.title, 'REPL Commands')
   assert.deepEqual(cardEvent.entries, [
-    { kind: 'text', text: '/help  Show available REPL commands.' },
-    { kind: 'text', text: '/session (/info)  Show current session info.' },
+    { kind: 'row', label: 'session id', value: longSessionId },
+    {
+      kind: 'row',
+      label: 'stored provider/model',
+      value: 'openai / gpt-5.4',
+    },
   ])
 })
 
-test('info-style REPL commands are cataloged for structured card presentation', () => {
+test('status-style REPL commands are cataloged for structured card presentation', () => {
+  const commands = listReplCommands()
   const commandPresentation = new Map(
-    listReplCommands().map(command => [
+    commands.map(command => [
       command.name,
       {
         kind: command.presentationKind,
@@ -69,21 +94,9 @@ test('info-style REPL commands are cataloged for structured card presentation', 
     ]),
   )
 
-  assert.deepEqual(commandPresentation.get('/help'), {
+  assert.deepEqual(commandPresentation.get('/status'), {
     kind: 'structured_card',
-    title: 'REPL Commands',
-  })
-  assert.deepEqual(commandPresentation.get('/plan'), {
-    kind: 'structured_card',
-    title: 'Plan Mode',
-  })
-  assert.deepEqual(commandPresentation.get('/session'), {
-    kind: 'structured_card',
-    title: 'Current Session',
-  })
-  assert.deepEqual(commandPresentation.get('/history'), {
-    kind: 'structured_card',
-    title: 'Session History',
+    title: 'Status',
   })
   assert.deepEqual(commandPresentation.get('/doctor'), {
     kind: 'structured_card',
@@ -97,17 +110,13 @@ test('info-style REPL commands are cataloged for structured card presentation', 
     kind: 'structured_card',
     title: 'Permissions',
   })
-  assert.deepEqual(commandPresentation.get('/config'), {
+  assert.deepEqual(commandPresentation.get('/skills'), {
     kind: 'structured_card',
-    title: 'DCLAW Config',
-  })
-  assert.deepEqual(commandPresentation.get('/transcript'), {
-    kind: 'structured_card',
-    title: 'Transcript',
+    title: 'Skills',
   })
   assert.deepEqual(commandPresentation.get('/resume'), {
-    kind: 'structured_card',
-    title: 'Resume Session',
+    kind: 'assistant_note',
+    title: undefined,
   })
   assert.deepEqual(commandPresentation.get('/compact'), {
     kind: 'structured_card',
@@ -117,6 +126,80 @@ test('info-style REPL commands are cataloged for structured card presentation', 
     kind: 'structured_card',
     title: 'Session Reset',
   })
+  assert.equal(commandPresentation.has('/help'), false)
+  assert.equal(commandPresentation.has('/history'), false)
+  assert.equal(commandPresentation.has('/interrupt'), false)
+  assert.equal(commandPresentation.has('/plan'), false)
+  assert.equal(commandPresentation.has('/transcript'), false)
+  assert.equal(commandPresentation.has('/config'), false)
+  assert.equal(commandPresentation.has('/cls'), false)
+  assert.equal(commandPresentation.has('/session'), false)
+  assert.equal(
+    commands.some(command => command.aliases?.includes('/info')),
+    false,
+  )
+  assert.equal(
+    commands.some(command => command.aliases?.includes('/cancel')),
+    false,
+  )
+})
+
+test('REPL command catalog includes TUI metadata for slash controls', () => {
+  const commands = listReplCommands()
+  const commandMetadata = new Map(
+    commands.map(command => [
+      command.name,
+      {
+        displayName: command.displayName,
+        argKind: command.argKind,
+        argumentHint: command.argumentHint,
+      },
+    ]),
+  )
+
+  assert.deepEqual(commandMetadata.get('/runtime'), {
+    displayName: 'Runtime',
+    argKind: 'enum',
+    argumentHint: '[name|list]',
+  })
+  assert.deepEqual(commandMetadata.get('/permissions'), {
+    displayName: 'Permissions',
+    argKind: 'enum',
+    argumentHint: '[mode]',
+  })
+  assert.deepEqual(commandMetadata.get('/compact'), {
+    displayName: 'Compact',
+    argKind: 'freeform',
+    argumentHint: '[instructions]',
+  })
+  assert.deepEqual(commandMetadata.get('/skills'), {
+    displayName: 'Skills',
+    argKind: 'none',
+    argumentHint: undefined,
+  })
+  assert.equal(commandMetadata.has('/help'), false)
+  assert.equal(commandMetadata.has('/history'), false)
+  assert.equal(commandMetadata.has('/interrupt'), false)
+  assert.equal(commandMetadata.has('/plan'), false)
+  assert.equal(commandMetadata.has('/transcript'), false)
+  assert.equal(commandMetadata.has('/config'), false)
+  assert.equal(commandMetadata.has('/cls'), false)
+  assert.equal(commandMetadata.has('/cancel'), false)
+  assert.equal(commandMetadata.has('/session'), false)
+  assert.equal(commandMetadata.has('/info'), false)
+  assert.deepEqual(commandMetadata.get('/status'), {
+    displayName: 'Status',
+    argKind: 'none',
+    argumentHint: undefined,
+  })
+  assert.equal(
+    commands.some(command => command.aliases?.includes('/info')),
+    false,
+  )
+  assert.equal(
+    commands.some(command => command.aliases?.includes('/cancel')),
+    false,
+  )
 })
 
 test('getActivityGroupTitle maps core tool categories to transcript groups', () => {

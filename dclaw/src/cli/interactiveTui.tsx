@@ -8,7 +8,12 @@ import { createInteractiveContext, getInteractiveRuntimeLabel } from './interact
 import { canStartInteractiveTui } from './interactiveUi.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { maybeHandleReplCommand } from './replCommands.js'
+import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { InteractiveCommand } from './types.js'
+import { createWelcomeCardData } from './welcome.js'
+import { buildConfigAwareEnvWithSources } from './configFile.js'
+import { loadResolvedLlmConfig } from '../llm/config.js'
+import { listSessionHistory } from '../session/history.js'
 
 type CapturedCommandResult = {
   handled: boolean
@@ -80,6 +85,19 @@ export async function runInteractiveTui(
   }
 
   const interactiveContext = await createInteractiveContext(command)
+  const configured = await buildConfigAwareEnvWithSources(
+    interactiveContext.replOptions.cwd,
+  )
+  const llmConfig = await loadResolvedLlmConfig(
+    interactiveContext.replOptions.cwd,
+    configured.env,
+  )
+  const welcomeCard = createWelcomeCardData({
+    version: interactiveContext.version,
+    modelLabel:
+      interactiveContext.runtime.model ?? interactiveContext.runtime.provider,
+    cwd: interactiveContext.replOptions.cwd,
+  })
 
   const app = render(
     <TuiApp
@@ -88,7 +106,47 @@ export async function runInteractiveTui(
         permissionLabel: interactiveContext.replSession.permissionMode,
         runtimeLabel: getInteractiveRuntimeLabel(interactiveContext),
       })}
+      getBottomSheetOptions={() => {
+        const runtimeNames = Object.keys(llmConfig.runtimes).sort((left, right) =>
+          left.localeCompare(right),
+        )
+
+        return {
+          '/permissions': ALL_PERMISSION_MODES.map(mode => ({
+            value: mode,
+            label: mode,
+            description:
+              mode === interactiveContext.replSession.permissionMode
+                ? 'Current mode'
+                : undefined,
+          })),
+          '/runtime': [
+            ...runtimeNames.map(name => ({
+              value: name,
+              label: name,
+              description:
+                name === interactiveContext.replOptions.runtime
+                  ? 'Current runtime'
+                  : undefined,
+            })),
+            {
+              value: 'list',
+              label: 'list',
+              description: 'Show available runtimes without switching.',
+            },
+          ],
+        }
+      }}
       initialPrompt={command.prompt}
+      welcomeCard={welcomeCard}
+      onListResumeSessions={() => listSessionHistory()}
+      onListSkillStatuses={() => {
+        if (!interactiveContext.replContext.listSkillStatuses) {
+          throw new Error('Skills are not available in this REPL context.')
+        }
+
+        return interactiveContext.replContext.listSkillStatuses()
+      }}
       onLocalCommand={async (prompt, options) => {
         const result = await captureCommandResult(async writeOutput =>
           maybeHandleReplCommand(prompt, interactiveContext.replContext, {
@@ -99,6 +157,9 @@ export async function runInteractiveTui(
         return emitLocalCommandResult(prompt, result, options.onUiEvent)
       }}
       onPrompt={async (prompt, options) => {
+        interactiveContext.replContext.engine.setAskUserQuestions(
+          options.askUserQuestions,
+        )
         const result = await runInteractiveSessionPrompt({
           engine: interactiveContext.replContext.engine,
           sessionId: interactiveContext.replSession.sessionId,
@@ -117,6 +178,15 @@ export async function runInteractiveTui(
           interactiveContext.replSession.permissionMode = runtimePermissionMode
           interactiveContext.replSession.permissionModeSource = 'tool_runtime'
         }
+      }}
+      onSetSkillEnabled={(skillName, enabled) => {
+        if (!interactiveContext.replContext.setSkillEnabled) {
+          throw new Error(
+            'Skill enablement changes are not available in this REPL context.',
+          )
+        }
+
+        return interactiveContext.replContext.setSkillEnabled(skillName, enabled)
       }}
     />,
     {

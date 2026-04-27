@@ -70,12 +70,19 @@ test('parseArgs accepts explicit permission mode overrides', () => {
   const command = parseArgs([
     '--print',
     '--permission-mode',
-    'plan',
+    'accept-edits',
     'hello',
   ])
 
   assert.equal(command.mode, 'print')
-  assert.equal(command.options.permissionMode, 'plan')
+  assert.equal(command.options.permissionMode, 'accept-edits')
+})
+
+test('parseArgs rejects plan as a user permission mode override', () => {
+  assert.throws(
+    () => parseArgs(['--print', '--permission-mode', 'plan', 'hello']),
+    /Unsupported permission mode: plan/,
+  )
 })
 
 test('parseArgs accepts explicit max iteration overrides', () => {

@@ -203,7 +203,7 @@ test('runInteractiveReplLoop runs allowed busy commands immediately', async () =
       }
     },
     onBusyPrompt(prompt) {
-      if (prompt === '/info') {
+      if (prompt === '/status') {
         busyCommands.push(prompt)
         return true
       }
@@ -213,8 +213,8 @@ test('runInteractiveReplLoop runs allowed busy commands immediately', async () =
 
   input.write('first prompt\n')
   await waitFor(() => prompts.includes('first prompt'))
-  input.write('/info\n')
-  await waitFor(() => busyCommands.includes('/info'))
+  input.write('/status\n')
+  await waitFor(() => busyCommands.includes('/status'))
   assert.deepEqual(prompts, ['first prompt'])
 
   releaseFirstPrompt?.()
@@ -222,44 +222,7 @@ test('runInteractiveReplLoop runs allowed busy commands immediately', async () =
   input.end()
 
   await loop
-  assert.deepEqual(busyCommands, ['/info'])
-})
-
-test('runInteractiveReplLoop treats /abort as an interrupt command while busy', async () => {
-  const input = new PassThrough() as PassThrough & { isTTY?: boolean }
-  const output = new PassThrough() as PassThrough & { isTTY?: boolean }
-  const outputChunks = collectStreamOutput(output)
-  const prompts: string[] = []
-
-  input.isTTY = true
-  output.isTTY = true
-
-  const loop = runInteractiveReplLoop({
-    input,
-    output,
-    onPrompt: async (_prompt, control) => {
-      prompts.push(_prompt)
-      await new Promise<void>((resolve, reject) => {
-        control.signal.addEventListener(
-          'abort',
-          () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })),
-          { once: true },
-        )
-      })
-    },
-  })
-
-  input.write('first prompt\n')
-  await waitFor(() => prompts.includes('first prompt'))
-  input.write('/abort\n')
-  await waitFor(() =>
-    outputChunks.join('').includes('Interrupted current response.'),
-  )
-  input.write('/exit\n')
-  input.end()
-
-  await loop
-  assert.match(outputChunks.join(''), /Interrupted current response\./)
+  assert.deepEqual(busyCommands, ['/status'])
 })
 
 test('runInteractiveReplLoop handles immediate local commands without entering busy state', async () => {
@@ -299,46 +262,4 @@ test('runInteractiveReplLoop handles immediate local commands without entering b
   assert.deepEqual(immediatePrompts, ['/runtime'])
   assert.match(text, /current runtime:/)
   assert.doesNotMatch(text, /dclaw\[busy\]>/)
-})
-
-test('runInteractiveReplLoop interrupts the active prompt', async () => {
-  const input = new PassThrough() as PassThrough & { isTTY?: boolean }
-  const output = new PassThrough() as PassThrough & { isTTY?: boolean }
-  const prompts: string[] = []
-  const interrupted: string[] = []
-
-  input.isTTY = true
-  output.isTTY = true
-
-  const loop = runInteractiveReplLoop({
-    input,
-    output,
-    onPrompt: async (prompt, control) => {
-      prompts.push(prompt)
-      await new Promise<void>((_resolve, reject) => {
-        control.signal.addEventListener(
-          'abort',
-          () => {
-            const error = new Error('Request aborted')
-            error.name = 'AbortError'
-            reject(error)
-          },
-          { once: true },
-        )
-      })
-    },
-    onPromptInterrupted(prompt) {
-      interrupted.push(prompt)
-    },
-  })
-
-  input.write('long prompt\n')
-  await waitFor(() => prompts.includes('long prompt'))
-  input.write('/interrupt\n')
-  await waitFor(() => interrupted.includes('long prompt'))
-  input.write('/exit\n')
-  input.end()
-
-  await loop
-  assert.deepEqual(interrupted, ['long prompt'])
 })

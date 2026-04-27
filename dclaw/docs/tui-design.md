@@ -244,9 +244,8 @@ slash 命令不走灰条，而是单独高亮成一行。
 适用内容：
 
 - `/status`
-- `/session`
 - `/runtime`
-- `/config`
+- `/skills`
 - 环境诊断摘要
 - 结构化计划摘要
 
@@ -358,7 +357,7 @@ Tasks · 2/5 completed
 ## 6.2 默认结构
 
 ```text
-[ › Ask DCLAW or type / for commands                         ]
+[ › █Ask DCLAW or type / for commands                        ]
 gpt-5.4 xhigh · default · ~/work/dclaw
 ```
 
@@ -370,6 +369,9 @@ gpt-5.4 xhigh · default · ~/work/dclaw
 - 左侧固定轻量提示符，建议使用 `›`
 - 支持多行输入
 - placeholder 低对比度
+- 始终显示当前输入光标；空输入时光标位于 placeholder 前，已有输入时光标跟随真实编辑位置
+- 光标建议使用高对比度块状或反白字符，优先呈现为 `█` / inverse cell，确保用户能判断当前插入点
+- 输入文本为正常前景色，placeholder 不应与光标同色，避免误认为已输入内容
 - 与 Transcript 之间只保留很小空隙
 
 默认 placeholder：
@@ -447,12 +449,13 @@ gpt-5.4 xhigh · default · ~/work/dclaw
 - 默认高亮第一项
 - 左列显示命令名，右列显示描述
 - 高亮项使用强调色，不使用大面积反白
+- 命令补全菜单出现时保留输入框可见，不隐藏用户正在输入的内容
+- 补全菜单不需要标题说明，避免干扰快速输入
 
 交互：
 
 - `Up/Down`：移动高亮
-- `Tab`：补全当前候选
-- `Enter`：选中候选
+- `Tab` / `Enter`：选中当前候选并立即触发命令；枚举型命令打开对应 Bottom Sheet
 - `Esc`：关闭建议菜单
 
 ## 6.5 Bottom Sheet
@@ -483,6 +486,7 @@ Press Enter to select, or Esc to dismiss.
 
 - 与输入框共享同一视觉系统
 - 顶部有标题与说明
+- `/runtime` 需要明确提示：选择 runtime 会立刻生效，在对话过程中切换 runtime 可能导致效果下降
 - 中间为编号列表
 - 当前项高亮
 - 底部有操作提示
@@ -592,7 +596,7 @@ QueryEngine events -> UI event reducer -> Transcript / Bottom Dock / Overlay
 - `onAssistantMessage` -> 追加或封口 `assistant_note`
 - `onToolUse` -> 累积进当前 `activity_group`
 - `onToolResult` -> 累积或完成当前 `activity_group`
-- `/status /session /runtime /config` -> `structured_card`
+- `/status /runtime /skills` -> `structured_card`
 - `TaskCreate / TaskUpdate / TaskList` -> `task_list_snapshot`
 - 权限请求 -> `Blocking Dialog`
 - `AskUserQuestion` -> `Blocking Dialog`
@@ -911,7 +915,7 @@ QueryEngine
 
 - 当前阶段 2 主闭环已打通：TUI 可以编辑输入、提交 prompt、显示 transcript、展示 busy 与 queue 状态
 - 本地 slash 命令已接入 TUI，输出会先缓冲再回流到 transcript，避免与 Ink 重绘互相污染
-- `Ctrl+C`、`/exit`、`/interrupt`、`/cls` 已在 TUI 路径下具备基础行为
+- `Ctrl+C`、`/exit` 已在 TUI 路径下具备基础行为
 - 这一阶段仍未覆盖 slash suggestion menu、bottom sheet、overlay、scrollback/autofollow
 
 ### 13.4 阶段 3：Transcript Item 渲染系统
@@ -953,8 +957,8 @@ QueryEngine
 测试任务：
 
 - [x] 普通 prompt 与 slash 命令渲染分流正确
-- [x] `/session`、`/runtime`、`/permissions` 这类结构化命令渲染为 card 的单测
-- [x] `/help`、`/doctor` 这类本地命令仍可进入 activity/prose 的单测
+- [x] `/status`、`/runtime`、`/permissions` 这类结构化命令渲染为 card 的单测
+- [x] `/doctor` 这类本地命令仍可进入 activity/prose 的单测
 - [ ] assistant streaming 文本不混入 activity 的单测
 
 阶段验收：
@@ -964,8 +968,8 @@ QueryEngine
 当前实现状态补充：
 
 - 当前阶段 3 主目标已完成：Transcript 现在支持 `user_prompt_band`、`user_command_inline`、`assistant_note`、`activity_group`、`structured_card`、`time_separator`
-- 本地 slash 命令已具备基础展示元数据，当前 `/session`、`/runtime`、`/permissions`、`/config` 会渲染为 card
-- `/help` 等长文本命令仍走 prose，符合“结构化输出进 card，普通说明进文档段落”的分层原则
+- 本地 slash 命令已具备基础展示元数据，当前 `/status`、`/runtime`、`/permissions`、`/skills` 会渲染为 card
+- 非结构化长文本命令仍走 prose，符合“结构化输出进 card，普通说明进文档段落”的分层原则
 - tool activity 已按工具类别映射到 `Explored / Edited / Ran / Checked / Planned / Delegated`
 - `scrollback/autofollow`、更细的 card 布局、task snapshot 与 richer command presentation 仍留待后续阶段
 
@@ -984,21 +988,21 @@ QueryEngine
 
 任务清单：
 
-- [ ] 从 `replCommands` 生成 slash 候选源
-- [ ] 为命令定义补充 UI 元数据：
+- [x] 从 `replCommands` 生成 slash 候选源
+- [x] 为命令定义补充 UI 元数据：
   - `displayName`
   - `description`
   - `argumentHint`
   - `argKind`
   - `presentationKind`
-- [ ] 实现 `/` 输入后的建议列表
-- [ ] 支持命令过滤、高亮、上下移动、Tab 补全、Enter 确认
-- [ ] 对枚举型参数实现 `Bottom Sheet`
+- [x] 实现 `/` 输入后的建议列表
+- [x] 支持命令过滤、高亮、上下移动、Tab 补全、Enter 确认
+- [x] 对枚举型参数实现 `Bottom Sheet`
 - [ ] 首批完成这些命令的底部结构化交互：
-  - `/runtime`
-  - `/permissions`
+  - [x] `/runtime`
+  - [x] `/permissions`
   - `/model`（如后续补入本地命令体系）
-- [ ] 保持自由文本参数命令继续在输入框中输入
+- [x] 保持自由文本参数命令继续在输入框中输入
 
 建议改动文件：
 
@@ -1010,15 +1014,30 @@ QueryEngine
 
 测试任务：
 
-- [ ] slash 建议过滤单测
-- [ ] Tab 补全行为单测
-- [ ] Enter 确认命令单测
-- [ ] `/runtime`、`/permissions` bottom sheet 选择行为单测
+- [x] slash 建议过滤单测
+- [x] Tab 补全行为单测
+- [x] Enter 确认命令单测
+- [x] `/runtime`、`/permissions` bottom sheet 选择行为单测
 
 阶段验收：
 
 - slash 命令选择已不需要用户记忆全部命令文本
 - `/runtime / permissions` 等命令已具备结构化底部交互
+
+当前实现状态补充：
+
+- 当前阶段 4 主目标已完成：TUI 会从 `replCommands` catalog 生成 slash 建议，支持过滤、上下移动、Tab/Enter 选择并立即触发命令或后续菜单
+- 枚举型参数命令已支持底部 `Bottom Sheet`，首批覆盖 `/runtime` 与 `/permissions`
+- 命令补全 menu 位于输入框下方且保留输入框可见；其它 menu 会隐藏输入框与状态行
+- menu 选择区不使用边框，最多显示 8 行并随键盘选择滚动
+- `/resume` 在 TUI 中会打开全屏历史会话选择 overlay，以表格展示创建时间、更新时间与会话标题，选择后复用 `/resume <session-id>` 恢复链路
+- 会话历史会根据最近几条用户消息生成 `conversationTitle`，跳过“继续”和 `<system-reminder>` 等低信息内容来保留真实上下文，并过滤没有消息的 empty session
+- 已从 slash 命令 catalog 中移除 `/help`、`/history`、`/interrupt`、`/cancel`
+- 已从 slash 命令 catalog 中移除 `/plan`、`/transcript`，并从用户可选权限模式中移除 `plan`
+- 已从 slash 命令 catalog 中移除 `/cls`、`/config`，新增 `/skills` 用于列出、启用、禁用 skills
+- 除命令补全外的底部 menu 会显示标题或说明文字，并提示 `Esc` 返回、`Enter` 选择
+- 自由文本参数命令仍保留在输入框中输入，不强行弹出结构化选择
+- `/model` 尚未接入本地命令体系，因此本阶段仅保留为后续扩展项
 
 ### 13.6 阶段 5：Blocking Dialog 与提问宿主统一
 
@@ -1035,13 +1054,13 @@ QueryEngine
 
 任务清单：
 
-- [ ] 实现 `DialogManager`
-- [ ] 把 `interactiveQuestionHost` 扩展为可挂接 TUI dialog host
-- [ ] 权限请求进入统一的 Permission Dialog
-- [ ] `AskUserQuestion` 进入统一的 Question Dialog
-- [ ] 支持单选、多选、preview、annotations、`finish_plan_interview`
-- [ ] dialog 关闭后焦点自动返回输入框
-- [ ] 非 TUI 路径继续保留原有 `readline` fallback
+- [x] 实现 `DialogManager`
+- [x] 把 `interactiveQuestionHost` 扩展为可挂接 TUI dialog host
+- [x] 权限请求进入统一的 Permission Dialog
+- [x] `AskUserQuestion` 进入统一的 Question Dialog
+- [x] 支持单选、多选、preview、annotations、`finish_plan_interview`
+- [x] dialog 关闭后焦点自动返回输入框
+- [x] 非 TUI 路径继续保留原有 `readline` fallback
 
 建议改动文件：
 
@@ -1063,6 +1082,14 @@ QueryEngine
 
 - 权限与用户问题交互已从消息流中分离出来，进入统一阻塞式交互层
 
+当前实现状态补充：
+
+- 当前阶段 5 主闭环已完成：TUI 会把 `AskUserQuestion` 渲染为底部阻塞式 Question Dialog，不再依赖 readline 直接发问
+- 权限确认复用同一条 `askUserQuestions` dialog host，因此 Bash/Edit/Write 等需要人工确认时会进入 TUI dialog
+- Question Dialog 已支持单选、多选、隐式 `Other` 自定义输入、preview notes、`submit_answers` / `respond_to_agent` / `finish_plan_interview`
+- TUI 路径通过 `QueryEngine.setAskUserQuestions()` 在每轮 prompt 前挂接 dialog host；legacy REPL 与非 TUI 路径仍走原有 `askUserQuestionsInteractively` fallback
+- 当前实现使用 bottom dock 内阻塞式 dialog；后续可继续细化视觉层级、diff preview 和更完整的权限专用文案
+
 ### 13.7 阶段 6：Task Snapshot 与计划态可视化
 
 目标：
@@ -1083,7 +1110,7 @@ QueryEngine
 - [ ] 渲染每个任务的完成状态
 - [ ] 渲染当前任务 `(current)` 标记
 - [ ] 最新快照默认展开，旧快照可折叠为摘要
-- [ ] 将 `/plan`、`Task*`、plan mode 相关本地命令结果与 snapshot 对齐
+- [ ] 将 `Task*`、plan mode 工具结果与 snapshot 对齐
 - [ ] 保证 `resume / compact` 后快照展示不重复、不丢失、不与旧状态冲突
 
 建议改动文件：

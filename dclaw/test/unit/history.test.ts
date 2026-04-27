@@ -38,6 +38,14 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
       sessionId: 'session-two',
       env,
     })
+    await createSession({
+      cwd: '/tmp/empty',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-empty',
+      env,
+    })
     await appendSessionMessages(
       second.sessionId,
       [
@@ -79,7 +87,12 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
     const sessions = await listSessionHistory(env)
 
     assert.equal(sessions.length, 2)
+    assert.equal(
+      sessions.some(session => session.meta.sessionId === 'session-empty'),
+      false,
+    )
     assert.equal(sessions[0]?.meta.sessionId, 'session-two')
+    assert.equal(sessions[0]?.conversationTitle, 'second')
     assert.equal(sessions[0]?.lastUserText, 'second')
     assert.equal(sessions[0]?.lastAssistantText, 'Reading /tmp/two.txt')
     assert.equal(sessions[0]?.lastBashSandboxMode, 'restricted')
@@ -90,6 +103,42 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
     )
     assert.equal(sessions[1]?.meta.sessionId, 'session-one')
     assert.equal(sessions[1]?.persistedToolResultCount, 0)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('listSessionHistory derives conversation titles from recent meaningful user messages', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-title-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/title',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-title',
+      env,
+    })
+    await appendSessionMessages(
+      session.sessionId,
+      [
+        createTextMessage('user', '继续开发13.5阶段4'),
+        createTextMessage('assistant', '好的'),
+        createTextMessage(
+          'user',
+          '<system-reminder>Task board updated</system-reminder>',
+        ),
+        createTextMessage('user', '继续'),
+      ],
+      env,
+    )
+
+    const sessions = await listSessionHistory(env)
+
+    assert.equal(sessions[0]?.conversationTitle, '继续开发13.5阶段4')
+    assert.equal(sessions[0]?.lastUserText, '继续')
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

@@ -1,6 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import { loadEnvFiles } from '../llm/env.js'
 import { getCliErrorOutput } from './errorFormatting.js'
 import { runDoctor } from './doctor.js'
@@ -11,14 +9,7 @@ import { CliArgumentError, formatHelp, parseArgs } from './parseArgs.js'
 import { runResume } from './resume.js'
 import { readStdinIfPiped } from './stdio.js'
 import type { ParsedCliCommand } from './types.js'
-
-async function readVersion(): Promise<string> {
-  const here = dirname(fileURLToPath(import.meta.url))
-  const pkgPath = resolve(here, '../../package.json')
-  const text = await readFile(pkgPath, 'utf8')
-  const parsed = JSON.parse(text) as { version?: string }
-  return parsed.version ?? '0.0.0'
-}
+import { readCliVersion } from './version.js'
 
 async function resolvePrompt(command: ParsedCliCommand): Promise<ParsedCliCommand> {
   if (
@@ -76,7 +67,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return
       }
       if (error.message === 'VERSION') {
-        process.stdout.write((await readVersion()) + '\n')
+        process.stdout.write((await readCliVersion()) + '\n')
         return
       }
       process.stderr.write(`${error.message}\n\n${formatHelp()}\n`)

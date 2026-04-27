@@ -129,7 +129,7 @@ test('reduceUiEvent appends structured cards and time separators', () => {
   let state = createInitialUiState()
   state = reduceUiEvent(state, {
     type: 'structured_card_added',
-    title: 'Current Session',
+    title: 'Status',
     entries: [
       { kind: 'row', label: 'session id', value: 'abc123' },
       { kind: 'separator' },
@@ -143,7 +143,7 @@ test('reduceUiEvent appends structured cards and time separators', () => {
 
   const card = state.transcript.find(item => item.kind === 'structured_card')
   assert.ok(card)
-  assert.equal(card.title, 'Current Session')
+  assert.equal(card.title, 'Status')
   assert.deepEqual(card.entries, [
     { kind: 'row', label: 'session id', value: 'abc123' },
     { kind: 'separator' },

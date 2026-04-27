@@ -34,7 +34,7 @@ test('resolvePermissionMode falls back to default when no config is present', as
   }
 })
 
-test('resolvePermissionMode honors workspace config for plan mode', async () => {
+test('resolvePermissionMode rejects plan mode from workspace config', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-permission-home-'))
   const workspaceDir = await mkdtemp(
     join(tmpdir(), 'dclaw-permission-workspace-'),
@@ -45,15 +45,13 @@ test('resolvePermissionMode honors workspace config for plan mode', async () => 
       permissionMode: 'plan',
     })
 
-    const resolved = await resolvePermissionMode(
-      { cwd: workspaceDir },
-      { ...process.env, HOME: homeDir },
+    await assert.rejects(
+      resolvePermissionMode(
+        { cwd: workspaceDir },
+        { ...process.env, HOME: homeDir },
+      ),
+      /permissionMode must be one of default, accept-edits, bypass-permissions/,
     )
-
-    assert.deepEqual(resolved, {
-      permissionMode: 'plan',
-      permissionModeSource: 'workspace',
-    })
   } finally {
     await rm(homeDir, { recursive: true, force: true })
     await rm(workspaceDir, { recursive: true, force: true })
@@ -95,7 +93,7 @@ test('resolvePermissionMode honors user config before workspace config', async (
 
   try {
     await writeJson(getWorkspaceConfigPath(workspaceDir), {
-      permissionMode: 'plan',
+      permissionMode: 'bypass-permissions',
     })
     await writeJson(getDclawConfigPath(env), {
       permissionMode: 'accept-edits',
@@ -122,7 +120,7 @@ test('resolvePermissionMode lets explicit CLI values override config files', asy
 
   try {
     await writeJson(getWorkspaceConfigPath(workspaceDir), {
-      permissionMode: 'plan',
+      permissionMode: 'bypass-permissions',
     })
     await writeJson(getDclawConfigPath(env), {
       permissionMode: 'accept-edits',

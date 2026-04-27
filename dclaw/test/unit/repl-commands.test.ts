@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { QueryEngine } from '../../src/core/queryEngine.js'
@@ -86,45 +85,6 @@ function createCommandContextBase(): ReplCommandContext {
   }
 }
 
-test('maybeHandleReplCommand prints help for /help', async () => {
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-
-  try {
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand('/help', {
-      ...createCommandContext(),
-    })
-
-    assert.equal(handled, true)
-  } finally {
-    process.stdout.write = originalWrite as typeof process.stdout.write
-  }
-
-  const text = output.join('')
-  assert.match(text, /REPL commands:/)
-  assert.match(text, /\/session/)
-  assert.match(text, /\/info/)
-  assert.match(text, /\/doctor/)
-  assert.match(text, /\/runtime/)
-  assert.match(text, /\/permissions/)
-  assert.match(text, /\/plan/)
-  assert.match(text, /\/config/)
-  assert.match(text, /\/transcript/)
-  assert.match(text, /\/resume/)
-  assert.match(text, /\/compact/)
-  assert.match(text, /\/clear/)
-  assert.match(text, /\/cls/)
-  assert.match(text, /\/history/)
-  assert.match(text, /\/exit/)
-})
-
 test('maybeHandleReplCommand rejects unknown slash commands locally', async () => {
   const output: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
@@ -137,16 +97,27 @@ test('maybeHandleReplCommand rejects unknown slash commands locally', async () =
       return true
     }) as typeof process.stdout.write
 
-    const handled = await maybeHandleReplCommand('/model', createCommandContext())
-
-    assert.equal(handled, true)
+    assert.equal(
+      await maybeHandleReplCommand('/model', createCommandContext()),
+      true,
+    )
+    assert.equal(
+      await maybeHandleReplCommand('/session', createCommandContext()),
+      true,
+    )
+    assert.equal(
+      await maybeHandleReplCommand('/info', createCommandContext()),
+      true,
+    )
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
   }
 
   const text = output.join('')
   assert.match(text, /Unknown REPL command: \/model/)
-  assert.match(text, /Use \/help to list available commands\./)
+  assert.match(text, /Unknown REPL command: \/session/)
+  assert.match(text, /Unknown REPL command: \/info/)
+  assert.match(text, /Type \/ to browse available commands\./)
 })
 
 test('maybeHandleReplCommand can write busy-command output through a supplied writer', async () => {
@@ -166,7 +137,7 @@ test('maybeHandleReplCommand can write busy-command output through a supplied wr
   assert.equal(handled, true)
   const text = output.join('')
   assert.match(text, /Unknown REPL command: \/model/)
-  assert.match(text, /Use \/help to list available commands\./)
+  assert.match(text, /Type \/ to browse available commands\./)
 })
 
 test('maybeHandleReplCommand shows the current runtime for /runtime', async () => {
@@ -501,7 +472,8 @@ test('maybeHandleReplCommand shows and updates the current permission mode for /
 
   const text = output.join('')
   assert.match(text, /Current permission mode: default/)
-  assert.match(text, /Available modes: default, accept-edits, bypass-permissions, plan/)
+  assert.match(text, /Available modes: default, accept-edits, bypass-permissions/)
+  assert.doesNotMatch(text, /Available modes: .*plan/)
   assert.match(
     text,
     /Permission mode updated for this REPL session: bypass-permissions/,
@@ -510,25 +482,32 @@ test('maybeHandleReplCommand shows and updates the current permission mode for /
   assert.equal(context.session.permissionModeSource, 'repl_command')
 })
 
-test('maybeHandleReplCommand enters and exits plan mode with /plan', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-plan-'))
-  const env = { ...process.env, HOME: homeDir }
-  const originalEnv = process.env
-  const output: string[] = []
+test('maybeHandleReplCommand lists skills with /skills only', async () => {
   const originalWrite = process.stdout.write.bind(process.stdout)
-  const context = createCommandContext()
+  const output: string[] = []
+  const statuses = [
+    {
+      name: 'review',
+      description: 'Review code changes.',
+      source: 'user' as const,
+      prompt: 'Review carefully.',
+      path: '/tmp/review.md',
+      enabled: true,
+    },
+    {
+      name: 'pdf',
+      description: 'Analyze PDFs.',
+      source: 'builtin' as const,
+      prompt: 'Read PDFs.',
+      path: '/tmp/pdf.md',
+      enabled: false,
+    },
+  ]
+  const context = createCommandContext({
+    listSkillStatuses: async () => statuses,
+  })
 
   try {
-    process.env = env
-    await createSession({
-      cwd: '/tmp/project',
-      mode: 'interactive',
-      provider: 'stub',
-      model: 'stub-model',
-      sessionId: context.session.sessionId,
-      env,
-    })
-
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
         typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
@@ -536,130 +515,20 @@ test('maybeHandleReplCommand enters and exits plan mode with /plan', async () =>
       return true
     }) as typeof process.stdout.write
 
-    assert.equal(await maybeHandleReplCommand('/plan', context), true)
-    const board = await loadTaskBoardForSession(context.session.sessionId, env)
-    assert.ok(board?.planFilePath)
-    assert.equal(existsSync(board.planFilePath), true)
-    assert.equal(await maybeHandleReplCommand('/plan exit', context), true)
+    assert.equal(await maybeHandleReplCommand('/skills', context), true)
+    assert.equal(await maybeHandleReplCommand('/skills list', context), true)
   } finally {
-    process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write
-    await rm(homeDir, { recursive: true, force: true })
   }
 
   const text = output.join('')
-  assert.match(text, /Entered plan mode for this REPL session\./)
-  assert.match(text, /plan mode: active/)
-  assert.match(text, /plan file:/)
-  assert.match(text, /Exited plan mode\. Restored permission mode: default/)
-  assert.equal(context.session.permissionMode, 'default')
+  assert.match(text, /Skills:/)
+  assert.match(text, /Usage: \/skills/)
+  assert.match(text, /enabled\s+review \(user\)\s+Review code changes\./)
+  assert.match(text, /disabled\s+pdf \(builtin\)\s+Analyze PDFs\./)
 })
 
-test('maybeHandleReplCommand manages task state via /plan start', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-task-'))
-  const env = { ...process.env, HOME: homeDir }
-  const originalEnv = process.env
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-  const context = createCommandContext()
-
-  try {
-    process.env = env
-    await createSession({
-      cwd: '/tmp/project',
-      mode: 'interactive',
-      provider: 'stub',
-      model: 'stub-model',
-      sessionId: context.session.sessionId,
-      env,
-    })
-
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    assert.equal(await maybeHandleReplCommand('/plan', context), true)
-    assert.equal(
-      await maybeHandleReplCommand('/plan start implement recall', context),
-      true,
-    )
-    assert.equal(await maybeHandleReplCommand('/plan', context), true)
-  } finally {
-    process.env = originalEnv
-    process.stdout.write = originalWrite as typeof process.stdout.write
-    await rm(homeDir, { recursive: true, force: true })
-  }
-
-  const text = output.join('')
-  assert.match(text, /Started task: implement recall/)
-  assert.match(text, /current task: implement recall/)
-  assert.match(text, /current step: <none>/)
-})
-
-test('maybeHandleReplCommand prints config sources for /config', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-config-'))
-  const env = { ...process.env, HOME: homeDir }
-  const originalEnv = process.env
-  const originalWrite = process.stdout.write.bind(process.stdout)
-  const output: string[] = []
-
-  try {
-    process.env = env
-    const configDir = join(homeDir, '.dclaw')
-    await mkdir(configDir, { recursive: true })
-    await writeFile(
-      join(configDir, 'config.json'),
-      JSON.stringify({
-        llm: {
-          defaultRuntime: 'default',
-          providers: {
-            main: {
-              type: 'openai',
-              apiKey: 'test-key',
-            },
-          },
-          runtimes: {
-            default: {
-              primary: {
-                providerRef: 'main',
-                model: 'gpt-5.4',
-              },
-            },
-          },
-        },
-      }),
-      'utf8',
-    )
-
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand('/config', createCommandContext())
-
-    assert.equal(handled, true)
-  } finally {
-    process.env = originalEnv
-    process.stdout.write = originalWrite as typeof process.stdout.write
-    await rm(homeDir, { recursive: true, force: true })
-  }
-
-  const text = output.join('')
-  assert.match(text, /dclaw config/)
-  assert.match(text, /user config path:/)
-  assert.match(text, /user config: loaded/)
-  assert.match(text, /workspace config path:/)
-  assert.match(text, /workspace config: not found/)
-  assert.match(text, /config-backed env keys: none/)
-})
-
-test('maybeHandleReplCommand prints current session info for /session', async () => {
+test('maybeHandleReplCommand prints current status for /status', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-session-'))
   const output: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
@@ -677,7 +546,7 @@ test('maybeHandleReplCommand prints current session info for /session', async ()
       return true
     }) as typeof process.stdout.write
 
-    const handled = await maybeHandleReplCommand('/session', createCommandContext())
+    const handled = await maybeHandleReplCommand('/status', createCommandContext())
 
     assert.equal(handled, true)
   } finally {
@@ -687,7 +556,7 @@ test('maybeHandleReplCommand prints current session info for /session', async ()
   }
 
   const text = output.join('')
-  assert.match(text, /current session:/)
+  assert.match(text, /status:/)
   assert.match(text, /session id: session-123/)
   assert.match(text, /mode: interactive/)
   assert.match(text, /provider: stub/)
@@ -699,7 +568,7 @@ test('maybeHandleReplCommand prints current session info for /session', async ()
   assert.match(text, /compact tokens: \d+ used \(model limits unavailable\)/)
 })
 
-test('maybeHandleReplCommand shows canonicalized model details in /session', async () => {
+test('maybeHandleReplCommand shows canonicalized model details in /status', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-session-canonical-'))
   const workspaceDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-session-workspace-'))
   const output: string[] = []
@@ -743,7 +612,7 @@ test('maybeHandleReplCommand shows canonicalized model details in /session', asy
     }) as typeof process.stdout.write
 
     const handled = await maybeHandleReplCommand(
-      '/session',
+      '/status',
       createCommandContext({
         options: {
           ...createOptions(),
@@ -777,8 +646,8 @@ test('maybeHandleReplCommand shows canonicalized model details in /session', asy
   assert.match(text, /catalog match: claude-opus-4-7/)
 })
 
-test('maybeHandleReplCommand allows read-only info commands while a response is active', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-busy-info-'))
+test('maybeHandleReplCommand allows read-only status commands while a response is active', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-busy-status-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
   const output: string[] = []
@@ -794,7 +663,7 @@ test('maybeHandleReplCommand allows read-only info commands while a response is 
     }) as typeof process.stdout.write
 
     const handled = await maybeHandleReplCommand(
-      '/info',
+      '/status',
       createCommandContext(),
       { allowDuringActivePrompt: true },
     )
@@ -807,7 +676,7 @@ test('maybeHandleReplCommand allows read-only info commands while a response is 
   }
 
   const text = output.join('')
-  assert.match(text, /current session:/)
+  assert.match(text, /status:/)
   assert.match(text, /session id:/)
 })
 
@@ -840,89 +709,7 @@ test('maybeHandleReplCommand blocks mutating commands while a response is active
   )
 })
 
-test('maybeHandleReplCommand prints current transcript for /transcript', async () => {
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-
-  try {
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand(
-      '/transcript',
-      createCommandContext(),
-    )
-
-    assert.equal(handled, true)
-  } finally {
-    process.stdout.write = originalWrite as typeof process.stdout.write
-  }
-
-  const text = output.join('')
-  assert.match(text, /current transcript:/)
-  assert.match(text, /user: hello/)
-  assert.match(text, /assistant: hi there/)
-})
-
-test('maybeHandleReplCommand supports limiting transcript output', async () => {
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-
-  try {
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand(
-      '/transcript 1',
-      createCommandContext(),
-    )
-
-    assert.equal(handled, true)
-  } finally {
-    process.stdout.write = originalWrite as typeof process.stdout.write
-  }
-
-  const text = output.join('')
-  assert.match(text, /current transcript \(latest 1 messages\):/)
-  assert.match(text, /assistant: hi there/)
-  assert.doesNotMatch(text, /user: hello/)
-})
-
-test('maybeHandleReplCommand reports invalid transcript limits locally', async () => {
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-
-  try {
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand(
-      '/transcript nope',
-      createCommandContext(),
-    )
-
-    assert.equal(handled, true)
-  } finally {
-    process.stdout.write = originalWrite as typeof process.stdout.write
-  }
-
-  const text = output.join('')
-  assert.match(text, /Invalid transcript limit/)
-})
-
-test('maybeHandleReplCommand resets engine state and updates session info on /clear', async () => {
+test('maybeHandleReplCommand resets engine state and updates status on /clear', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-clear-state-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -978,8 +765,10 @@ test('maybeHandleReplCommand leaves plan mode when /clear starts a fresh session
       sessionId: context.session.sessionId,
       env,
     })
-    await maybeHandleReplCommand('/plan', context)
-    assert.equal(context.session.permissionMode, 'plan')
+    context.engine.setPermissionMode('plan')
+    context.engine.setPlanFilePath('/tmp/project/.dclaw/plans/plan_board_123.md')
+    context.session.permissionMode = 'plan'
+    context.session.permissionModeSource = 'task_board'
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -1051,68 +840,6 @@ test('maybeHandleReplCommand compacts the conversation into a summary within the
     /Primary request: continue the current session with a compacted summary\./,
   )
   assert.doesNotMatch(summaryText, /Transcript summary:/)
-})
-
-test('maybeHandleReplCommand clears the terminal for /cls', async () => {
-  const output: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
-
-  try {
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand('/cls', createCommandContext())
-
-    assert.equal(handled, true)
-  } finally {
-    process.stdout.write = originalWrite as typeof process.stdout.write
-  }
-
-  assert.equal(output.join(''), '\x1b[2J\x1b[H')
-})
-
-test('maybeHandleReplCommand delegates /history to session history output', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-history-'))
-  const env = { ...process.env, HOME: homeDir }
-  const originalEnv = process.env
-  const originalWrite = process.stdout.write.bind(process.stdout)
-  const output: string[] = []
-
-  try {
-    process.env = env
-    await createSession({
-      cwd: '/tmp/project',
-      mode: 'interactive',
-      provider: 'stub',
-      model: 'stub-model',
-      env,
-    })
-
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      output.push(
-        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
-      )
-      return true
-    }) as typeof process.stdout.write
-
-    const handled = await maybeHandleReplCommand('/history', {
-      ...createCommandContext(),
-    })
-
-    assert.equal(handled, true)
-  } finally {
-    process.env = originalEnv
-    process.stdout.write = originalWrite as typeof process.stdout.write
-    await rm(homeDir, { recursive: true, force: true })
-  }
-
-  const text = output.join('')
-  assert.match(text, /dclaw history/)
-  assert.match(text, /sessions: 1/)
 })
 
 test('maybeHandleReplCommand resumes a saved session and restores its messages', async () => {
@@ -1320,13 +1047,18 @@ test('maybeHandleReplCommand shows recent sessions when /resume has no session i
 
   try {
     process.env = env
-    await createSession({
+    const session = await createSession({
       cwd: '/tmp/project',
       mode: 'interactive',
       provider: 'stub',
       model: 'resume-model',
       env,
     })
+    await appendSessionMessages(
+      session.sessionId,
+      [createTextMessage('user', 'resume this later')],
+      env,
+    )
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(

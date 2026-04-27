@@ -52,12 +52,6 @@ const EXIT_COMMANDS = new Set([
   '.quit',
 ])
 
-const INTERRUPT_COMMANDS = new Set([
-  '/interrupt',
-  '/cancel',
-  '/abort',
-])
-
 function trimPrompt(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed && trimmed.length > 0 ? trimmed : undefined
@@ -298,17 +292,6 @@ export async function runInteractiveReplLoop(
         pendingPrompts.splice(0, pendingPrompts.length)
         interruptActivePrompt()
         break
-      }
-
-      if (INTERRUPT_COMMANDS.has(trimmed.toLowerCase())) {
-        if (hasActivePrompt()) {
-          interruptActivePrompt()
-          writeOutput('Interrupted current response.\n')
-        } else {
-          writeOutput('No active response to interrupt.\n')
-          promptIfIdle()
-        }
-        continue
       }
 
       if (hasActivePrompt()) {
