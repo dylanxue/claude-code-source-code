@@ -19,11 +19,14 @@
   },
   "dependencies": {
     "eventsource-parser": "^3.0.6",
+    "ink": "^6.8.0",
+    "react": "^19.2.0",
     "sharp": "^0.34.5",
     "tsx": "^4.20.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.14",
     "typescript": "^5.9.0"
   }
 }

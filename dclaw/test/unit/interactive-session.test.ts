@@ -140,6 +140,113 @@ test('runInteractiveSessionPrompt shows coarse progress in default mode', async 
   assert.match(text, /Assistant: Final answer\n$/)
 })
 
+test('runInteractiveSessionPrompt emits UI events for transcript rendering', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-ui-events-'))
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    model: 'stub-model',
+    env,
+  })
+  const events: Array<{ type: string; text?: string; prompt?: string }> = []
+
+  const engine = {
+    messages: [] as ReturnType<typeof createTextMessage>[],
+    async submitUserPrompt() {
+      throw new Error('submitUserPrompt should not be used in UI event mode')
+    },
+    async submitUserPromptWithHandlers(
+      prompt: string,
+      handlers?: {
+        onTextDelta?: (text: string) => void
+        onToolUse?: (toolUse: {
+          iteration: number
+          id: string
+          name: string
+          input: Record<string, unknown>
+        }) => void
+        onToolResult?: (toolResult: {
+          iteration: number
+          toolUseId: string
+          output: unknown
+        }) => void
+      },
+    ) {
+      assert.equal(prompt, 'inspect the file')
+      handlers?.onTextDelta?.('Final')
+      handlers?.onTextDelta?.(' answer')
+      handlers?.onToolUse?.({
+        iteration: 1,
+        id: 'tool_read_1',
+        name: 'Read',
+        input: { file_path: '/tmp/example.txt' },
+      })
+      handlers?.onToolResult?.({
+        iteration: 1,
+        toolUseId: 'tool_read_1',
+        output: {
+          ok: true,
+          output: { content: 'example' },
+          summary: 'Read /tmp/example.txt',
+        },
+      })
+
+      return {
+        appendedMessages: [
+          createTextMessage('user', prompt),
+          createTextMessage('assistant', 'Final answer'),
+        ],
+        outputText: 'Final answer',
+      }
+    },
+    getSessionId() {
+      return session.sessionId
+    },
+    getMessages() {
+      return this.messages
+    },
+  }
+
+  try {
+    await runInteractiveSessionPrompt({
+      engine: engine as never,
+      sessionId: session.sessionId,
+      prompt: 'inspect the file',
+      stream: true,
+      verbose: false,
+      env,
+      writeOutput() {},
+      flushOutput() {},
+      onUiEvent(event) {
+        events.push({
+          type: event.type,
+          ...('text' in event ? { text: event.text } : {}),
+          ...('prompt' in event ? { prompt: event.prompt } : {}),
+        })
+      },
+    })
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  assert.deepEqual(
+    events.map(event => event.type),
+    [
+      'turn_started',
+      'assistant_text_delta',
+      'assistant_text_delta',
+      'tool_use_started',
+      'tool_result_received',
+      'turn_completed',
+    ],
+  )
+  assert.equal(events[0]?.prompt, 'inspect the file')
+  assert.equal(events[1]?.text, 'Final')
+  assert.equal(events[2]?.text, ' answer')
+})
+
 test('runInteractiveSessionPrompt falls back to generic thinking only when no concrete progress appears quickly', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-generic-'))
   const env = { ...process.env, HOME: homeDir }

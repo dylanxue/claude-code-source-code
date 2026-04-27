@@ -3,6 +3,8 @@ import type { PermissionMode } from '../types/tool.js'
 
 export type CliMode = 'interactive' | 'print' | 'doctor' | 'resume' | 'history'
 
+export type InteractiveUiMode = 'auto' | 'tui' | 'legacy-repl'
+
 export type CommonCliOptions = {
   cwd: string
   runtime?: string
@@ -13,6 +15,7 @@ export type CommonCliOptions = {
   stream: boolean
   verbose: boolean
   outputFormat: 'text' | 'sse'
+  interactiveUi?: InteractiveUiMode
 }
 
 export type InteractiveCommand = {

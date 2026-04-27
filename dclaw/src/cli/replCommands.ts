@@ -96,16 +96,32 @@ export type ReplCommandContext = {
   }>
 }
 
+export type ReplCommandPresentationKind =
+  | 'assistant_note'
+  | 'structured_card'
+
 type ReplCommandDefinition = {
   name: string
   aliases?: string[]
   description: string
   argumentHint?: string
   canRunWhileBusy?: boolean
+  presentationKind?: ReplCommandPresentationKind
+  presentationTitle?: string
   handle: (
     args: string[],
     context: ReplCommandContext,
   ) => Promise<void> | void
+}
+
+export type ReplCommandCatalogItem = {
+  name: string
+  aliases?: string[]
+  description: string
+  argumentHint?: string
+  canRunWhileBusy?: boolean
+  presentationKind: ReplCommandPresentationKind
+  presentationTitle?: string
 }
 
 let activeOutputWriter: ((text: string) => void) | undefined
@@ -985,6 +1001,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/help',
     description: 'Show available REPL commands.',
     canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'REPL Commands',
     handle() {
       printLines([
         'REPL commands:',
@@ -1006,6 +1024,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/plan',
     argumentHint: '[start <title>|exit]',
     description: 'Enter plan mode, show the current plan state, or exit plan mode.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Plan Mode',
     async handle(args, context) {
       await handlePlanCommand(args, context)
     },
@@ -1015,6 +1035,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     aliases: ['/info'],
     description: 'Show current session info.',
     canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'Current Session',
     async handle(_args, context) {
       await printSessionInfo(context)
     },
@@ -1023,10 +1045,14 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/history',
     description: 'Show recent saved sessions.',
     canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'Session History',
     async handle(_args, context) {
       await runHistory({
         mode: 'history',
         options: context.options,
+      }, {
+        writeOutput: writeReplOutput,
       })
     },
   },
@@ -1034,6 +1060,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/doctor',
     description: 'Show diagnostics for the current REPL session.',
     canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'Diagnostics',
     async handle(_args, context) {
       await printDoctor(context)
     },
@@ -1042,6 +1070,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/runtime',
     argumentHint: '[name|list]',
     description: 'Show the current runtime, list available runtimes, or switch to one.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Runtime',
     async handle(args, context) {
       await setCurrentRuntime(args, context)
     },
@@ -1051,6 +1081,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[mode]',
     description:
       'Show or change the active permission mode for this REPL session.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Permissions',
     handle(args, context) {
       setCurrentPermissionMode(args, context)
     },
@@ -1059,6 +1091,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/config',
     description: 'Show loaded dclaw config files and config-backed env keys.',
     canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'DCLAW Config',
     async handle(_args, context) {
       await printConfig(context)
     },
@@ -1069,6 +1103,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     description:
       'Show the current conversation transcript, optionally limited to the latest N messages.',
     canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'Transcript',
     async handle(args, context) {
       if (args.length === 0) {
         await printTranscript(context)
@@ -1093,6 +1129,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[session-id]',
     description:
       'Resume a saved session inside the current REPL, or list recent sessions when no id is provided.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Resume Session',
     async handle(args, context) {
       await resumeConversation(args, context)
     },
@@ -1102,6 +1140,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[instructions]',
     description:
       'Compact the current conversation into a local summary and continue in a fresh session.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Compact Session',
     async handle(args, context) {
       await compactConversation(args, context)
     },
@@ -1109,6 +1149,8 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
   {
     name: '/clear',
     description: 'Clear conversation history and start a new empty session.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Session Reset',
     async handle(_args, context) {
       await clearConversation(context)
     },
@@ -1150,6 +1192,20 @@ function findReplCommand(name: string): ReplCommandDefinition | undefined {
       command.name.toLowerCase() === normalized ||
       command.aliases?.some(alias => alias.toLowerCase() === normalized),
   )
+}
+
+export function listReplCommands(): ReplCommandCatalogItem[] {
+  return REPL_COMMANDS.map(command => ({
+    name: command.name,
+    ...(command.aliases ? { aliases: [...command.aliases] } : {}),
+    description: command.description,
+    ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
+    ...(command.canRunWhileBusy ? { canRunWhileBusy: true } : {}),
+    presentationKind: command.presentationKind ?? 'assistant_note',
+    ...(command.presentationTitle
+      ? { presentationTitle: command.presentationTitle }
+      : {}),
+  }))
 }
 
 export async function maybeHandleReplCommand(

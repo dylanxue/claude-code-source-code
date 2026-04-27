@@ -1,6 +1,10 @@
 import { listSessionHistory } from '../session/history.js'
 import type { HistoryCommand } from './types.js'
 
+type HistoryOutputOptions = {
+  writeOutput?: (text: string) => void
+}
+
 function formatSubagentSummaryLine(
   session: Awaited<ReturnType<typeof listSessionHistory>>[number],
 ): string | null {
@@ -23,13 +27,21 @@ function formatSubagentSummaryLine(
   return parts.join('  ')
 }
 
-export async function runHistory(command: HistoryCommand): Promise<void> {
+export async function runHistory(
+  command: HistoryCommand,
+  options: HistoryOutputOptions = {},
+): Promise<void> {
+  const writeOutput =
+    options.writeOutput ??
+    ((text: string) => {
+      process.stdout.write(text)
+    })
   const sessions = await listSessionHistory()
   const lines = ['dclaw history', '']
 
   if (sessions.length === 0) {
     lines.push('No sessions found yet.')
-    process.stdout.write(lines.join('\n') + '\n')
+    writeOutput(lines.join('\n') + '\n')
     return
   }
 
@@ -91,5 +103,5 @@ export async function runHistory(command: HistoryCommand): Promise<void> {
     }
   })
 
-  process.stdout.write(lines.join('\n') + '\n')
+  writeOutput(lines.join('\n') + '\n')
 }

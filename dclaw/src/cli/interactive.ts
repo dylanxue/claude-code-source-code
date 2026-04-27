@@ -1,92 +1,50 @@
-import { createSession } from '../session/store.js'
-import { prepareCliRuntime } from './runtime.js'
 import type { InteractiveCommand } from './types.js'
 import { formatVerboseContextLines } from './verboseEvents.js'
 import { runInteractiveReplLoop } from './repl.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { getCliErrorOutput } from './errorFormatting.js'
-import {
-  maybeHandleReplCommand,
-  type ReplSessionState,
-} from './replCommands.js'
+import { maybeHandleReplCommand } from './replCommands.js'
+import { resolveInteractiveUiMode } from './interactiveUi.js'
+import { runInteractiveTui } from './interactiveTui.js'
+import { createInteractiveContext } from './interactiveContext.js'
 
-export async function runInteractive(command: InteractiveCommand): Promise<void> {
-  let {
+type InteractiveRunners = {
+  runLegacyRepl: (command: InteractiveCommand) => Promise<void>
+  runTui: (command: InteractiveCommand) => Promise<void>
+}
+
+const defaultInteractiveRunners: InteractiveRunners = {
+  runLegacyRepl: runInteractiveLegacyRepl,
+  runTui: runInteractiveTui,
+}
+
+export async function runInteractive(
+  command: InteractiveCommand,
+  runners: InteractiveRunners = defaultInteractiveRunners,
+): Promise<void> {
+  const interactiveUi = resolveInteractiveUiMode(command.options.interactiveUi)
+  if (interactiveUi === 'tui') {
+    await runners.runTui(command)
+    return
+  }
+
+  await runners.runLegacyRepl(command)
+}
+
+export async function runInteractiveLegacyRepl(
+  command: InteractiveCommand,
+): Promise<void> {
+  const interactiveContext = await createInteractiveContext(command)
+  const {
     runtime,
     dclawMdEntries,
     toolRegistry,
-    engine,
-    rotateQueryTrace,
-    drainBackgroundWork,
-    permissionMode,
-    permissionModeSource,
-  } = await prepareCliRuntime(command.options, 'interactive')
-
-  const session = await createSession({
-    cwd: command.options.cwd,
-    mode: 'interactive',
-    provider: runtime.provider,
-    model: runtime.model,
-  })
-  engine.setSessionId(session.sessionId)
-  const queryTracePath = await rotateQueryTrace(session.sessionId)
-  const replSession: ReplSessionState = {
-    sessionId: session.sessionId,
-    mode: 'interactive',
-    provider: runtime.provider,
-    providerSource: runtime.providerSource,
-    model: runtime.model,
-    modelSource: runtime.modelSource,
-    permissionMode,
-    permissionModeSource,
-  }
-  const replOptions = { ...command.options }
-  const replContext = {
-    engine,
-    options: replOptions,
-    session: replSession,
-    rotateQueryTrace,
-    switchRuntime: async (runtimeName: string) => {
-      await drainBackgroundWork()
-      const nextOptions = {
-        ...replOptions,
-        runtime: runtimeName,
-        permissionMode: replSession.permissionMode as typeof replOptions.permissionMode,
-      }
-      const prepared = await prepareCliRuntime(
-        nextOptions,
-        'interactive',
-        replContext.engine.getMessages(),
-      )
-      const nextEngine = prepared.engine
-      nextEngine.setSessionId(replSession.sessionId)
-      nextEngine.setPlanFilePath(replContext.engine.getPlanFilePath())
-      nextEngine.setPermissionMode(replSession.permissionMode as typeof permissionMode)
-      const nextQueryTracePath =
-        await prepared.rotateQueryTrace(replSession.sessionId)
-
-      runtime = prepared.runtime
-      dclawMdEntries = prepared.dclawMdEntries
-      toolRegistry = prepared.toolRegistry
-      engine = nextEngine
-      rotateQueryTrace = prepared.rotateQueryTrace
-      drainBackgroundWork = prepared.drainBackgroundWork
-      permissionMode = replSession.permissionMode as typeof permissionMode
-      permissionModeSource = replSession.permissionModeSource as typeof permissionModeSource
-      replOptions.runtime = runtimeName
-      replContext.engine = nextEngine
-      replContext.rotateQueryTrace = prepared.rotateQueryTrace
-      replSession.provider = runtime.provider
-      replSession.providerSource = runtime.providerSource
-      replSession.model = runtime.model
-      replSession.modelSource = runtime.modelSource
-
-      return {
-        runtime,
-        queryTracePath: nextQueryTracePath,
-      }
-    },
-  }
+    replSession,
+    replOptions,
+    replContext,
+    queryTracePath,
+  } = interactiveContext
+  const { permissionMode, permissionModeSource } = interactiveContext
 
   const lines = [
     'dclaw interactive mode is ready.',
@@ -231,5 +189,5 @@ export async function runInteractive(command: InteractiveCommand): Promise<void>
       writeOutput('Current response interrupted.\n')
     },
   })
-  await drainBackgroundWork()
+  await interactiveContext.drainBackgroundWork()
 }

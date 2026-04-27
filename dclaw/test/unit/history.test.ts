@@ -185,6 +185,57 @@ test('runHistory prints recent sessions', async () => {
   )
 })
 
+test('runHistory can write to a provided output writer', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-writer-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+  const output: string[] = []
+
+  try {
+    process.env = env
+
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-history-writer',
+      env,
+    })
+    await appendSessionMessages(
+      session.sessionId,
+      [createTextMessage('user', 'Inspect the file')],
+      env,
+    )
+
+    await runHistory(
+      {
+        mode: 'history',
+        options: {
+          cwd: '/tmp/project',
+          permissionMode: 'default',
+          stream: false,
+          verbose: false,
+          outputFormat: 'text',
+        },
+      },
+      {
+        writeOutput(text) {
+          output.push(text)
+        },
+      },
+    )
+  } finally {
+    process.env = originalEnv
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /dclaw history/)
+  assert.match(text, /session-history-writer/)
+  assert.match(text, /last user: Inspect the file/)
+})
+
 test('runHistory prints planning summary when a task board is attached', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-plan-'))
   const env = { ...process.env, HOME: homeDir }

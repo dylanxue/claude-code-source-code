@@ -756,17 +756,17 @@ QueryEngine
 
 任务清单：
 
-- [ ] 在 `dclaw/package.json` 显式声明 `ink`、`react`、必要的类型依赖
-- [ ] 为 `interactive` 模式增加运行时分流
-- [ ] 迁移期保留 legacy REPL 回退方式，建议新增 `--legacy-repl`
-- [ ] 在 `src/cli/` 新增 TUI 入口适配层，建议命名为 `runInteractiveTui`
-- [ ] 新建 `src/tui/` 目录骨架，至少包含：
+- [x] 在 `dclaw/package.json` 显式声明 `ink`、`react`、必要的类型依赖
+- [x] 为 `interactive` 模式增加运行时分流
+- [x] 迁移期同时保留 `--tui` 显式进入新壳与 `--legacy-repl` 强制回退
+- [x] 在 `src/cli/` 新增 TUI 入口适配层，命名为 `runInteractiveTui`
+- [x] 新建 `src/tui/` 目录骨架，至少包含：
   - `src/tui/App.tsx`
   - `src/tui/state/`
   - `src/tui/presenters/`
   - `src/tui/components/`
   - `src/tui/views/`
-- [ ] 约定：迁移完成前，`runInteractive` 负责在 TUI 与 legacy REPL 之间做一次选择
+- [x] 约定：迁移完成前，`runInteractive` 负责在 TUI 与 legacy REPL 之间做一次选择
 
 建议改动文件：
 
@@ -779,15 +779,23 @@ QueryEngine
 
 测试任务：
 
-- [ ] CLI 参数解析新增 `--legacy-repl` 的单测
-- [ ] interactive 入口能正确选择 TUI 或 legacy REPL 的单测
-- [ ] 非 TTY 场景仍按现有逻辑处理的回归测试
+- [x] CLI 参数解析新增 `--tui / --legacy-repl` 的单测
+- [x] interactive 入口能正确选择 TUI 或 legacy REPL 的单测
+- [x] 非 TTY 场景仍按现有逻辑处理的回归测试
 
 阶段验收：
 
 - `interactive` 入口已能稳定进入一个最小 Ink 应用
 - legacy REPL 仍可回退使用
 - 没有破坏 `print / resume / doctor / history` 主路径
+
+当前实现状态补充：
+
+- 当前阶段 0 已完成
+- 当前默认 interactive 路径仍为 legacy REPL
+- 用户可通过 `--tui` 显式进入新的 Ink 壳
+- `--legacy-repl` 已作为显式回退入口保留
+- 当前 Ink 壳仍是 phase 0 skeleton，只展示最小 Transcript 与 Bottom Dock，不承接真实 turn loop
 
 ### 13.2 阶段 1：抽离 Turn Presenter 与 UI Reducer
 
@@ -804,30 +812,30 @@ QueryEngine
 
 任务清单：
 
-- [ ] 从 `src/cli/interactiveSession.ts` 中抽离 turn 级事件消费逻辑
-- [ ] 定义 `UiEvent` 类型，至少覆盖：
+- [x] 从 `src/cli/interactiveSession.ts` 中抽离 turn 级事件消费逻辑
+- [x] 定义首批 `UiEvent` 类型并接入主 turn 流：
   - `turn_started`
   - `assistant_text_delta`
   - `assistant_progress_message`
-  - `assistant_final_message`
   - `tool_use_started`
   - `tool_result_received`
+  - `system_notice`
+  - `turn_completed`
+  - `turn_interrupted`
+- [x] 定义 `TranscriptItem`、`BottomDockState`、`OverlayState`
+- [x] 实现 `UiReducer`
+- [x] 让 line renderer 与后续 TUI renderer 共用同一套 turn presenter
+- [x] 明确 assistant streaming draft、activity draft 的 reducer 更新路径
+- [ ] 在后续阶段继续补齐这些事件族：
   - `task_board_updated`
   - `permission_requested`
   - `questionnaire_requested`
-  - `turn_interrupted`
   - `session_resumed`
   - `conversation_compacted`
-- [ ] 定义 `TranscriptItem`、`BottomDockState`、`OverlayState`
-- [ ] 实现 `UiReducer`
-- [ ] 让 line renderer 与 TUI renderer 共用同一套 turn presenter，而不是各自再拼一遍业务语义
-- [ ] 明确 assistant streaming draft、activity draft、task snapshot 的 reducer 更新路径
 
 建议改动文件：
 
 - `dclaw/src/cli/interactiveSession.ts`
-- `dclaw/src/core/queryEngine.ts`
-- `dclaw/src/core/queryLoop.ts`
 - `dclaw/src/tui/state/types.ts`
 - `dclaw/src/tui/state/reducer.ts`
 - `dclaw/src/tui/presenters/turnPresenter.ts`
@@ -835,15 +843,22 @@ QueryEngine
 
 测试任务：
 
-- [ ] reducer 对 `assistant_text_delta` 的聚合单测
-- [ ] `toolUse -> toolResult` 合并为 activity draft 的单测
-- [ ] interrupt 后 partial turn 状态一致性的单测
-- [ ] presenter 在 `stream / non-stream / verbose` 下行为稳定的单测
+- [x] reducer 对 `assistant_text_delta` 的聚合单测
+- [x] `toolUse -> toolResult` 合并为 activity draft 的单测
+- [x] presenter 在当前 `stream / non-stream / verbose` 主路径下保持现有交互测试通过
+- [ ] interrupt 后 partial turn 状态一致性的独立 reducer/presenter 单测
 
 阶段验收：
 
 - 不依赖 `stdout.write`，也能把 turn 跑成一组稳定 UI 状态
 - LineRenderer 能继续跑通当前交互与测试主线
+
+当前实现状态补充：
+
+- 当前阶段 1 核心已完成
+- `interactiveSession` 的主 turn 流已通过 `turnPresenter + lineRenderer` 收口
+- `UiReducer` 已能表达当前最关键的 transcript 语义：用户输入、assistant draft、assistant note、activity group
+- `permission / questionnaire / task snapshot / session resume / compact` 等事件族仍留待后续阶段补齐
 
 ### 13.3 阶段 2：Ink App Shell 与 Bottom Dock 默认态
 
@@ -861,14 +876,14 @@ QueryEngine
 
 任务清单：
 
-- [ ] 实现 `TuiApp`
-- [ ] 实现 `TranscriptPane`
-- [ ] 实现 `BottomDock`
-- [ ] 接入输入框、placeholder、多行输入
-- [ ] 接入 `runtime / permissions / cwd` 的 Meta Line
-- [ ] 保留现有 busy/queue 语义，并映射到底部状态
+- [x] 实现 `TuiApp`
+- [x] 实现 `TranscriptPane`
+- [x] 实现 `BottomDock`
+- [x] 接入输入框、placeholder 的最小静态表现
+- [x] 接入 `runtime / permissions / cwd` 的 Meta Line
+- [x] 保留现有 busy/queue 语义，并映射到底部状态
 - [ ] 接入自动跟随与手动滚动暂停跟随
-- [ ] 为 interrupt、queued prompt、busy 状态提供底部文案
+- [x] 为 interrupt、queued prompt、busy 状态提供底部文案
 
 建议改动文件：
 
@@ -882,7 +897,7 @@ QueryEngine
 
 测试任务：
 
-- [ ] 初始渲染显示 placeholder 与 meta line
+- [x] 初始渲染显示 placeholder 与 meta line
 - [ ] busy 时 placeholder 切换正确
 - [ ] queue count 状态更新正确
 - [ ] interrupt 后 Bottom Dock 状态恢复正确
@@ -891,6 +906,13 @@ QueryEngine
 
 - 可以在 Ink 中输入 prompt 并触发一次完整 turn
 - 底部能稳定展示当前 runtime、permissions、cwd
+
+当前实现状态补充：
+
+- 当前阶段 2 主闭环已打通：TUI 可以编辑输入、提交 prompt、显示 transcript、展示 busy 与 queue 状态
+- 本地 slash 命令已接入 TUI，输出会先缓冲再回流到 transcript，避免与 Ink 重绘互相污染
+- `Ctrl+C`、`/exit`、`/interrupt`、`/cls` 已在 TUI 路径下具备基础行为
+- 这一阶段仍未覆盖 slash suggestion menu、bottom sheet、overlay、scrollback/autofollow
 
 ### 13.4 阶段 3：Transcript Item 渲染系统
 
@@ -910,15 +932,15 @@ QueryEngine
 
 任务清单：
 
-- [ ] 为普通 prompt 渲染浅灰横条
-- [ ] 为 slash 命令渲染单行高亮文本
-- [ ] 为 assistant prose 渲染文档段落块
-- [ ] 实现 `activity_group` 渲染器
-- [ ] 实现 `structured_card` 渲染器
-- [ ] 实现 `time_separator` 渲染器
-- [ ] 约定并编码工具到 activity group 的归类规则
-- [ ] 让 streaming assistant 正文只进入 prose，不进入 activity
-- [ ] 本地 slash 命令结果增加“展示元数据”，决定它走 card、activity、还是 prose
+- [x] 为普通 prompt 渲染浅灰横条
+- [x] 为 slash 命令渲染单行高亮文本
+- [x] 为 assistant prose 渲染文档段落块
+- [x] 实现 `activity_group` 渲染器
+- [x] 实现 `structured_card` 渲染器
+- [x] 实现 `time_separator` 渲染器
+- [x] 约定并编码工具到 activity group 的归类规则
+- [x] 让 streaming assistant 正文只进入 prose，不进入 activity
+- [x] 本地 slash 命令结果增加“展示元数据”，决定它走 card、activity、还是 prose
 
 建议改动文件：
 
@@ -930,14 +952,22 @@ QueryEngine
 
 测试任务：
 
-- [ ] 普通 prompt 与 slash 命令渲染分流正确
-- [ ] `/status` 渲染为 card 的单测
-- [ ] `/help`、`/doctor` 这类本地命令仍可进入 activity/prose 的单测
+- [x] 普通 prompt 与 slash 命令渲染分流正确
+- [x] `/session`、`/runtime`、`/permissions` 这类结构化命令渲染为 card 的单测
+- [x] `/help`、`/doctor` 这类本地命令仍可进入 activity/prose 的单测
 - [ ] assistant streaming 文本不混入 activity 的单测
 
 阶段验收：
 
 - Transcript 已不再是线性 stdout 文本，而是具备基本视觉语法的工作文档
+
+当前实现状态补充：
+
+- 当前阶段 3 主目标已完成：Transcript 现在支持 `user_prompt_band`、`user_command_inline`、`assistant_note`、`activity_group`、`structured_card`、`time_separator`
+- 本地 slash 命令已具备基础展示元数据，当前 `/session`、`/runtime`、`/permissions`、`/config` 会渲染为 card
+- `/help` 等长文本命令仍走 prose，符合“结构化输出进 card，普通说明进文档段落”的分层原则
+- tool activity 已按工具类别映射到 `Explored / Edited / Ran / Checked / Planned / Delegated`
+- `scrollback/autofollow`、更细的 card 布局、task snapshot 与 richer command presentation 仍留待后续阶段
 
 ### 13.5 阶段 4：Slash Suggestion Menu 与 Bottom Sheet
 
@@ -1137,8 +1167,8 @@ QueryEngine
 
 如果我们下一步要直接动手，建议严格从这里开始：
 
-1. 先做 `阶段 0`
-2. 完成后立即进入 `阶段 1`
+1. `阶段 0` 已完成，下一步直接进入 `阶段 1`
+2. 优先抽离 `interactiveSession.ts` 里的 turn presenter 与 reducer
 3. 不要先做对话框，不要先做花哨布局
 4. 第一个可见里程碑应是：
    - Ink 界面能启动

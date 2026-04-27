@@ -110,3 +110,56 @@ test('runInteractive shows model canonicalization details in the startup header'
   assert.match(text, /model canonicalized to: claude-opus-4-7/)
   assert.match(text, /catalog match: claude-opus-4-7/)
 })
+
+test('runInteractive routes to the TUI runner when requested', async () => {
+  let selected: 'legacy' | 'tui' | undefined
+
+  await runInteractive(
+    {
+      mode: 'interactive',
+      options: {
+        cwd: '/tmp/project',
+        stream: false,
+        verbose: false,
+        outputFormat: 'text',
+        interactiveUi: 'tui',
+      },
+    },
+    {
+      async runLegacyRepl() {
+        selected = 'legacy'
+      },
+      async runTui() {
+        selected = 'tui'
+      },
+    },
+  )
+
+  assert.equal(selected, 'tui')
+})
+
+test('runInteractive keeps the legacy REPL as the default path during phase 0', async () => {
+  let selected: 'legacy' | 'tui' | undefined
+
+  await runInteractive(
+    {
+      mode: 'interactive',
+      options: {
+        cwd: '/tmp/project',
+        stream: false,
+        verbose: false,
+        outputFormat: 'text',
+      },
+    },
+    {
+      async runLegacyRepl() {
+        selected = 'legacy'
+      },
+      async runTui() {
+        selected = 'tui'
+      },
+    },
+  )
+
+  assert.equal(selected, 'legacy')
+})
