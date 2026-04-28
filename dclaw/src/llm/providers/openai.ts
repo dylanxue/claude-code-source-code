@@ -519,6 +519,26 @@ function toOpenAiTools(
   }))
 }
 
+function stripStoredResponseIdsWhenStoreIsFalse(
+  items: OpenAiResponsesInputItem[],
+): OpenAiResponsesInputItem[] {
+  return items.map(item => {
+    if (
+      'type' in item &&
+      item.type === 'reasoning' &&
+      typeof item.encrypted_content === 'string'
+    ) {
+      return {
+        type: item.type,
+        ...(item.summary ? { summary: item.summary } : {}),
+        encrypted_content: item.encrypted_content,
+        ...(item.status ? { status: item.status } : {}),
+      }
+    }
+    return item
+  })
+}
+
 function isResponsesMessageOutputItem(
   item: OpenAiResponsesOutputItem,
 ): item is OpenAiResponsesMessageOutputItem {
@@ -1290,7 +1310,7 @@ function buildChatCompletionContent(
 function buildResponsesRequestBody(
   request: CreateMessageRequest,
   model: string,
-  maxOutputTokens: number,
+  maxOutputTokens: number | undefined,
   stream: boolean,
   options: ResolvedOpenAiResponsesOptions,
 ): Record<string, unknown> {
@@ -1310,9 +1330,14 @@ function buildResponsesRequestBody(
   return {
     model,
     instructions: request.systemPrompt,
-    input: toResponsesInput(request.messages),
+    input:
+      options.store === false
+        ? stripStoredResponseIdsWhenStoreIsFalse(toResponsesInput(request.messages))
+        : toResponsesInput(request.messages),
     tools: toOpenAiTools(request.tools),
-    max_output_tokens: maxOutputTokens,
+    ...(typeof maxOutputTokens === 'number'
+      ? { max_output_tokens: maxOutputTokens }
+      : {}),
     ...(Object.keys(textConfig).length > 0 ? { text: textConfig } : {}),
     ...(Object.keys(reasoningConfig).length > 0
       ? { reasoning: reasoningConfig }
@@ -1344,6 +1369,7 @@ function buildChatCompletionsRequestBody(
   model: string,
   maxOutputTokens: number,
   stream: boolean,
+  options: ResolvedOpenAiResponsesOptions,
 ): Record<string, unknown> {
   return {
     model,
@@ -1357,6 +1383,7 @@ function buildChatCompletionsRequestBody(
       },
     })),
     max_tokens: maxOutputTokens,
+    ...(typeof options.store === 'boolean' ? { store: options.store } : {}),
     stream,
   }
 }
@@ -1422,6 +1449,7 @@ export class OpenAiLlmClient implements LlmClient {
                 model,
                 limits.maxOutputTokens,
                 false,
+                responsesOptions,
               ),
             ),
             signal,
@@ -1456,7 +1484,9 @@ export class OpenAiLlmClient implements LlmClient {
             buildResponsesRequestBody(
               request,
               model,
-              limits.maxOutputTokens,
+              this.apiStyle === 'codex-responses'
+                ? undefined
+                : limits.maxOutputTokens,
               false,
               responsesOptions,
             ),
@@ -1501,7 +1531,9 @@ export class OpenAiLlmClient implements LlmClient {
               buildResponsesRequestBody(
                 request,
                 model,
-                limits.maxOutputTokens,
+                this.apiStyle === 'codex-responses'
+                  ? undefined
+                  : limits.maxOutputTokens,
                 true,
                 responsesOptions,
               ),
@@ -1597,7 +1629,13 @@ export class OpenAiLlmClient implements LlmClient {
             authorization: `Bearer ${this.apiKey!}`,
           },
           body: JSON.stringify(
-            buildChatCompletionsRequestBody(request, model, limits.maxOutputTokens, true),
+            buildChatCompletionsRequestBody(
+              request,
+              model,
+              limits.maxOutputTokens,
+              true,
+              responsesOptions,
+            ),
           ),
           signal,
         })
@@ -1734,7 +1772,10 @@ export class OpenAiLlmClient implements LlmClient {
       reasoningEffort:
         requestOptions?.reasoningEffort ?? this.defaultReasoningEffort,
       previousResponseId: requestOptions?.previousResponseId,
-      store: requestOptions?.store ?? this.defaultStore,
+      store:
+        this.apiStyle === 'codex-responses'
+          ? false
+          : (requestOptions?.store ?? this.defaultStore),
       parallelToolCalls: requestOptions?.parallelToolCalls,
       maxToolCalls: requestOptions?.maxToolCalls,
       include: requestOptions?.include,

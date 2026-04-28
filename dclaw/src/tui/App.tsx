@@ -309,6 +309,7 @@ export function TuiApp({
   >(undefined)
   const [activeTurnElapsedMs, setActiveTurnElapsedMs] = useState(0)
   const [queuedPrompts, setQueuedPrompts] = useState<string[]>([])
+  const isWaitingForQuestionDialog = questionDialog !== undefined
   const activeControllerRef = useRef<AbortController | undefined>(undefined)
   const activePromptRef = useRef<string | undefined>(undefined)
   const foregroundInterruptedPromptRef = useRef<string | undefined>(undefined)
@@ -349,6 +350,10 @@ export function TuiApp({
       return
     }
 
+    if (isWaitingForQuestionDialog) {
+      return
+    }
+
     setActiveTurnElapsedMs(performance.now() - activeTurnStartedAt)
     const timer = setInterval(() => {
       if (!mountedRef.current) {
@@ -361,7 +366,7 @@ export function TuiApp({
     return () => {
       clearInterval(timer)
     }
-  }, [activeTurnStartedAt])
+  }, [activeTurnStartedAt, isWaitingForQuestionDialog])
 
   const flushPendingAssistantDelta = (): void => {
     if (pendingAssistantDeltaTimerRef.current) {
@@ -1470,7 +1475,7 @@ export function TuiApp({
     <Box flexDirection="column" height="100%">
       <TranscriptPane
         activeStatusText={
-          activeTurnStartedAt === undefined
+          activeTurnStartedAt === undefined || isWaitingForQuestionDialog
             ? undefined
             : formatActiveTurnStatusText(activeTurnElapsedMs)
         }

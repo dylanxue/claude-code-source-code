@@ -78,7 +78,7 @@ test('resolveLlmRuntimeConfig can use merged config.json-backed provider and run
             type: 'openai',
             apiKey: 'config-key',
             baseURL: 'https://example.test/v1',
-            apiStyle: 'chat-completions',
+            apiStyle: 'codex-responses',
           },
         },
       },
@@ -110,7 +110,7 @@ test('resolveLlmRuntimeConfig can use merged config.json-backed provider and run
     assert.equal(runtime.providerConfig.provider, 'openai')
     assert.equal(runtime.providerConfig.baseUrl, 'https://example.test/v1')
     assert.equal(runtime.providerConfig.apiKey, 'config-key')
-    assert.equal(runtime.providerConfig.apiStyle, 'chat-completions')
+    assert.equal(runtime.providerConfig.apiStyle, 'codex-responses')
     assert.equal(runtime.model, 'kimi-k2.5')
     assert.equal(runtime.imageFallback?.provider, 'openai')
     assert.equal(runtime.imageFallback?.model, 'gpt-4.1-mini')

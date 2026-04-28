@@ -9,7 +9,7 @@ const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 export type ProviderProfileType = 'anthropic' | 'openai' | 'stub'
-export type OpenAiApiStyle = 'responses' | 'chat-completions'
+export type OpenAiApiStyle = 'responses' | 'chat-completions' | 'codex-responses'
 export type LlmConfigSource = ConfigEnvSource | 'default' | 'cli'
 
 type BaseProviderProfileConfig = {
@@ -92,7 +92,11 @@ function parseOptionalString(value: unknown): string | undefined {
 }
 
 function parseOpenAiApiStyle(value: unknown): OpenAiApiStyle | undefined {
-  return value === 'responses' || value === 'chat-completions' ? value : undefined
+  return value === 'responses' ||
+    value === 'chat-completions' ||
+    value === 'codex-responses'
+    ? value
+    : undefined
 }
 
 function parseOpenAiTextVerbosity(

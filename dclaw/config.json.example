@@ -5,63 +5,60 @@
   "DCLAW_LLM_MAX_RETRIES": 10,
   "DCLAW_LLM_TIMEOUT_MS": 600000,
   "DCLAW_ENABLE_STREAM_WATCHDOG": true,
-  "DCLAW_STREAM_IDLE_TIMEOUT_MS": 90000,
+  "DCLAW_STREAM_IDLE_TIMEOUT_MS": 600000,
+
   "llm": {
-    "defaultRuntime": "default",
+    "defaultRuntime": "glm-5.1",
     "providers": {
-      "openai-default": {
+      "doubao": {
         "type": "openai",
-        "apiKey": "your-openai-api-key",
-        "baseURL": "https://api.openai.com/v1",
-        "apiStyle": "responses",
-        "requestDefaults": {
-          "verbosity": "medium",
-          "reasoningEffort": "medium",
-          "store": false
-        }
-      },
-      "anthropic-default": {
-        "type": "anthropic",
-        "apiKey": "your-anthropic-api-key",
-        "baseURL": "https://api.anthropic.com"
-      },
-      "openrouter-default": {
-        "type": "openai",
-        "apiKey": "your-openrouter-api-key",
-        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "ark-a6205f22-9603-459b-a3fd-6d4d1f4cab25-050fd",
+        "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
         "apiStyle": "chat-completions"
+      },
+      "openrouter": {
+        "type": "openai",
+        "apiKey": "7Dm8RlZya912CqrXO7rRppfrpAjEBTAffEHCO9uJMWhjhoSt",
+        "baseURL": "https://api.newoa.cn/v1",
+        "apiStyle": "chat-completions"
+      },
+      "gpt":{
+        "type": "openai",
+        "apiKey": "cxp_eNbDzusnXbA4cU2bvlx-hL3d-1Pb2P-lBDVQAnQFf-Y",
+        "baseURL": "https://gpt.newoa.cn/v1",
+        "apiStyle": "responses"
       }
     },
     "runtimes": {
-      "default": {
+      "glm-5.1": {
         "primary": {
-          "providerRef": "openai-default",
-          "model": "gpt-5.4"
+          "providerRef": "doubao",
+          "model": "glm-5.1"
         },
         "imageFallback": {
-          "providerRef": "anthropic-default",
-          "model": "claude-sonnet-4-6"
+          "providerRef": "doubao",
+          "model": "doubao-seed-2.0-code"
         }
       },
-      "openrouter-claude": {
+      "gpt-5.4": {
         "primary": {
-          "providerRef": "openrouter-default",
-          "model": "anthropic/claude-opus-4.7"
+          "providerRef": "openrouter",
+          "model": "openai/gpt-5.4"
         },
         "imageFallback": {
-          "providerRef": "openrouter-default",
-          "model": "gpt-4.1-mini"
+          "providerRef": "openrouter",
+          "model": "openai/gpt-5.4"
         }
-      }
-    },
-    "modelCatalogOverrides": {
-      "gpt-5": {
-        "contextWindow": 900000,
-        "maxOutputTokens": 96000,
-        "maxOutputTokensUpperLimit": 128000
       },
-      "claude-opus-4.7": {
-        "supportsPdfInput": true
+      "gpt-5.4-mini": {
+        "primary": {
+          "providerRef": "openrouter",
+          "model": "openai/gpt-5.4-mini"
+        },
+        "imageFallback": {
+          "providerRef": "openrouter",
+          "model": "openai/gpt-5.4-mini"
+        }
       }
     }
   }

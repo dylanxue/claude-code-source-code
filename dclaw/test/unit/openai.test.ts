@@ -59,6 +59,16 @@ test('resolveProviderConfig keeps openai request defaults from typed config', ()
   })
 })
 
+test('resolveProviderConfig accepts codex responses api style', () => {
+  const config = resolveProviderConfig({
+    type: 'openai',
+    apiStyle: 'codex-responses',
+  })
+
+  assert.equal(config.provider, 'openai')
+  assert.equal(config.apiStyle, 'codex-responses')
+})
+
 test('OpenAiLlmClient formats persisted tool results as readable file references', async () => {
   let capturedBody: unknown
 
@@ -386,6 +396,95 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
           output: '{\n  "ok": true,\n  "output": {\n    "file": {\n      "content": "hello"\n    }\n  }\n}',
         },
       ],
+    })
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient uses Codex Responses request shape for Codex backends', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'hello from codex' }],
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'codex-responses',
+      modelCatalogOverrides: {
+        'gpt-5.4': {
+          maxOutputTokens: 777,
+          maxOutputTokensUpperLimit: 1000,
+          contextWindow: 400000,
+        },
+      },
+    })
+
+    await client.createMessage({
+      model: 'gpt-5.4',
+      providerOptions: {
+        openai: {
+          store: true,
+        },
+      },
+      messages: [
+        createMessage('assistant', [
+          {
+            type: 'reasoning',
+            id: 'rs_previous',
+            summary: ['Previous reasoning.'],
+            encryptedContent: 'enc_previous',
+            status: 'completed',
+          },
+        ]),
+        createTextMessage('user', 'hello'),
+      ],
+    })
+
+    assert.deepEqual(capturedBody, {
+      model: 'gpt-5.4',
+      input: [
+        {
+          type: 'reasoning',
+          summary: [{ type: 'summary_text', text: 'Previous reasoning.' }],
+          encrypted_content: 'enc_previous',
+          status: 'completed',
+        },
+        { role: 'user', content: 'hello' },
+      ],
+      store: false,
+      stream: false,
     })
   } finally {
     server.close()
@@ -1126,6 +1225,7 @@ test('OpenAiLlmClient supports chat completions requests', async () => {
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${address.port}`,
       apiStyle: 'chat-completions',
+      defaultStore: false,
       modelCatalogOverrides: {
         'kimi-k2.5': {
           maxOutputTokens: 2048,
@@ -1186,6 +1286,7 @@ test('OpenAiLlmClient supports chat completions requests', async () => {
     assert.deepEqual(capturedBody, {
       model: 'kimi-k2.5',
       max_tokens: 2048,
+      store: false,
       stream: false,
       tools: [
         {
