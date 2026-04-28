@@ -1,5 +1,5 @@
 import type { ToolResult } from '../../types/tool.js'
-import { updateSessionTask } from '../../tasks/store.js'
+import { updateExecutionSessionTask } from '../../taskboard/store.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './taskUpdatePrompt.js'
 
@@ -8,7 +8,7 @@ export type TaskUpdateInput = {
   subject?: string
   description?: string
   activeForm?: string
-  status?: 'pending' | 'in_progress' | 'completed' | 'deleted'
+  status?: 'pending' | 'in_progress' | 'completed' | 'cancelled'
   addBlocks?: string[]
   addBlockedBy?: string[]
   owner?: string
@@ -24,7 +24,6 @@ export type TaskUpdateOutput = {
     from: string
     to: string
   }
-  verificationNudgeNeeded?: boolean
 }
 
 export const taskUpdateTool: Tool<TaskUpdateInput, TaskUpdateOutput> = buildTool({
@@ -55,7 +54,7 @@ export const taskUpdateTool: Tool<TaskUpdateInput, TaskUpdateOutput> = buildTool
       },
       status: {
         type: 'string',
-        enum: ['pending', 'in_progress', 'completed', 'deleted'],
+        enum: ['pending', 'in_progress', 'completed', 'cancelled'],
         description: 'New status for the task.',
       },
       addBlocks: {
@@ -101,13 +100,11 @@ export const taskUpdateTool: Tool<TaskUpdateInput, TaskUpdateOutput> = buildTool
         required: ['from', 'to'],
         additionalProperties: false,
       },
-      verificationNudgeNeeded: { type: 'boolean' },
     },
     required: ['success', 'taskId', 'updatedFields'],
     additionalProperties: false,
   },
   isReadOnly() {
-    // Internal execution-state updates remain available during plan mode.
     return true
   },
   validate(input, context) {
@@ -135,7 +132,7 @@ export const taskUpdateTool: Tool<TaskUpdateInput, TaskUpdateOutput> = buildTool
       throw new Error('TaskUpdate requires an active sessionId in tool context')
     }
 
-    const result = await updateSessionTask(context.sessionId, input.taskId, {
+    const result = await updateExecutionSessionTask(context.sessionId, input.taskId, {
       subject: input.subject,
       description: input.description,
       activeForm: input.activeForm,
@@ -152,12 +149,12 @@ export const taskUpdateTool: Tool<TaskUpdateInput, TaskUpdateOutput> = buildTool
     } else if (result.statusChange?.to === 'completed') {
       summary = [
         `Task #${result.taskId} marked completed.`,
-        'Call TaskList now to find your next available task or see whether this work unblocked others.',
+        'Call TaskList now to find the next available task or confirm that the execution batch has reached terminal states.',
       ].join(' ')
     } else if (result.statusChange?.to === 'in_progress') {
-      summary = `Task #${result.taskId} marked in_progress. Continue the implementation and keep the task updated as work progresses.`
-    } else if (result.statusChange?.to === 'deleted') {
-      summary = `Task #${result.taskId} was deleted from the task list.`
+      summary = `Task #${result.taskId} marked in_progress. Continue implementation and keep advancing the current execution batch in this turn.`
+    } else if (result.statusChange?.to === 'cancelled') {
+      summary = `Task #${result.taskId} marked cancelled.`
     } else {
       summary = `Updated task #${result.taskId} ${result.updatedFields.join(', ')}`
     }

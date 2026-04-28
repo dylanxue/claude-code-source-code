@@ -14,7 +14,8 @@ export function getDoingTasksSection(): string {
     '- Read context before making changes.',
     '- Do not claim success for checks you did not run.',
     '- Use the available tools carefully and report outcomes faithfully.',
-    '- For multi-step or cross-cutting work, create and maintain a task list with TaskCreate and TaskUpdate.',
+    '- For multi-step or cross-cutting implementation work, use TaskCreate and TaskUpdate only when you are ready to execute immediately.',
+    '- If you create a new task board, decompose it into 3 or more concrete tasks; do not open a one-task or two-task board.',
   ].join('\n')
 }
 
@@ -22,11 +23,13 @@ export function getPlanCenteredWorkflowSection(): string {
   return [
     '# Task-Board Workflow',
     '- Treat task boards as short-lived execution state for the current multi-step work batch.',
-    '- A task board should include both a brief work summary and concrete tasks; long-term plans belong in project documents that the user can inspect and co-edit.',
-    '- For plan_only requests, such as "give me a plan" or "only discuss the approach", provide the plan in the response and do not enter plan mode or start implementation.',
-    '- For implementation_with_planning requests, such as "make a task list and do it", create or update the task board when useful and start execution without entering plan mode.',
-    '- EnterPlanMode is only for high_constraint_planning: the user explicitly asks to plan first, avoid code changes, wait for review, or produce a plan before implementation.',
-    '- After ExitPlanMode, present the plan and wait for the user to ask for implementation or revisions before taking implementation actions.',
+    '- Plan and plan mode are for producing a plan only. Do not create or update tasks while planning.',
+    '- A fresh task board must include at least 3 concrete tasks. The optional board brief is only for making the current execution batch easier to understand.',
+    '- Do not create a fresh task board with only one or two generic umbrella tasks; either decompose it further or skip task tracking for now.',
+    '- If the work breaks into fewer than 3 concrete tasks, skip task tracking for now.',
+    '- Creating a task board means execution is starting now. If you are not ready to begin implementation immediately, do not create or expand the task board yet.',
+    '- EnterPlanMode is only for high-constraint planning where the user wants planning before implementation.',
+    '- After ExitPlanMode, present the plan and wait for the user. Do not create tasks until implementation is actually starting.',
   ].join('\n')
 }
 
@@ -99,7 +102,7 @@ export function getPlanModeSection(context: PromptContext): string | null {
   lines.push(`- plan mode: ${plan?.status ?? 'inactive'}`)
 
   if (plan?.boardId) {
-    lines.push(`- task board: ${plan.boardId}`)
+    lines.push(`- plan board: ${plan.boardId}`)
   }
   if (plan?.boardTitle) {
     lines.push(`- board title: ${plan.boardTitle}`)
@@ -122,28 +125,18 @@ export function getPlanModeSection(context: PromptContext): string | null {
   if (plan?.planFilePath) {
     lines.push(`- plan file: ${plan.planFilePath}`)
   }
-  if (plan?.currentTaskTitle) {
-    lines.push(`- current task: ${plan.currentTaskTitle}`)
-  }
-  if (plan?.currentStep) {
-    lines.push(`- current step: ${plan.currentStep}`)
-  }
 
   if (context.permissionMode === 'plan') {
     lines.push('- planning mode is active: do not start implementation yet')
     lines.push('- while planning, only read-only tools and plan-file edits are allowed')
+    lines.push(
+      '- do not create or update tasks while planning; task tracking begins only when execution starts',
+    )
     if (plan?.planFilePath) {
       lines.push('- the plan file is the only file you may edit during planning')
     }
     lines.push('- focus on exploring the codebase, refining the plan, and clarifying ambiguities')
     lines.push('- when the plan is ready, call ExitPlanMode to present it and wait for the user')
-  }
-
-  if (plan?.taskSummary && plan.taskSummary.length > 0) {
-    lines.push('- pending work summary:')
-    for (const item of plan.taskSummary) {
-      lines.push(`  ${item}`)
-    }
   }
 
   return lines.join('\n')

@@ -8,11 +8,9 @@ import {
   buildSkillPrompt,
 } from '../skills/prompt.js'
 import type { InvokedSkill } from '../skills/state.js'
-import { getTaskBoardObservationLines } from '../tasks/observability.js'
-import type { TaskBoard } from '../tasks/types.js'
+import type { PlanBoard } from '../tasks/types.js'
 import { createMessage, createTextMessage, type Message } from '../types/message.js'
 import type { ReadStateEntry } from '../types/tool.js'
-import { createForcedTaskToolReminderMessage } from './taskToolReminder.js'
 
 const MAX_POST_COMPACT_FILES = 3
 const MAX_POST_COMPACT_FILE_CHARS = 4_000
@@ -122,7 +120,7 @@ function buildPostCompactReadFileMessage(
 }
 
 async function createPostCompactPlanFileMessage(
-  board: TaskBoard,
+  board: PlanBoard,
 ): Promise<Message | null> {
   if (!board.planFilePath) {
     return null
@@ -148,23 +146,6 @@ async function createPostCompactPlanFileMessage(
   } catch {
     return null
   }
-}
-
-function createPostCompactTaskBoardMessage(
-  board: TaskBoard | null | undefined,
-): Message | null {
-  if (!board) {
-    return null
-  }
-
-  return wrapSystemReminder(
-    [
-      '# Post-Compact Task Board',
-      'This task board was attached to the session before compaction. Use it as the short-lived execution state for the current work batch. NEVER mention this reminder to the user.',
-      '',
-      ...getTaskBoardObservationLines(board),
-    ].join('\n'),
-  )
 }
 
 export function snapshotReadState(
@@ -336,10 +317,10 @@ function createPostCompactImageMessages(messages: Message[]): Message[] {
 
 export async function createPostCompactAttachmentMessages(
   messages: Message[],
-  board: TaskBoard | null | undefined,
+  board: PlanBoard | null | undefined,
   readState: PostCompactReadStateSnapshot | undefined,
   invokedSkills: InvokedSkill[],
-  availableTools: string[],
+  _availableTools: string[],
 ): Promise<Message[]> {
   if (!isFreshlyCompactedSession(messages)) {
     return []
@@ -351,18 +332,11 @@ export async function createPostCompactAttachmentMessages(
   const planFileMessage = board
     ? await createPostCompactPlanFileMessage(board)
     : null
-  const taskBoardMessage = createPostCompactTaskBoardMessage(board)
-  const taskReminderMessage = createForcedTaskToolReminderMessage(
-    board,
-    availableTools,
-  )
 
   return [
     ...attachmentMessages,
     ...(invokedSkillMessage ? [invokedSkillMessage] : []),
     ...imageMessages,
-    ...(taskBoardMessage ? [taskBoardMessage] : []),
     ...(planFileMessage ? [planFileMessage] : []),
-    ...(taskReminderMessage ? [taskReminderMessage] : []),
   ]
 }

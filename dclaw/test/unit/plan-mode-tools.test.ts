@@ -6,12 +6,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSession } from '../../src/session/store.js'
 import {
-  ensureTaskBoardPlanFile,
-  getOrCreateTaskBoardForSession,
-  listSessionTasks,
-  loadTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  getOrCreatePlanBoardForSession,
+  loadPlanBoardForSession,
+  updatePlanBoard,
 } from '../../src/tasks/store.js'
+import { loadExecutionTaskBoardForSession } from '../../src/taskboard/store.js'
 import { enterPlanModeTool } from '../../src/tools/builtin/enterPlanMode.js'
 import { exitPlanModeTool } from '../../src/tools/builtin/exitPlanMode.js'
 import { createToolContext } from '../helpers/toolContext.js'
@@ -56,7 +56,7 @@ test('EnterPlanMode activates planning state without asking for approval', async
     assert.ok(context.planFilePath)
     assert.equal(existsSync(context.planFilePath), true)
 
-    const board = await loadTaskBoardForSession(session.sessionId, env)
+    const board = await loadPlanBoardForSession(session.sessionId, env)
     assert.ok(board)
     assert.equal(board.mode, 'active')
     assert.equal(board.resumePermissionMode, 'accept-edits')
@@ -86,11 +86,11 @@ test('ExitPlanMode exits planning without asking for approval', async () => {
       sessionId: 'session-exit-plan-reject',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(session.sessionId, '/tmp/project', env),
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(session.sessionId, '/tmp/project', env),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -136,7 +136,7 @@ test('ExitPlanMode exits planning without asking for approval', async () => {
     assert.match(result.output.message ?? '', /- Update the plan handoff flow/)
     assert.equal(result.output.plan, '# Implementation Plan\n\n- Update the plan handoff flow')
 
-    const updatedBoard = await loadTaskBoardForSession(session.sessionId, env)
+    const updatedBoard = await loadPlanBoardForSession(session.sessionId, env)
     assert.ok(updatedBoard)
     assert.equal(updatedBoard.mode, 'inactive')
   } finally {
@@ -160,11 +160,11 @@ test('ExitPlanMode presents the plan and restores the previous permission mode',
       sessionId: 'session-exit-plan',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(session.sessionId, '/tmp/project', env),
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(session.sessionId, '/tmp/project', env),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -208,12 +208,15 @@ test('ExitPlanMode presents the plan and restores the previous permission mode',
     assert.equal(context.permissionMode, 'accept-edits')
     assert.equal(context.planFilePath, undefined)
 
-    const updatedBoard = await loadTaskBoardForSession(session.sessionId, env)
+    const updatedBoard = await loadPlanBoardForSession(session.sessionId, env)
     assert.ok(updatedBoard)
     assert.equal(updatedBoard.mode, 'inactive')
     assert.equal(updatedBoard.resumePermissionMode, undefined)
-    const listed = await listSessionTasks(session.sessionId, env)
-    assert.deepEqual(listed.tasks, [])
+    const executionBoard = await loadExecutionTaskBoardForSession(
+      session.sessionId,
+      env,
+    )
+    assert.equal(executionBoard, null)
     assert.match(
       result.summary ?? '',
       /Present the plan to the user and wait for the next instruction/,

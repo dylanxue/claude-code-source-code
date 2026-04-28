@@ -15,9 +15,6 @@ export type PlanPromptContext = {
   boardPlan?: string
   boardScope?: string
   boardVerification?: string
-  currentTaskTitle?: string
-  currentStep?: string
-  taskSummary?: string[]
 }
 
 export type SkillsRuntimePromptContext = {

@@ -302,7 +302,7 @@ test('query loop forwards dedicated long prompts for implemented core tools', as
   const askUserQuestion = tools.find(tool => tool.name === 'AskUserQuestion')
   assert.match(askUserQuestion?.description ?? '', /Users will always be able to select "Other"/i)
   assert.match(askUserQuestion?.description ?? '', /\(Recommended\)/i)
-  assert.match(askUserQuestion?.description ?? '', /clarify requirements or choose between approaches/i)
+  assert.match(askUserQuestion?.description ?? '', /clarify requirements, constraints, or approach decisions/i)
   assert.match(askUserQuestion?.description ?? '', /Do not reference "the plan"/i)
 
   const exitPlanMode = tools.find(tool => tool.name === 'ExitPlanMode')
@@ -335,27 +335,35 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   assert.ok(tools)
 
   const taskCreate = tools.find(tool => tool.name === 'TaskCreate')
-  assert.match(taskCreate?.description ?? '', /Complex multi-step tasks/i)
+  assert.match(taskCreate?.description ?? '', /Multi-step implementation work/i)
   assert.match(taskCreate?.description ?? '', /Check TaskList first/i)
-  assert.match(taskCreate?.description ?? '', /fewer than 3 trivial steps/i)
-  assert.match(taskCreate?.description ?? '', /follow-up task/i)
+  assert.match(taskCreate?.description ?? '', /fewer than 3 concrete tasks/i)
+  assert.match(taskCreate?.description ?? '', /must start with 3 or more concrete tasks/i)
+  assert.match(taskCreate?.description ?? '', /single TaskCreate call with the \*\*tasks\*\* array to seed 3-6 actionable tasks/i)
+  assert.match(taskCreate?.description ?? '', /execution starts now/i)
+  assert.match(taskCreate?.description ?? '', /no longer supports single-task creation/i)
+  assert.match(taskCreate?.description ?? '', /automatically starts the first task/i)
+  assert.match(taskCreate?.description ?? '', /Do not use this tool in plan mode/i)
+  assert.equal(Boolean(taskCreate && 'anyOf' in taskCreate.inputSchema), false)
 
   const taskList = tools.find(tool => tool.name === 'TaskList')
-  assert.match(taskList?.description ?? '', /prefer working on tasks in ID order/i)
+  assert.match(taskList?.description ?? '', /Once implementation has started, use this tool before creating new tasks/i)
 
   const taskGet = tools.find(tool => tool.name === 'TaskGet')
   assert.match(taskGet?.description ?? '', /blockedBy/i)
+  assert.match(taskGet?.description ?? '', /cancelled/i)
 
   const taskUpdate = tools.find(tool => tool.name === 'TaskUpdate')
   assert.match(taskUpdate?.description ?? '', /TaskGet.*before updating/i)
   assert.match(taskUpdate?.description ?? '', /Only mark a task as `completed`/i)
-  assert.match(taskUpdate?.description ?? '', /create a new task describing the blocker/i)
+  assert.match(taskUpdate?.description ?? '', /Only one task may be `in_progress` at a time/i)
+  assert.match(taskUpdate?.description ?? '', /cancelled/i)
   assert.match(taskUpdate?.description ?? '', /## Examples/i)
 
   const enterPlanMode = tools.find(tool => tool.name === 'EnterPlanMode')
   assert.match(enterPlanMode?.description ?? '', /no-implementation planning lock/i)
   assert.match(enterPlanMode?.description ?? '', /Do not enter plan mode merely because a task is non-trivial/i)
-  assert.match(enterPlanMode?.description ?? '', /Task boards are the runtime execution state/i)
+  assert.match(enterPlanMode?.description ?? '', /Plan mode is for plan creation only/i)
 })
 
 test('query loop stores model-facing tool results separately from raw tool results', async () => {

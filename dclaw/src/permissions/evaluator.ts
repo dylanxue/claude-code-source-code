@@ -152,6 +152,8 @@ export async function evaluateToolPermission(
     return { ok: true }
   }
 
+  context.taskTurnHandoffReason = 'permission_denied'
+
   return {
     ok: false,
     error:

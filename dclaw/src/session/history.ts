@@ -14,10 +14,10 @@ import { getTextContent, type Message } from '../types/message.js'
 import {
   describePlanModeToolUse,
   describeSystemReminderText,
-  getTaskBoardObservationLines,
+  getPlanBoardObservationLines,
   isSystemReminderText,
 } from '../tasks/observability.js'
-import { loadTaskBoard } from '../tasks/store.js'
+import { loadPlanBoardForSession } from '../tasks/store.js'
 import { getSessionsDir } from './paths.js'
 import {
   loadSessionMessages,
@@ -286,8 +286,7 @@ export async function listSessionHistory(
       const persistedToolResultInfo =
         getPersistedToolResultInfoFromMeta(meta.persistedToolResults) ??
         getPersistedToolResultInfo(messages)
-      const board =
-        meta.taskBoardId ? await loadTaskBoard(meta.taskBoardId, env) : null
+      const board = await loadPlanBoardForSession(meta.sessionId, env)
       const subagents = await loadSessionSubagentSummary(meta.sessionId, env)
       const lastUserMessage = [...messages]
         .reverse()
@@ -327,7 +326,7 @@ export async function listSessionHistory(
           : {}),
         compactBoundaryCount: compactBoundaries.length,
         ...(lastCompactBoundaryLabel ? { lastCompactBoundaryLabel } : {}),
-        planningSummary: board ? getTaskBoardObservationLines(board) : [],
+        planningSummary: board ? getPlanBoardObservationLines(board) : [],
         subagents,
       }
     }),

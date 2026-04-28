@@ -21,31 +21,26 @@ import {
   updateSessionMeta,
 } from '../session/store.js'
 import {
-  ensurePlanFileForTaskBoard,
+  ensurePlanFileForPlanBoard,
   readPlanFile,
 } from '../tasks/planFiles.js'
 import {
   appendPlanSnapshotForFile,
-  recoverTaskBoardPlanFile,
+  recoverPlanBoardPlanFile,
 } from '../tasks/planSnapshots.js'
 import {
-  getTaskBoardBriefObservationLines,
-  getTaskBoardObservationLines,
+  getPlanBoardBriefObservationLines,
+  getPlanBoardObservationLines,
 } from '../tasks/observability.js'
 import {
-  createTaskRecord,
-  getCurrentTask,
-  setTaskStatus,
-} from '../tasks/taskState.js'
-import {
-  attachTaskBoardToSession,
-  createTaskBoard,
-  loadTaskBoard,
-  loadTaskBoardForSession,
-  updateTaskBoard,
-  updateTaskBoardLatestSession,
+  attachPlanBoardToSession,
+  createPlanBoard,
+  loadPlanBoard,
+  loadPlanBoardForSession,
+  updatePlanBoard,
+  updatePlanBoardLatestSession,
 } from '../tasks/store.js'
-import type { TaskBoard } from '../tasks/types.js'
+import type { PlanBoard } from '../tasks/types.js'
 import { formatTranscript } from '../session/transcript.js'
 import type { PermissionMode } from '../types/tool.js'
 import type { SkillStatus } from '../skills/enablement.js'
@@ -157,14 +152,14 @@ function printLines(lines: string[]): void {
   writeReplOutput(lines.join('\n') + '\n')
 }
 
-async function ensureBoardPlanFile(board: TaskBoard): Promise<TaskBoard> {
-  const { filePath } = await ensurePlanFileForTaskBoard(board)
+async function ensureBoardPlanFile(board: PlanBoard): Promise<PlanBoard> {
+  const { filePath } = await ensurePlanFileForPlanBoard(board)
   if (board.planFilePath === filePath) {
     return board
   }
 
   return (
-    (await updateTaskBoard(
+    (await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -180,10 +175,10 @@ async function ensureBoardPlanFile(board: TaskBoard): Promise<TaskBoard> {
 
 async function syncPlanModeRuntime(
   context: ReplCommandContext,
-): Promise<TaskBoard | null> {
-  const loadedBoard = await loadTaskBoardForSession(context.session.sessionId)
+): Promise<PlanBoard | null> {
+  const loadedBoard = await loadPlanBoardForSession(context.session.sessionId)
   const board = loadedBoard
-    ? await recoverTaskBoardPlanFile(
+    ? await recoverPlanBoardPlanFile(
         loadedBoard,
         context.engine.getMessages(),
       )
@@ -194,12 +189,12 @@ async function syncPlanModeRuntime(
   if (board?.mode === 'active') {
     context.engine.setPermissionMode('plan')
     context.session.permissionMode = 'plan'
-    context.session.permissionModeSource = 'task_board'
+    context.session.permissionModeSource = 'plan_board'
   } else if (context.session.permissionMode === 'plan') {
     const nextPermissionMode = board?.resumePermissionMode ?? 'default'
     context.engine.setPermissionMode(nextPermissionMode)
     context.session.permissionMode = nextPermissionMode
-    context.session.permissionModeSource = 'task_board'
+    context.session.permissionModeSource = 'plan_board'
   }
 
   return board
@@ -207,8 +202,8 @@ async function syncPlanModeRuntime(
 
 async function printSessionInfo(context: ReplCommandContext): Promise<void> {
   const meta = await loadSessionMeta(context.session.sessionId)
-  const taskBoard = meta?.taskBoardId
-    ? await loadTaskBoard(meta.taskBoardId)
+  const planBoard = meta?.planBoardId
+    ? await loadPlanBoard(meta.planBoardId)
     : null
   const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
   const llmConfig = await loadResolvedLlmConfig(context.options.cwd, configured.env)
@@ -248,10 +243,9 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     ...(context.engine.getQueryTracePath()
       ? [`query trace: ${context.engine.getQueryTracePath()}`]
       : []),
-    ...(meta?.taskBoardId ? [`task board: ${meta.taskBoardId}`] : []),
-    ...(taskBoard ? [`plan mode state: ${taskBoard.mode}`] : []),
-    ...(taskBoard?.planFilePath ? [`plan file: ${taskBoard.planFilePath}`] : []),
-    ...(taskBoard?.currentStep ? [`current step: ${taskBoard.currentStep}`] : []),
+    ...(meta?.planBoardId ? [`plan board: ${meta.planBoardId}`] : []),
+    ...(planBoard ? [`plan mode state: ${planBoard.mode}`] : []),
+    ...(planBoard?.planFilePath ? [`plan file: ${planBoard.planFilePath}`] : []),
     ...formatCompactRecommendationLines(compactRecommendation),
     ...(compactBoundaries.length > 0
       ? [`compact boundaries: ${compactBoundaries.length}`]
@@ -298,7 +292,7 @@ async function printTranscript(
 }
 
 async function clearConversation(context: ReplCommandContext): Promise<void> {
-  const board = await loadTaskBoardForSession(context.session.sessionId)
+  const board = await loadPlanBoardForSession(context.session.sessionId)
   const nextPermissionMode =
     context.session.permissionMode === 'plan'
       ? board?.resumePermissionMode ?? 'default'
@@ -320,7 +314,7 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   context.session.permissionMode = nextPermissionMode
   const queryTracePath = await context.rotateQueryTrace?.(nextSession.sessionId)
   if (nextPermissionMode === 'plan') {
-    context.session.permissionModeSource = 'task_board'
+    context.session.permissionModeSource = 'plan_board'
   }
 
   printLines([
@@ -331,30 +325,26 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   ])
 }
 
-function formatTaskBoardSummary(board: TaskBoard): string[] {
-  const currentTask = getCurrentTask(board)
-
+function formatPlanBoardSummary(board: PlanBoard): string[] {
   return [
-    `task board: ${board.boardId}`,
-    ...getTaskBoardBriefObservationLines(board),
+    `plan board: ${board.boardId}`,
+    ...getPlanBoardBriefObservationLines(board),
     `plan mode: ${board.mode}`,
     `workspace: ${board.workspaceId}`,
     `root session: ${board.rootSessionId}`,
     `latest session: ${board.latestSessionId}`,
     `plan file: ${board.planFilePath ?? '<none>'}`,
-    `current task: ${currentTask?.subject ?? '<none>'}`,
-    `current step: ${board.currentStep ?? '<none>'}`,
   ]
 }
 
-async function getOrCreateCurrentTaskBoard(
+async function getOrCreateCurrentPlanBoard(
   context: ReplCommandContext,
-): Promise<TaskBoard> {
-  const existing = await loadTaskBoardForSession(context.session.sessionId)
+): Promise<PlanBoard> {
+  const existing = await loadPlanBoardForSession(context.session.sessionId)
   if (existing) {
     const updated =
       existing.latestSessionId !== context.session.sessionId
-        ? await updateTaskBoardLatestSession(
+        ? await updatePlanBoardLatestSession(
             existing.boardId,
             context.session.sessionId,
           )
@@ -362,11 +352,11 @@ async function getOrCreateCurrentTaskBoard(
     return updated ?? existing
   }
 
-  const board = await createTaskBoard({
+  const board = await createPlanBoard({
     workspaceId: context.options.cwd,
     rootSessionId: context.session.sessionId,
   })
-  await attachTaskBoardToSession(context.session.sessionId, board.boardId)
+  await attachPlanBoardToSession(context.session.sessionId, board.boardId)
   return board
 }
 
@@ -374,7 +364,7 @@ async function showPlanState(context: ReplCommandContext): Promise<void> {
   const board = await syncPlanModeRuntime(context)
   if (!board) {
     printLines([
-      'No task board is attached to this session yet.',
+      'No plan board is attached to this session yet.',
       'Use /plan to enter plan mode and create one.',
       '',
     ])
@@ -391,7 +381,7 @@ async function showPlanState(context: ReplCommandContext): Promise<void> {
     .find(line => line.length > 0 && !line.startsWith('#'))
 
   printLines([
-    ...formatTaskBoardSummary(board),
+    ...formatPlanBoardSummary(board),
     ...(board.planFilePath && existsSync(board.planFilePath)
       ? ['plan file status: ready']
       : ['plan file status: missing']),
@@ -401,11 +391,11 @@ async function showPlanState(context: ReplCommandContext): Promise<void> {
 }
 
 async function enterPlanMode(context: ReplCommandContext): Promise<void> {
-  const board = await ensureBoardPlanFile(await getOrCreateCurrentTaskBoard(context))
+  const board = await ensureBoardPlanFile(await getOrCreateCurrentPlanBoard(context))
   const updated =
     board.mode === 'active' && context.session.permissionMode === 'plan'
       ? board
-      : await updateTaskBoard(
+      : await updatePlanBoard(
           board.boardId,
           current => ({
             ...current,
@@ -433,23 +423,23 @@ async function enterPlanMode(context: ReplCommandContext): Promise<void> {
 
   printLines([
     'Entered plan mode for this REPL session.',
-    ...(updated ? formatTaskBoardSummary(updated) : []),
+    ...(updated ? formatPlanBoardSummary(updated) : []),
     '',
   ])
 }
 
 async function exitPlanMode(context: ReplCommandContext): Promise<void> {
-  const board = await loadTaskBoardForSession(context.session.sessionId)
+  const board = await loadPlanBoardForSession(context.session.sessionId)
   if (!board) {
     printLines([
-      'No task board is attached to this session yet.',
+      'No plan board is attached to this session yet.',
       '',
     ])
     return
   }
 
   const nextPermissionMode = board.resumePermissionMode ?? 'default'
-  const updated = await updateTaskBoard(
+  const updated = await updatePlanBoard(
     board.boardId,
     current => ({
       ...current,
@@ -476,7 +466,7 @@ async function exitPlanMode(context: ReplCommandContext): Promise<void> {
 
   printLines([
     `Exited plan mode. Restored permission mode: ${nextPermissionMode}`,
-    ...(updated ? formatTaskBoardSummary(updated) : []),
+    ...(updated ? formatPlanBoardSummary(updated) : []),
     '',
   ])
 }
@@ -492,45 +482,7 @@ async function handlePlanCommand(
     return
   }
 
-  if (subcommand === 'start') {
-    const title = args.slice(1).join(' ').trim()
-    const board = await getOrCreateCurrentTaskBoard(context)
-    if (!title) {
-      printLines([
-        ...(board ? formatTaskBoardSummary(board) : []),
-        '',
-      ])
-      return
-    }
-
-    const now = new Date().toISOString()
-    const task = createTaskRecord(title, now)
-    const updated = await updateTaskBoard(
-      board.boardId,
-      current => ({
-        ...current,
-        currentTaskId: task.id,
-        tasks: [
-          ...current.tasks.map(existing =>
-            existing.status === 'in_progress'
-              ? setTaskStatus(existing, 'pending', now)
-              : existing,
-          ),
-          setTaskStatus(task, 'in_progress', now),
-        ],
-        updatedAt: now,
-      }),
-    )
-
-    printLines([
-      `Started task: ${title}`,
-      ...(updated ? formatTaskBoardSummary(updated) : []),
-      '',
-    ])
-    return
-  }
-
-  const board = await loadTaskBoardForSession(context.session.sessionId)
+  const board = await loadPlanBoardForSession(context.session.sessionId)
   if (board?.mode === 'active' || context.session.permissionMode === 'plan') {
     await showPlanState(context)
     return
@@ -876,7 +828,7 @@ async function resumeConversation(
 
   context.engine.resetMessages(resumed.messages)
   context.engine.setSessionId(resumed.meta.sessionId)
-  const taskBoard = await syncPlanModeRuntime(context)
+  const planBoard = await syncPlanModeRuntime(context)
   await updateSessionMeta(context.session.sessionId, meta => ({
     ...meta,
     runtimeName: context.session.runtimeName,
@@ -904,7 +856,7 @@ async function resumeConversation(
     ...(lastCompactBoundary
       ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
       : []),
-    ...(taskBoard ? getTaskBoardObservationLines(taskBoard) : []),
+    ...(planBoard ? getPlanBoardObservationLines(planBoard) : []),
     ...(resumed.subagents.count > 0
       ? [
           `subagents: ${resumed.subagents.count}`,

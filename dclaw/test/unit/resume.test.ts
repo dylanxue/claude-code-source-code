@@ -8,9 +8,9 @@ import { compactSession } from '../../src/compact/compactSession.js'
 import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import {
-  ensureTaskBoardPlanFile,
-  getOrCreateTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  getOrCreatePlanBoardForSession,
+  updatePlanBoard,
 } from '../../src/tasks/store.js'
 import { createPlanSnapshotMessage } from '../../src/tasks/planSnapshots.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
@@ -182,7 +182,7 @@ test('runResume shows compact boundary metadata for compacted sessions', async (
   assert.match(text, /restored transcript:/)
 })
 
-test('runResume prints planning summary for sessions with an attached task board', async () => {
+test('runResume prints planning summary for sessions with an attached plan board', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-resume-plan-'))
   const env = { ...process.env, HOME: homeDir }
   const originalWrite = process.stdout.write.bind(process.stdout)
@@ -206,39 +206,25 @@ test('runResume prints planning summary for sessions with an attached task board
       sessionId: 'resume-plan-session',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(
         session.sessionId,
         '/tmp/project',
         env,
       ),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
         title: 'Auth flow migration',
         purpose: 'Make the auth work batch visible after resume.',
-        background: 'The session has an attached task board.',
+        background: 'The session has an attached plan board.',
         plan: 'Review the auth flow before implementation.',
         scope: 'Auth flow planning only.',
-        verification: 'Resume output includes the task board brief.',
+        verification: 'Resume output includes the plan board brief.',
         mode: 'active',
-        currentTaskId: '1',
-        currentStep: 'Reviewing auth flow',
-        tasks: [
-          {
-            id: '1',
-            subject: 'Review auth flow',
-            description: 'Review auth flow before implementation',
-            status: 'in_progress',
-            blocks: [],
-            blockedBy: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
         updatedAt: new Date().toISOString(),
       }),
       env,
@@ -265,14 +251,14 @@ test('runResume prints planning summary for sessions with an attached task board
   }
 
   const text = output.join('')
-  assert.match(text, /task board:/)
+  assert.match(text, /plan board:/)
   assert.match(text, /board title: Auth flow migration/)
   assert.match(text, /board purpose: Make the auth work batch visible after resume\./)
   assert.match(text, /board plan: Review the auth flow before implementation\./)
   assert.match(text, /plan mode state: active/)
   assert.match(text, /plan file:/)
-  assert.match(text, /current task: Review auth flow/)
-  assert.match(text, /current step: Reviewing auth flow/)
+  assert.doesNotMatch(text, /current task:/)
+  assert.doesNotMatch(text, /current step:/)
 })
 
 test('runResume recovers a missing plan file for inactive sessions from transcript snapshots', async () => {
@@ -299,8 +285,8 @@ test('runResume recovers a missing plan file for inactive sessions from transcri
       sessionId: 'resume-plan-recovery-session',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(
         session.sessionId,
         '/tmp/project',
         env,
@@ -319,7 +305,7 @@ test('runResume recovers a missing plan file for inactive sessions from transcri
       [createPlanSnapshotMessage(board.planFilePath!, recoveredPlan, 'test-seed')],
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,

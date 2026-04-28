@@ -5,13 +5,13 @@ import {
   createTranscriptOnlyTextMessage,
   type Message,
 } from '../types/message.js'
-import type { TaskBoard } from './types.js'
+import type { PlanBoard } from './types.js'
 import {
-  ensurePlanFileForTaskBoard,
+  ensurePlanFileForPlanBoard,
   getDefaultPlanFilePath,
   readPlanFile,
 } from './planFiles.js'
-import { updateTaskBoard } from './store.js'
+import { updatePlanBoard } from './store.js'
 
 const PLAN_SNAPSHOT_OPEN = '<plan-file-snapshot>'
 const PLAN_SNAPSHOT_CLOSE = '</plan-file-snapshot>'
@@ -135,7 +135,7 @@ function readPlanSnapshotFromMessages(messages: Message[]): PlanSnapshotRecord |
 
 function isPlanFilePath(
   filePath: string,
-  board: TaskBoard,
+  board: PlanBoard,
   env: NodeJS.ProcessEnv,
 ): boolean {
   const resolvedPath = resolve(filePath)
@@ -153,7 +153,7 @@ function isPlanFilePath(
 
 function readPlanContentFromToolResults(
   messages: Message[],
-  board: TaskBoard,
+  board: PlanBoard,
   env: NodeJS.ProcessEnv,
 ): {
   filePath: string
@@ -232,11 +232,11 @@ export async function appendPlanSnapshotForFile(
   )
 }
 
-export async function recoverTaskBoardPlanFile(
-  board: TaskBoard,
+export async function recoverPlanBoardPlanFile(
+  board: PlanBoard,
   messages: Message[],
   env: NodeJS.ProcessEnv = process.env,
-): Promise<TaskBoard> {
+): Promise<PlanBoard> {
   const currentContent =
     board.planFilePath ? await readPlanFile(board.planFilePath) : null
   if (currentContent && currentContent.trim().length > 0) {
@@ -259,7 +259,7 @@ export async function recoverTaskBoardPlanFile(
     }
 
     return (
-      (await updateTaskBoard(
+      (await updatePlanBoard(
         board.boardId,
         current => ({
           ...current,
@@ -278,13 +278,13 @@ export async function recoverTaskBoardPlanFile(
     return board
   }
 
-  const ensured = await ensurePlanFileForTaskBoard(board, env)
+  const ensured = await ensurePlanFileForPlanBoard(board, env)
   if (board.planFilePath === ensured.filePath) {
     return board
   }
 
   return (
-    (await updateTaskBoard(
+    (await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,

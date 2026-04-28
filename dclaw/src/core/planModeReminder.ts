@@ -1,8 +1,7 @@
 import { createTextMessage, getTextContent, type Message } from '../types/message.js'
 import { isFreshlyCompactedSession } from '../compact/boundaryMessage.js'
-import { updateTaskBoard } from '../tasks/store.js'
-import { getCurrentTask } from '../tasks/taskState.js'
-import type { TaskBoard } from '../tasks/types.js'
+import { updatePlanBoard } from '../tasks/store.js'
+import type { PlanBoard } from '../tasks/types.js'
 import type { PermissionMode } from '../types/tool.js'
 
 const PLAN_MODE_TURNS_BETWEEN_ATTACHMENTS = 5
@@ -22,21 +21,15 @@ function countHumanTurns(messages: Message[]): number {
 }
 
 function buildPlanModeReminderText(
-  board: TaskBoard,
+  board: PlanBoard,
   reminderType: 'full' | 'sparse',
 ): string {
-  const currentTask = getCurrentTask(board)
-  const taskContextLines = [
-    ...(currentTask ? [`Current task: ${currentTask.subject}`] : []),
-    ...(board.currentStep ? [`Current step: ${board.currentStep}`] : []),
-  ]
-
   if (reminderType === 'sparse') {
     return [
       '## Plan Mode',
       `You are still in plan mode. Keep planning in ${board.planFilePath ?? 'the active plan file'}.`,
-      ...taskContextLines,
       'Do not start implementation yet.',
+      'Do not create or update tasks while planning. A task list belongs to the execution phase and should only be created when you are ready to begin implementation immediately.',
       'Only read-only tools and edits to the plan file are allowed.',
       'Explore the codebase, interview the user when needed, and keep refining the plan file.',
       'When the plan is ready to present, call ExitPlanMode.',
@@ -46,7 +39,6 @@ function buildPlanModeReminderText(
   return [
     '## Plan Mode',
     `You are in plan mode. The plan file is ${board.planFilePath ?? 'the active plan file'}.`,
-    ...taskContextLines,
     '',
     'Before implementation, you should:',
     '1. Explore the codebase with read-only tools',
@@ -57,11 +49,12 @@ function buildPlanModeReminderText(
     'Important constraints:',
     '- Do not start implementation yet',
     '- The plan file is the only file you may edit while plan mode remains active',
+    '- Do not create or update tasks while planning; task tracking begins only when execution starts',
     '- When the plan is ready, call ExitPlanMode to present it and wait for the user',
   ].join('\n')
 }
 
-function buildPlanModeReentryText(board: TaskBoard): string {
+function buildPlanModeReentryText(board: PlanBoard): string {
   return [
     '## Re-entering Plan Mode',
     '',
@@ -73,11 +66,12 @@ function buildPlanModeReentryText(board: TaskBoard): string {
     '3. Decide whether to continue or overwrite it',
     '4. Update the plan file before calling ExitPlanMode again',
     '',
+    'Stay in planning while you do this. Do not create or update tasks until execution begins.',
     'Treat this as a fresh planning session. Do not assume the existing plan is still correct without checking.',
   ].join('\n')
 }
 
-function buildPlanModeExitText(board: TaskBoard): string {
+function buildPlanModeExitText(board: PlanBoard): string {
   const planReference = board.planFilePath
     ? ` The plan file remains at ${board.planFilePath} if you need to reference it.`
     : ''
@@ -86,7 +80,7 @@ function buildPlanModeExitText(board: TaskBoard): string {
     '## Exited Plan Mode',
     '',
     `You have exited plan mode.${planReference}`,
-    'Present the plan to the user now. Do not start implementation until the user asks you to proceed or gives follow-up changes.',
+    'Present the plan to the user now. Do not start implementation, create tasks, or begin task tracking until the user asks you to proceed or gives follow-up changes.',
   ].join('\n')
 }
 
@@ -96,7 +90,7 @@ function wrapSystemReminder(text: string): Message {
 
 export function createPostCompactPlanModeReminderMessage(
   messages: Message[],
-  board: TaskBoard | null | undefined,
+  board: PlanBoard | null | undefined,
   permissionMode: PermissionMode,
 ): Message | null {
   if (
@@ -112,7 +106,7 @@ export function createPostCompactPlanModeReminderMessage(
 }
 
 function shouldAttachPlanModeReminder(
-  board: TaskBoard,
+  board: PlanBoard,
   currentHumanTurnCount: number,
 ): boolean {
   const last = board.lastPlanModeReminderTurnCount
@@ -129,7 +123,7 @@ function shouldAttachPlanModeReminder(
 
 export async function createPlanModeReminderMessages(
   messages: Message[],
-  board: TaskBoard | null | undefined,
+  board: PlanBoard | null | undefined,
   permissionMode: PermissionMode,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Message[]> {
@@ -142,7 +136,7 @@ export async function createPlanModeReminderMessages(
       return []
     }
 
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -171,7 +165,7 @@ export async function createPlanModeReminderMessages(
       ? 'full'
       : 'sparse'
 
-  await updateTaskBoard(
+  await updatePlanBoard(
     board.boardId,
     current => ({
       ...current,

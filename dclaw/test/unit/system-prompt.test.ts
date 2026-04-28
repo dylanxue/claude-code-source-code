@@ -18,23 +18,22 @@ test('buildSystemPrompt includes plan mode instructions and plan file context', 
         boardTitle: 'Planning state work',
         boardPurpose: 'Refine the short-lived implementation batch.',
         boardPlan: 'Inspect current code, write a plan file, then wait.',
-        currentTaskTitle: 'Implement planning state',
-        currentStep: 'Writing the plan file scaffold',
-        taskSummary: ['- [in_progress] Implement planning state'],
       },
     }),
   )
 
   assert.match(prompt, /# Planning State/)
   assert.match(prompt, /plan mode: active/)
-  assert.match(prompt, /task board: board_123/)
+  assert.match(prompt, /plan board: board_123/)
   assert.match(prompt, /board title: Planning state work/)
   assert.match(prompt, /board purpose: Refine the short-lived implementation batch/)
   assert.match(prompt, /board plan: Inspect current code/)
   assert.match(prompt, /plan file: \/tmp\/.dclaw\/plans\/plan_board_123\.md/)
   assert.match(prompt, /only file you may edit during planning/)
   assert.match(prompt, /call ExitPlanMode to present it and wait for the user/)
-  assert.match(prompt, /pending work summary:/)
+  assert.doesNotMatch(prompt, /current task:/)
+  assert.doesNotMatch(prompt, /current step:/)
+  assert.doesNotMatch(prompt, /pending work summary:/)
 })
 
 test('buildSystemPrompt nudges complex work toward task tracking without globally forcing plan mode', () => {
@@ -50,10 +49,12 @@ test('buildSystemPrompt nudges complex work toward task tracking without globall
 
   assert.match(prompt, /TaskCreate and TaskUpdate/)
   assert.match(prompt, /# Task-Board Workflow/)
-  assert.match(prompt, /plan_only requests/)
-  assert.match(prompt, /implementation_with_planning requests/)
-  assert.match(prompt, /EnterPlanMode is only for high_constraint_planning/)
-  assert.match(prompt, /start execution without entering plan mode/)
+  assert.match(prompt, /do not open a one-task or two-task board/i)
+  assert.match(prompt, /at least 3 concrete tasks/i)
+  assert.match(prompt, /Plan and plan mode are for producing a plan only/i)
+  assert.match(prompt, /Creating a task board means execution is starting now/i)
+  assert.match(prompt, /Do not create or update tasks while planning/i)
+  assert.match(prompt, /EnterPlanMode is only for high-constraint planning/i)
   assert.doesNotMatch(prompt, /Prefer direct execution for simple requests/)
   assert.doesNotMatch(prompt, /# DCLAW\.md Instructions/)
 })

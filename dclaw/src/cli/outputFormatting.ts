@@ -144,6 +144,9 @@ function formatToolUseDetail(
       return typeof taskId === 'string' ? `#${taskId}${status}` : undefined
     }
     case 'TaskCreate':
+      if (Array.isArray(input.tasks) && input.tasks.length > 0) {
+        return `${input.tasks.length} tasks`
+      }
       return typeof input.subject === 'string'
         ? truncateInlineText(input.subject, 80)
         : undefined

@@ -187,8 +187,8 @@
 
 当前阶段进展补充：
 
-- 已落地 `task board` 作为 planning / execution 状态容器
-- 已接通最小 REPL 入口：`/plan`、`/plan start`、`/plan exit`
+- 已落地 `plan board` 与 execution `task board` 的分离
+- 已接通最小 REPL 入口：`/plan`、`/plan exit`
 - 已移除 `TodoWrite` tool 与 `/todo` 系列命令，避免继续放大 Claude Code V1 checklist 路径
 - 重新评估后确认：Claude Code 当前 interactive 主路径是 `TaskCreate / TaskList / TaskGet / TaskUpdate`
 - 已接通 plan file 与 prompt runtime 摘要

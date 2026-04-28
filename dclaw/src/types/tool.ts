@@ -92,6 +92,8 @@ export type ReloadSkillsResult = {
 export type ToolContext = {
   sessionId?: string
   activeTurnId?: string
+  activeExecutionTaskBoardIdThisTurn?: string
+  taskTurnHandoffReason?: 'ask_user_handoff' | 'permission_denied'
   currentIteration?: number
   planFilePath?: string
   cwd: string

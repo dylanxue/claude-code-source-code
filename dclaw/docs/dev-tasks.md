@@ -416,18 +416,18 @@
 - [x] 新建 `src/tasks/`，先落：
   - `types.ts`
   - `store.ts`
-  - `taskState.ts`
+  - `planFiles.ts`
 
 - [x] 定义最小数据结构：
   - `planMode` 会话状态
-  - `task`（id、title、status、createdAt、updatedAt）
-  - `currentStep`
+  - `plan board brief`
+  - `plan file`
 
 - [x] 先采用本地文件持久化，保持与 session store 同风格，优先支持恢复而不是复杂查询
 
 - [x] 明确 task board 与 session 的关联方式：首版采用 `task board` 真值 + session meta 挂接 `taskBoardId`，允许连续 session 复用同一 board
 
-- [x] 验证标准：重启后可恢复 plan mode、当前 task 和当前步骤
+- [x] 验证标准：重启后可恢复 plan mode、plan file 与 plan board brief
 
 - [x] 已完成最小会话衔接：`/compact` 后会继承 `taskBoardId`，`/session` 可显示当前 board 与 plan 状态
 
@@ -445,7 +445,6 @@
 
 - [x] 为 CLI / REPL 设计最小入口：
   - `/plan`
-  - `/plan start`
   - `/plan exit`
 
 - [x] 设计 `/plan` 的交互语义：

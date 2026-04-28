@@ -4,24 +4,25 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { compactSession } from '../../src/compact/compactSession.js'
-import { getTaskBoardPath } from '../../src/session/paths.js'
+import { StubLlmClient } from '../../src/llm/providers/stub.js'
+import { getPlanBoardPath } from '../../src/session/paths.js'
 import {
-  ensurePlanFileForTaskBoard,
+  ensurePlanFileForPlanBoard,
   getDefaultPlanFilePath,
   readPlanFile,
 } from '../../src/tasks/planFiles.js'
 import {
-  createSessionTask,
-  createTaskBoard,
-  loadTaskBoard,
-  loadTaskBoardForSession,
-  updateTaskBoard,
+  attachPlanBoardToSession,
+  createPlanBoard,
+  getOrCreatePlanBoardForSession,
+  loadPlanBoard,
+  loadPlanBoardForSession,
 } from '../../src/tasks/store.js'
 import { createSession, loadSessionMeta } from '../../src/session/store.js'
 import { createTextMessage } from '../../src/types/message.js'
 
-test('task board store persists and can be linked to a session', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-'))
+test('plan board store persists and can be linked to a session', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
@@ -30,11 +31,11 @@ test('task board store persists and can be linked to a session', async () => {
       mode: 'interactive',
       provider: 'stub',
       model: 'stub-model',
-      taskBoardId: 'board-test',
+      planBoardId: 'board-test',
       env,
     })
 
-    const board = await createTaskBoard({
+    const board = await createPlanBoard({
       boardId: 'board-test',
       workspaceId: '/tmp/project',
       rootSessionId: session.sessionId,
@@ -42,10 +43,10 @@ test('task board store persists and can be linked to a session', async () => {
     })
 
     const storedMeta = await loadSessionMeta(session.sessionId, env)
-    const loadedBoard = await loadTaskBoard(board.boardId, env)
-    const linkedBoard = await loadTaskBoardForSession(session.sessionId, env)
+    const loadedBoard = await loadPlanBoard(board.boardId, env)
+    const linkedBoard = await loadPlanBoardForSession(session.sessionId, env)
 
-    assert.equal(storedMeta?.taskBoardId, 'board-test')
+    assert.equal(storedMeta?.planBoardId, 'board-test')
     assert.ok(loadedBoard)
     assert.equal(loadedBoard.workspaceId, '/tmp/project')
     assert.equal(loadedBoard.latestSessionId, session.sessionId)
@@ -56,26 +57,26 @@ test('task board store persists and can be linked to a session', async () => {
   }
 })
 
-test('ensurePlanFileForTaskBoard creates a reusable plan scaffold', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-plan-'))
+test('ensurePlanFileForPlanBoard creates a reusable plan scaffold', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-plan-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
-    const board = await createTaskBoard({
+    const board = await createPlanBoard({
       boardId: 'board-plan',
       workspaceId: '/tmp/project',
       rootSessionId: 'session-plan',
       env,
     })
 
-    const result = await ensurePlanFileForTaskBoard(board, env)
+    const result = await ensurePlanFileForPlanBoard(board, env)
     const content = await readPlanFile(result.filePath)
 
     assert.equal(result.created, true)
     assert.equal(result.filePath, getDefaultPlanFilePath(board.boardId, env))
     assert.equal(result.filePath.endsWith(`plan_${board.boardId}.md`), true)
     assert.ok(content)
-    assert.match(content, /# Task Board Plan/)
+    assert.match(content, /# Plan Board Plan/)
     assert.match(content, /## Purpose/)
     assert.match(content, /## Verification/)
   } finally {
@@ -83,54 +84,41 @@ test('ensurePlanFileForTaskBoard creates a reusable plan scaffold', async () => 
   }
 })
 
-test('createSessionTask initializes a short-lived task board brief', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-brief-'))
+test('createPlanBoard persists plan board brief metadata', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-brief-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
-    const session = await createSession({
-      cwd: '/tmp/project',
-      mode: 'interactive',
-      provider: 'stub',
-      model: 'stub-model',
-      sessionId: 'session-brief-board',
+    const board = await createPlanBoard({
+      boardId: 'board-brief',
+      workspaceId: '/tmp/project',
+      rootSessionId: 'session-brief-board',
+      brief: {
+        title: 'Project skeleton batch',
+        purpose: 'Prepare the repository for implementation.',
+        plan: 'Create directories, dependency files, and starter modules.',
+      },
       env,
     })
 
-    const created = await createSessionTask(
-      session.sessionId,
-      '/tmp/project',
-      {
-        subject: 'Initialize project skeleton',
-        description: 'Create the current implementation batch scaffolding.',
-        board: {
-          title: 'Project skeleton batch',
-          purpose: 'Prepare the repository for implementation.',
-          plan: 'Create directories, dependency files, and starter modules.',
-        },
-      },
-      env,
-    )
-
-    assert.equal(created.board.title, 'Project skeleton batch')
-    assert.equal(created.board.purpose, 'Prepare the repository for implementation.')
+    assert.equal(board.title, 'Project skeleton batch')
+    assert.equal(board.purpose, 'Prepare the repository for implementation.')
     assert.equal(
-      created.board.plan,
+      board.plan,
       'Create directories, dependency files, and starter modules.',
     )
-    assert.equal(created.board.tasks.length, 1)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }
 })
 
-test('loadTaskBoard clears stale planFilePath for inactive boards when the file is missing', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-stale-plan-'))
+test('loadPlanBoard clears stale planFilePath for inactive boards when the file is missing', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-stale-plan-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
     const boardId = 'board-stale-plan'
-    const boardPath = getTaskBoardPath(boardId, env)
+    const boardPath = getPlanBoardPath(boardId, env)
     const now = new Date().toISOString()
     await mkdir(join(homeDir, '.dclaw', 'task-boards'), { recursive: true })
 
@@ -159,7 +147,7 @@ test('loadTaskBoard clears stale planFilePath for inactive boards when the file 
       'utf8',
     )
 
-    const board = await loadTaskBoard(boardId, env)
+    const board = await loadPlanBoard(boardId, env)
     const rewritten = await readFile(boardPath, 'utf8')
 
     assert.ok(board)
@@ -170,8 +158,8 @@ test('loadTaskBoard clears stale planFilePath for inactive boards when the file 
   }
 })
 
-test('compactSession keeps the task board attached to the current session', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-compact-'))
+test('compactSession keeps the plan board attached to the current session', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-compact-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
@@ -180,10 +168,10 @@ test('compactSession keeps the task board attached to the current session', asyn
       mode: 'interactive',
       provider: 'stub',
       model: 'stub-model',
-      taskBoardId: 'board-compact',
+      planBoardId: 'board-compact',
       env,
     })
-    await createTaskBoard({
+    await createPlanBoard({
       boardId: 'board-compact',
       workspaceId: '/tmp/project',
       rootSessionId: source.sessionId,
@@ -203,13 +191,14 @@ test('compactSession keeps the task board attached to the current session', asyn
       model: 'stub-model',
       trigger: 'manual',
       reason: 'user requested /compact',
+      client: new StubLlmClient(),
       env,
     })
 
     const targetMeta = await loadSessionMeta(result.session.sessionId, env)
-    const updatedBoard = await loadTaskBoard('board-compact', env)
+    const updatedBoard = await loadPlanBoard('board-compact', env)
 
-    assert.equal(targetMeta?.taskBoardId, 'board-compact')
+    assert.equal(targetMeta?.planBoardId, 'board-compact')
     assert.equal(updatedBoard?.latestSessionId, source.sessionId)
     assert.equal(updatedBoard?.rootSessionId, source.sessionId)
   } finally {
@@ -217,13 +206,13 @@ test('compactSession keeps the task board attached to the current session', asyn
   }
 })
 
-test('loadTaskBoard rewrites legacy boards that still contain todos', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-migrate-'))
+test('loadPlanBoard rewrites legacy boards that still contain todos', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-migrate-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
     const boardId = 'board-legacy'
-    const boardPath = getTaskBoardPath(boardId, env)
+    const boardPath = getPlanBoardPath(boardId, env)
     const now = new Date().toISOString()
     await mkdir(join(homeDir, '.dclaw', 'task-boards'), { recursive: true })
 
@@ -258,7 +247,7 @@ test('loadTaskBoard rewrites legacy boards that still contain todos', async () =
       'utf8',
     )
 
-    const board = await loadTaskBoard(boardId, env)
+    const board = await loadPlanBoard(boardId, env)
     const rewritten = await readFile(boardPath, 'utf8')
 
     assert.ok(board)
@@ -270,8 +259,8 @@ test('loadTaskBoard rewrites legacy boards that still contain todos', async () =
   }
 })
 
-test('loadTaskBoardForSession retires inactive completed task boards after 5 seconds', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-retire-'))
+test('loadPlanBoardForSession retires inactive completed plan boards after 5 seconds', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-retire-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
@@ -283,45 +272,53 @@ test('loadTaskBoardForSession retires inactive completed task boards after 5 sec
       sessionId: 'session-retire-board',
       env,
     })
-    const created = await createSessionTask(
-      session.sessionId,
-      '/tmp/project',
-      {
-        subject: 'Ship the current plan',
-        description: 'Finish the current implementation work.',
-      },
+    const created = await createPlanBoard({
+      boardId: 'board-retire',
+      workspaceId: '/tmp/project',
+      rootSessionId: session.sessionId,
+      latestSessionId: session.sessionId,
       env,
-    )
+    })
+    await attachPlanBoardToSession(session.sessionId, created.boardId, env)
     const retiredAt = new Date(Date.now() - 6_000).toISOString()
-    await updateTaskBoard(
-      created.board.boardId,
-      current => ({
-        ...current,
-        mode: 'inactive',
-        updatedAt: retiredAt,
-        currentTaskId: undefined,
-        currentStep: undefined,
-        tasks: current.tasks.map(task => ({
-          ...task,
-          status: 'completed',
+    await writeFile(
+      getPlanBoardPath(created.boardId, env),
+      JSON.stringify(
+        {
+          ...created,
+          mode: 'inactive',
           updatedAt: retiredAt,
-        })),
-      }),
-      env,
+          tasks: [
+            {
+              id: '1',
+              subject: 'Ship the current plan',
+              description: 'Finish the current planning work.',
+              status: 'completed',
+              blocks: [],
+              blockedBy: [],
+              createdAt: retiredAt,
+              updatedAt: retiredAt,
+            },
+          ],
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
     )
 
-    const board = await loadTaskBoardForSession(session.sessionId, env)
+    const board = await loadPlanBoardForSession(session.sessionId, env)
     const meta = await loadSessionMeta(session.sessionId, env)
 
     assert.equal(board, null)
-    assert.equal(meta?.taskBoardId, undefined)
+    assert.equal(meta?.planBoardId, undefined)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }
 })
 
-test('createSessionTask creates a fresh board after the previous completed board retires', async () => {
-  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-board-refresh-'))
+test('getOrCreatePlanBoardForSession creates a fresh board after the previous completed plan board retires', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-plan-board-refresh-'))
   const env = { ...process.env, HOME: homeDir }
 
   try {
@@ -333,51 +330,54 @@ test('createSessionTask creates a fresh board after the previous completed board
       sessionId: 'session-refresh-board',
       env,
     })
-    const first = await createSessionTask(
-      session.sessionId,
-      '/tmp/project',
-      {
-        subject: 'Finish the current workstream',
-        description: 'Close the existing task list.',
-      },
+    const first = await createPlanBoard({
+      boardId: 'board-refresh-initial',
+      workspaceId: '/tmp/project',
+      rootSessionId: session.sessionId,
+      latestSessionId: session.sessionId,
       env,
-    )
+    })
+    await attachPlanBoardToSession(session.sessionId, first.boardId, env)
     const retiredAt = new Date(Date.now() - 6_000).toISOString()
-    await updateTaskBoard(
-      first.board.boardId,
-      current => ({
-        ...current,
-        mode: 'inactive',
-        updatedAt: retiredAt,
-        currentTaskId: undefined,
-        currentStep: undefined,
-        tasks: current.tasks.map(task => ({
-          ...task,
-          status: 'completed',
+    await writeFile(
+      getPlanBoardPath(first.boardId, env),
+      JSON.stringify(
+        {
+          ...first,
+          mode: 'inactive',
           updatedAt: retiredAt,
-        })),
-      }),
-      env,
+          tasks: [
+            {
+              id: '1',
+              subject: 'Finish the current workstream',
+              description: 'Close the existing plan board.',
+              status: 'completed',
+              blocks: [],
+              blockedBy: [],
+              createdAt: retiredAt,
+              updatedAt: retiredAt,
+            },
+          ],
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
     )
 
-    const second = await createSessionTask(
+    const second = await getOrCreatePlanBoardForSession(
       session.sessionId,
       '/tmp/project',
-      {
-        subject: 'Start a new top-level request',
-        description: 'Handle the next user request without appending to the old board.',
-      },
       env,
     )
     const meta = await loadSessionMeta(session.sessionId, env)
-    const retiredBoard = await loadTaskBoard(first.board.boardId, env)
+    const retiredBoard = await loadPlanBoard(first.boardId, env)
 
-    assert.notEqual(second.board.boardId, first.board.boardId)
-    assert.equal(second.task.id, '1')
-    assert.equal(meta?.taskBoardId, second.board.boardId)
+    assert.notEqual(second.boardId, first.boardId)
+    assert.equal(meta?.planBoardId, second.boardId)
     assert.ok(retiredBoard)
-    assert.equal(retiredBoard?.tasks.length, 1)
-    assert.equal(retiredBoard?.tasks[0]?.status, 'completed')
+    assert.equal(retiredBoard?.boardId, first.boardId)
+    assert.equal((retiredBoard as unknown as { tasks?: unknown[] }).tasks, undefined)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

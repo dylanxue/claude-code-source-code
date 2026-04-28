@@ -1,8 +1,8 @@
 import { readPlanFile } from '../../tasks/planFiles.js'
 import {
-  ensureTaskBoardPlanFile,
-  loadTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  loadPlanBoardForSession,
+  updatePlanBoard,
 } from '../../tasks/store.js'
 import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import type {
@@ -122,12 +122,12 @@ export const exitPlanModeTool: Tool<
       throw new Error('ExitPlanMode requires an active session context')
     }
 
-    const loadedBoard = await loadTaskBoardForSession(context.sessionId)
+    const loadedBoard = await loadPlanBoardForSession(context.sessionId)
     if (!loadedBoard) {
-      throw new Error('ExitPlanMode requires a task board attached to the active session')
+      throw new Error('ExitPlanMode requires a plan board attached to the active session')
     }
 
-    const board = await ensureTaskBoardPlanFile(loadedBoard)
+    const board = await ensurePlanBoardPlanFile(loadedBoard)
     const planContent =
       board.planFilePath ? await readPlanFile(board.planFilePath) : null
     const planPreview = extractPlanPreview(planContent)
@@ -153,7 +153,7 @@ export const exitPlanModeTool: Tool<
 
     const resumedPermissionMode = board.resumePermissionMode ?? 'default'
     const updated =
-      (await updateTaskBoard(board.boardId, current => ({
+      (await updatePlanBoard(board.boardId, current => ({
         ...current,
         mode: 'inactive',
         exitRequest: undefined,

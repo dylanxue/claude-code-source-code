@@ -15,8 +15,9 @@ import {
   loadSessionMeta,
 } from '../../src/session/store.js'
 import {
-  createSessionTask,
-  loadTaskBoardForSession,
+  attachPlanBoardToSession,
+  createPlanBoard,
+  loadPlanBoardForSession,
 } from '../../src/tasks/store.js'
 import type {
   ReplCommandContext,
@@ -733,7 +734,7 @@ test('maybeHandleReplCommand leaves plan mode when /clear starts a fresh session
     context.engine.setPermissionMode('plan')
     context.engine.setPlanFilePath('/tmp/project/.dclaw/plans/plan_board_123.md')
     context.session.permissionMode = 'plan'
-    context.session.permissionModeSource = 'task_board'
+    context.session.permissionModeSource = 'plan_board'
 
     process.stdout.write = ((chunk: string | Uint8Array) => {
       output.push(
@@ -1000,14 +1001,14 @@ test('maybeHandleReplCommand rotates query trace paths when switching sessions',
   assert.match(text, new RegExp(`query trace: /tmp/query-traces/${rotatedSessionIds[1]}\\.jsonl`))
 })
 
-test('maybeHandleReplCommand does not materialize a plan file when resuming a task-only session', async () => {
+test('maybeHandleReplCommand does not materialize a plan file when resuming an inactive plan-board session', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-repl-resume-task-only-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
   const output: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
   const context = createCommandContext()
-  let board: Awaited<ReturnType<typeof loadTaskBoardForSession>> | undefined | null
+  let board: Awaited<ReturnType<typeof loadPlanBoardForSession>> | undefined | null
 
   try {
     process.env = env
@@ -1020,15 +1021,18 @@ test('maybeHandleReplCommand does not materialize a plan file when resuming a ta
       sessionId: 'task-only-session',
       env,
     })
-    await createSessionTask(
-      session.sessionId,
-      '/tmp/project',
-      {
-        subject: 'Investigate auth edge cases',
-        description: 'Gather the outstanding execution tasks before coding.',
+    const planBoard = await createPlanBoard({
+      boardId: 'board-task-only',
+      workspaceId: '/tmp/project',
+      rootSessionId: session.sessionId,
+      latestSessionId: session.sessionId,
+      brief: {
+        title: 'Investigate auth edge cases',
+        purpose: 'Gather the outstanding execution tasks before coding.',
       },
       env,
-    )
+    })
+    await attachPlanBoardToSession(session.sessionId, planBoard.boardId, env)
 
     context.session.permissionMode = 'plan'
     context.session.permissionModeSource = 'repl_command'
@@ -1048,7 +1052,7 @@ test('maybeHandleReplCommand does not materialize a plan file when resuming a ta
     )
 
     assert.equal(handled, true)
-    board = await loadTaskBoardForSession('task-only-session', env)
+    board = await loadPlanBoardForSession('task-only-session', env)
   } finally {
     process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write

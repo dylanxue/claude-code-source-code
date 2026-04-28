@@ -6,9 +6,8 @@
   "DCLAW_LLM_TIMEOUT_MS": 600000,
   "DCLAW_ENABLE_STREAM_WATCHDOG": true,
   "DCLAW_STREAM_IDLE_TIMEOUT_MS": 600000,
-
   "llm": {
-    "defaultRuntime": "glm-5.1",
+    "defaultRuntime": "gpt-5.4",
     "providers": {
       "doubao": {
         "type": "openai",
@@ -21,6 +20,15 @@
         "apiKey": "7Dm8RlZya912CqrXO7rRppfrpAjEBTAffEHCO9uJMWhjhoSt",
         "baseURL": "https://api.newoa.cn/v1",
         "apiStyle": "chat-completions"
+      },
+      "codex-proxy": {
+        "type": "openai",
+        "apiKey": "cxp_eNbDzusnXbA4cU2bvlx-hL3d-1Pb2P-lBDVQAnQFf-Y",
+        "baseURL": "https://gpt.newoa.cn/v1",
+        "apiStyle": "codex-responses",
+        "requestDefaults": {
+          "store": false
+        }
       }
     },
     "runtimes": {
@@ -36,14 +44,25 @@
       },
       "gpt-5.4": {
         "primary": {
-          "providerRef": "openrouter",
-          "model": "openai/gpt-5.4"
+          "providerRef": "codex-proxy",
+          "model": "gpt-5.4"
         },
         "imageFallback": {
-          "providerRef": "openrouter",
-          "model": "openai/gpt-5.4"
+          "providerRef": "codex-proxy",
+          "model": "gpt-5.4"
+        }
+      },
+      "gpt-5.4-mini": {
+        "primary": {
+          "providerRef": "codex-proxy",
+          "model": "gpt-5.4-mini"
+        },
+        "imageFallback": {
+          "providerRef": "codex-proxy",
+          "model": "gpt-5.4-mini"
         }
       }
     }
   }
 }
+

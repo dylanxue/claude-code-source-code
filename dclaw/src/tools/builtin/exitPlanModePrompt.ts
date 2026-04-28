@@ -11,8 +11,9 @@ export const PROMPT = `Use this tool when you are in plan mode and your plan fil
 - This tool does not take the full plan content as input
 - It leaves the high-constraint planning lock and returns the plan content
 - It does not ask an interactive approval question
-- It does not mean implementation should begin immediately
-- It does not complete or retire the current task board
+- It does not create tasks or start implementation
+- Task creation belongs to the execution phase and should happen only when you are ready to begin implementation immediately
+- It does not complete or retire any execution task board
 - The optional note parameter is only a short summary of why the plan is ready to present
 
 ## When to Use This Tool
@@ -32,4 +33,5 @@ Important:
 - ExitPlanMode is not an approval step
 - After using ExitPlanMode, show the plan to the user and say: "If this direction looks good, I can start implementation; if you want changes, tell me what you would like adjusted."
 - Then wait for the user's next instruction instead of calling more implementation tools in the same turn
+- Do not call TaskCreate or TaskUpdate in the same turn that you exit plan mode
 `

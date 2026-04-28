@@ -409,6 +409,10 @@ export const askUserQuestionTool: Tool<
         : 'submit_answers'
     const message = buildActionMessage(action, input.questions, answers)
 
+    if (action === 'respond_to_agent') {
+      context.taskTurnHandoffReason = 'ask_user_handoff'
+    }
+
     return {
       ok: true,
       output: {

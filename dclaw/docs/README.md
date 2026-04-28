@@ -48,6 +48,7 @@
 这些文档保留更细的约束和实现细节，供后续分模块开发时查阅：
 
 - [plan-centered-design.md](./plan-centered-design.md)
+- [plan-task-runtime-split-design.md](./plan-task-runtime-split-design.md)
 - [architecture.md](./architecture.md)
 - [phases.md](./phases.md)
 - [mvp-tech-design.md](./mvp-tech-design.md)

@@ -33,6 +33,11 @@ import {
 } from './toolResultBudget.js'
 import { QueryLoopAbortError, QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
+import {
+  isExecutionBoardActive,
+  loadExecutionTaskBoardForSession,
+} from '../taskboard/store.js'
+import type { TaskBoard } from '../taskboard/types.js'
 
 const APPROX_ASCII_CHARS_PER_TOKEN = 4
 const STREAM_OUTPUT_GUARD_RATIO = 0.95
@@ -116,6 +121,7 @@ export type QueryLoopResult = {
   outputText: string
   iterations: number
   usedPostCompactAttachments: boolean
+  turnEndReason: 'assistant_handoff' | 'permission_denied' | 'max_iterations'
 }
 
 export const DEFAULT_QUERY_MAX_ITERATIONS = 128
@@ -381,6 +387,49 @@ function buildEmptyTurnRepairFailureMessage(
   )
 }
 
+function formatExecutionTaskPreview(board: TaskBoard): string[] {
+  return board.tasks.map(task => {
+    const blocked =
+      task.blockedBy.length > 0
+        ? ` [blocked by ${task.blockedBy.map(id => `#${id}`).join(', ')}]`
+        : ''
+    return `- #${task.id} [${task.status}] ${task.subject}${blocked}`
+  })
+}
+
+function buildActiveExecutionTaskContinuationReminderMessage(
+  board: TaskBoard,
+): Message {
+  const currentTask = board.tasks.find(task => task.id === board.currentTaskId)
+  const lines = [
+    'You still have an active execution task list in this turn.',
+    'Do not end the turn with ordinary assistant text while pending or in_progress tasks remain.',
+    'Continue implementation by updating the current task state, checking the task list, or completing the next actionable step.',
+  ]
+
+  if (currentTask) {
+    lines.push(
+      `Current task: #${currentTask.id} [${currentTask.status}] ${currentTask.subject}`,
+    )
+  }
+  if (board.currentStep) {
+    lines.push(`Current step: ${board.currentStep}`)
+  }
+
+  lines.push('Current execution tasks:')
+  lines.push(...formatExecutionTaskPreview(board))
+
+  return createSystemReminderMessage(lines.join('\n'))
+}
+
+function resolveTurnEndReason(
+  toolContext: ToolContext,
+): 'assistant_handoff' | 'permission_denied' {
+  return toolContext.taskTurnHandoffReason === 'permission_denied'
+    ? 'permission_denied'
+    : 'assistant_handoff'
+}
+
 function summarizeToolResultContent(
   result: ToolExecutionResult,
 ): Array<Record<string, unknown>> | undefined {
@@ -620,6 +669,8 @@ export async function executeSingleTurn(
   let usedPostCompactAttachments = false
   let emptyTurnRepairAttempted = false
   let pendingEmptyTurnRepairMessages: Message[] = []
+  let executionTurnEndRepairAttempted = false
+  let pendingExecutionTurnRepairMessages: Message[] = []
   const initialIterationState = await resolveIterationState(
     request,
     workingMessages,
@@ -668,8 +719,12 @@ export async function executeSingleTurn(
       if (iteration > 1) {
         usedPostCompactAttachments ||= baseIterationState.usedPostCompactAttachments
       }
-      const repairMessagesForIteration = pendingEmptyTurnRepairMessages
+      const repairMessagesForIteration = [
+        ...pendingEmptyTurnRepairMessages,
+        ...pendingExecutionTurnRepairMessages,
+      ]
       pendingEmptyTurnRepairMessages = []
+      pendingExecutionTurnRepairMessages = []
       const iterationState = {
         ...baseIterationState,
         messages: [
@@ -965,9 +1020,47 @@ export async function executeSingleTurn(
           outputText,
           iterations: iteration,
           usedPostCompactAttachments,
+          turnEndReason: resolveTurnEndReason(request.toolContext),
         }
       }
       if (toolUseBlocks.length === 0) {
+        const activeExecutionBoard = request.toolContext.sessionId
+          ? await loadExecutionTaskBoardForSession(request.toolContext.sessionId)
+          : null
+        const shouldGuardTurnEnd =
+          activeExecutionBoard !== null &&
+          isExecutionBoardActive(activeExecutionBoard) &&
+          !request.toolContext.taskTurnHandoffReason
+        if (shouldGuardTurnEnd) {
+          recordTrace(
+            request.queryTraceSink,
+            'turn.execution_guard.detected',
+            {
+              boardId: activeExecutionBoard.boardId,
+              currentTaskId: activeExecutionBoard.currentTaskId,
+            },
+            iteration,
+          )
+
+          if (!executionTurnEndRepairAttempted && iteration < maxIterations) {
+            const reminderMessage =
+              buildActiveExecutionTaskContinuationReminderMessage(
+                activeExecutionBoard,
+              )
+            pendingExecutionTurnRepairMessages = [reminderMessage]
+            executionTurnEndRepairAttempted = true
+            recordTrace(
+              request.queryTraceSink,
+              'turn.execution_guard.repair_scheduled',
+              {
+                reminderMessage: summarizeMessageForTrace(reminderMessage),
+              },
+              iteration,
+            )
+            continue
+          }
+        }
+
         outputText = getTextContent(assistantMessage)
         recordTrace(
           request.queryTraceSink,
@@ -988,6 +1081,7 @@ export async function executeSingleTurn(
           outputText,
           iterations: iteration,
           usedPostCompactAttachments,
+          turnEndReason: resolveTurnEndReason(request.toolContext),
         }
       }
 
@@ -1348,6 +1442,7 @@ export async function executeSingleTurn(
       outputText: maxIterationsMessageText,
       iterations: maxIterations,
       usedPostCompactAttachments,
+      turnEndReason: 'max_iterations',
     }
   } finally {
     await request.queryTraceSink?.flush().catch(() => undefined)

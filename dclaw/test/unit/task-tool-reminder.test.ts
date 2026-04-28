@@ -10,9 +10,14 @@ import type {
   CreateMessageResponse,
   LlmClient,
 } from '../../src/llm/types.js'
+import type { AskUserQuestionHostResult } from '../../src/types/tool.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { createSession } from '../../src/session/store.js'
-import { createSessionTask } from '../../src/tasks/store.js'
+import {
+  createExecutionTaskBoardForSession,
+  loadExecutionTaskBoard,
+  loadExecutionTaskBoardForSession,
+} from '../../src/taskboard/store.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
 class CapturingLlmClient implements LlmClient {
@@ -25,6 +30,66 @@ class CapturingLlmClient implements LlmClient {
     this.requests.push(request)
     return {
       message: createTextMessage('assistant', 'ok'),
+    }
+  }
+}
+
+class StaticAnswerClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    return {
+      message: createTextMessage('assistant', 'ok'),
+    }
+  }
+}
+
+class AskThenChatClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+
+    if (this.requests.length === 1) {
+      return {
+        message: createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'ask_1',
+            name: 'AskUserQuestion',
+            input: {
+              questions: [
+                {
+                  id: 'clarify',
+                  header: 'Clarify',
+                  question: 'Which requirement should I prioritize?',
+                  options: [
+                    {
+                      label: 'Engine',
+                      description: 'Focus on the engine path first.',
+                    },
+                    {
+                      label: 'UI',
+                      description: 'Focus on the UI path first.',
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ]),
+      }
+    }
+
+    return {
+      message: createTextMessage('assistant', 'What would you like to clarify?'),
     }
   }
 }
@@ -55,13 +120,23 @@ test('QueryEngine appends a task tool reminder when task tracking is stale', asy
       sessionId: 'session-task-reminder',
       env,
     })
-    await createSessionTask(
+    await createExecutionTaskBoardForSession(
       session.sessionId,
       '/tmp/project',
-      {
-        subject: 'Implement task reminders',
-        description: 'Add a runtime reminder when task tools go stale.',
-      },
+      [
+        {
+          subject: 'Implement task reminders',
+          description: 'Add a runtime reminder when task tools go stale.',
+        },
+        {
+          subject: 'Verify reminder timing',
+          description: 'Confirm the reminder appears after stale task tracking.',
+        },
+        {
+          subject: 'Check task cleanup',
+          description: 'Confirm unfinished tasks close when the turn ends.',
+        },
+      ],
       env,
     )
 
@@ -106,7 +181,7 @@ test('QueryEngine appends a task tool reminder when task tracking is stale', asy
     assert.match(reminderText, /TaskCreate/)
     assert.match(reminderText, /TaskUpdate/)
     assert.match(reminderText, /Current task list:/)
-    assert.match(reminderText, /#1 \[pending\] Implement task reminders/)
+    assert.match(reminderText, /#1 \[in_progress\] Implement task reminders/)
 
     const persistedMessages = engine.getMessages()
     assert.equal(
@@ -136,13 +211,23 @@ test('QueryEngine skips the task tool reminder when task tools were used recentl
       sessionId: 'session-task-reminder-recent',
       env,
     })
-    await createSessionTask(
+    await createExecutionTaskBoardForSession(
       session.sessionId,
       '/tmp/project',
-      {
-        subject: 'Implement task reminders',
-        description: 'Add a runtime reminder when task tools go stale.',
-      },
+      [
+        {
+          subject: 'Implement task reminders',
+          description: 'Add a runtime reminder when task tools go stale.',
+        },
+        {
+          subject: 'Verify reminder timing',
+          description: 'Confirm the reminder is skipped after recent task tool use.',
+        },
+        {
+          subject: 'Check task cleanup',
+          description: 'Confirm unfinished tasks close when the turn ends.',
+        },
+      ],
       env,
     )
 
@@ -176,6 +261,167 @@ test('QueryEngine skips the task tool reminder when task tools were used recentl
       )
     })
     assert.equal(reminderMessage, undefined)
+  } finally {
+    process.env = originalEnv
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('QueryEngine retries once before ending a turn with unfinished execution tasks, then cancels them', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-turn-cleanup-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+
+  try {
+    process.env = env
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-task-turn-cleanup',
+      env,
+    })
+    const created = await createExecutionTaskBoardForSession(
+      session.sessionId,
+      '/tmp/project',
+      [
+        {
+          subject: 'Implement task reminders',
+          description: 'Add a runtime reminder when task tools go stale.',
+        },
+        {
+          subject: 'Verify reminder timing',
+          description: 'Confirm the reminder appears after stale task tracking.',
+        },
+        {
+          subject: 'Check task cleanup',
+          description: 'Confirm unfinished tasks close when the turn ends.',
+        },
+      ],
+      env,
+    )
+
+    const client = new StaticAnswerClient()
+    const registry = createDefaultToolRegistry()
+    const engine = new QueryEngine({
+      client,
+      model: 'stub-model',
+      modelLimitsEnv: env,
+      systemPrompt: 'BASE SYSTEM PROMPT',
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        cwd: '/tmp/project',
+        sessionId: session.sessionId,
+        availableTools: registry.list().map(tool => tool.name),
+      }),
+    })
+
+    await engine.submitUserPrompt('continue')
+
+    assert.equal(client.requests.length, 2)
+    const repairRequestText = client.requests[1]?.messages
+      .map(message =>
+        message.content
+          .map(block => (block.type === 'text' ? block.text : ''))
+          .join('\n'),
+      )
+      .join('\n') ?? ''
+    assert.match(repairRequestText, /You still have an active execution task list/i)
+
+    const attachedBoard = await loadExecutionTaskBoardForSession(session.sessionId, env)
+    assert.equal(attachedBoard, null)
+
+    const finalizedBoard = await loadExecutionTaskBoard(created.board.boardId, env)
+    assert.ok(finalizedBoard)
+    assert.equal(finalizedBoard.executionState, 'cancelled')
+    assert.deepEqual(
+      finalizedBoard.tasks.map(task => task.status),
+      ['cancelled', 'cancelled', 'cancelled'],
+    )
+  } finally {
+    process.env = originalEnv
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('AskUserQuestion handoff allows the turn to end without execution-turn repair and still cleans up tasks', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-task-turn-handoff-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalEnv = process.env
+
+  try {
+    process.env = env
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-task-turn-handoff',
+      env,
+    })
+    const created = await createExecutionTaskBoardForSession(
+      session.sessionId,
+      '/tmp/project',
+      [
+        {
+          subject: 'Clarify engine path',
+          description: 'Understand which engine detail matters first.',
+        },
+        {
+          subject: 'Sketch UI interaction',
+          description: 'Outline the browser interaction flow.',
+        },
+        {
+          subject: 'Verify next steps',
+          description: 'Decide what to do after clarification.',
+        },
+      ],
+      env,
+    )
+
+    const client = new AskThenChatClient()
+    const registry = createDefaultToolRegistry()
+    const engine = new QueryEngine({
+      client,
+      model: 'stub-model',
+      modelLimitsEnv: env,
+      systemPrompt: 'BASE SYSTEM PROMPT',
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        cwd: '/tmp/project',
+        sessionId: session.sessionId,
+        availableTools: registry.list().map(tool => tool.name),
+        askUserQuestions: async () =>
+          ({
+            answers: { clarify: 'Need more context' },
+            action: 'respond_to_agent',
+          }) satisfies AskUserQuestionHostResult,
+      }),
+    })
+
+    await engine.submitUserPrompt('continue')
+
+    assert.equal(client.requests.length, 2)
+    const finalRequestText = client.requests[1]?.messages
+      .map(message =>
+        message.content
+          .map(block => (block.type === 'text' ? block.text : ''))
+          .join('\n'),
+      )
+      .join('\n') ?? ''
+    assert.doesNotMatch(finalRequestText, /You still have an active execution task list/i)
+
+    const attachedBoard = await loadExecutionTaskBoardForSession(session.sessionId, env)
+    assert.equal(attachedBoard, null)
+
+    const finalizedBoard = await loadExecutionTaskBoard(created.board.boardId, env)
+    assert.ok(finalizedBoard)
+    assert.equal(finalizedBoard.executionState, 'cancelled')
+    assert.deepEqual(
+      finalizedBoard.tasks.map(task => task.status),
+      ['cancelled', 'cancelled', 'cancelled'],
+    )
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })

@@ -28,7 +28,9 @@ import {
   getModelVisibleMessages,
   type Message,
 } from '../types/message.js'
-import { loadTaskBoardForSession } from '../tasks/store.js'
+import { loadPlanBoardForSession } from '../tasks/store.js'
+import { loadExecutionTaskBoardForSession } from '../taskboard/store.js'
+import { cleanupExecutionTaskBoardForTurnEnd } from '../taskboard/turnCleanup.js'
 import type { ToolRegistry } from '../tools/registry.js'
 import type { SkillRegistry } from '../skills/registry.js'
 import {
@@ -415,7 +417,7 @@ export class QueryEngine {
       }
     }
 
-    const board = await loadTaskBoardForSession(
+    const board = await loadPlanBoardForSession(
       this.toolContext.sessionId,
       this.modelLimitsEnv,
     )
@@ -449,9 +451,13 @@ export class QueryEngine {
       transientMessages.push(...planModeReminderMessages)
     }
 
+    const executionBoard = await loadExecutionTaskBoardForSession(
+      this.toolContext.sessionId,
+      this.modelLimitsEnv,
+    )
     const taskReminderMessage = createTaskToolReminderMessage(
       messages,
-      board,
+      executionBoard,
       this.toolContext.availableTools,
     )
     if (taskReminderMessage) {
@@ -503,6 +509,34 @@ export class QueryEngine {
     return modelLimits
       ? deriveToolResultBudgetFromModelLimits(modelLimits)
       : undefined
+  }
+
+  private resetTurnScopedTaskState(): void {
+    this.toolContext.activeExecutionTaskBoardIdThisTurn = undefined
+    this.toolContext.taskTurnHandoffReason = undefined
+  }
+
+  private async cleanupExecutionTaskBoard(
+    reason:
+      | 'assistant_handoff'
+      | 'permission_denied'
+      | 'abort'
+      | 'llm_error'
+      | 'max_iterations',
+  ): Promise<void> {
+    if (!this.toolContext.sessionId) {
+      return
+    }
+
+    try {
+      await cleanupExecutionTaskBoardForTurnEnd(
+        this.toolContext.sessionId,
+        reason,
+        this.modelLimitsEnv,
+      )
+    } catch {
+      // Best-effort cleanup; do not fail the main turn if task-board cleanup fails.
+    }
   }
 
   private async autoCompactIfNeeded(
@@ -615,6 +649,7 @@ export class QueryEngine {
     const persistedMessagesWithUser = this.getMessages()
     const modelLimits = this.getResolvedModelLimits()
     const toolResultBudgetOptions = this.getResolvedToolResultBudgetOptions()
+    this.resetTurnScopedTaskState()
 
     let response
     try {
@@ -661,6 +696,11 @@ export class QueryEngine {
           this.postCompactReadState = undefined
         }
       }
+      if (error instanceof QueryLoopLlmError) {
+        await this.cleanupExecutionTaskBoard('llm_error')
+      } else if (error instanceof QueryLoopAbortError) {
+        await this.cleanupExecutionTaskBoard('abort')
+      }
       throw error
     }
 
@@ -690,6 +730,8 @@ export class QueryEngine {
         // Post-turn hooks are best-effort and should not fail the main turn.
       }
     }
+
+    await this.cleanupExecutionTaskBoard(response.turnEndReason)
 
     return {
       userMessage,

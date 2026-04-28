@@ -27,7 +27,7 @@ import {
   getSessionDir,
   getSessionAgentMessagesPath,
   getSessionAgentMetaPath,
-  getTaskBoardsDir,
+  getPlanBoardsDir,
 } from '../../src/session/paths.js'
 import { listSessionHistory } from '../../src/session/history.js'
 import { createSession, appendSessionMessages, loadSessionMessages } from '../../src/session/store.js'
@@ -697,7 +697,7 @@ test('agent send resumes background execution without requiring wait', async () 
   }
 })
 
-test('subagent execution does not create top-level session or task-board artifacts', async () => {
+test('subagent execution does not create top-level session or plan-board artifacts', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-agent-boundary-'))
   const env = { ...process.env, HOME: homeDir }
   const workspaceDir = join(homeDir, 'workspace')
@@ -752,7 +752,7 @@ test('subagent execution does not create top-level session or task-board artifac
     )
 
     assert.deepEqual(
-      await readdir(getTaskBoardsDir(env)).catch(() => []),
+      await readdir(getPlanBoardsDir(env)).catch(() => []),
       [],
     )
     assert.deepEqual(

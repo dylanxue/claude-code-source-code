@@ -8,9 +8,9 @@ import { loadSessionForResume } from '../session/resume.js'
 import type { SessionSubagentSummary } from '../agent/observability.js'
 import type { SessionPersistedToolResultRecord } from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
-import { getTaskBoardObservationLines } from '../tasks/observability.js'
-import { recoverTaskBoardPlanFile } from '../tasks/planSnapshots.js'
-import { loadTaskBoardForSession } from '../tasks/store.js'
+import { getPlanBoardObservationLines } from '../tasks/observability.js'
+import { recoverPlanBoardPlanFile } from '../tasks/planSnapshots.js'
+import { loadPlanBoardForSession } from '../tasks/store.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import { runInteractiveReplLoop } from './repl.js'
@@ -178,15 +178,15 @@ export async function runResume(command: ResumeCommand): Promise<void> {
   }
   engine.setSessionId(replSession.sessionId)
   const queryTracePath = await rotateQueryTrace(replSession.sessionId)
-  const loadedTaskBoard = await loadTaskBoardForSession(replSession.sessionId)
-  const taskBoard = loadedTaskBoard
-    ? await recoverTaskBoardPlanFile(loadedTaskBoard, resumed.messages)
+  const loadedPlanBoard = await loadPlanBoardForSession(replSession.sessionId)
+  const planBoard = loadedPlanBoard
+    ? await recoverPlanBoardPlanFile(loadedPlanBoard, resumed.messages)
     : null
-  if (taskBoard?.mode === 'active') {
+  if (planBoard?.mode === 'active') {
     engine.setPermissionMode('plan')
-    engine.setPlanFilePath(taskBoard.planFilePath)
+    engine.setPlanFilePath(planBoard.planFilePath)
     replSession.permissionMode = 'plan'
-    replSession.permissionModeSource = 'task_board'
+    replSession.permissionModeSource = 'plan_board'
   }
   const lines = [
     'dclaw resume mode is ready.',
@@ -210,7 +210,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     `permission mode: ${replSession.permissionMode}`,
     `permission mode source: ${replSession.permissionModeSource}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
-    ...(taskBoard ? getTaskBoardObservationLines(taskBoard) : []),
+    ...(planBoard ? getPlanBoardObservationLines(planBoard) : []),
     ...formatSubagentSummaryLines(resumed.subagents),
   ]
 

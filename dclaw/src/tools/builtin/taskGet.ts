@@ -1,5 +1,5 @@
 import type { ToolResult } from '../../types/tool.js'
-import { getSessionTask } from '../../tasks/store.js'
+import { getExecutionSessionTask } from '../../taskboard/store.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './taskGetPrompt.js'
 
@@ -12,7 +12,7 @@ export type TaskGetOutput = {
     id: string
     subject: string
     description: string
-    status: 'pending' | 'in_progress' | 'completed'
+    status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
     blocks: string[]
     blockedBy: string[]
   } | null
@@ -48,7 +48,7 @@ export const taskGetTool: Tool<TaskGetInput, TaskGetOutput> = buildTool({
               description: { type: 'string' },
               status: {
                 type: 'string',
-                enum: ['pending', 'in_progress', 'completed'],
+                enum: ['pending', 'in_progress', 'completed', 'cancelled'],
               },
               blocks: {
                 type: 'array',
@@ -104,7 +104,7 @@ export const taskGetTool: Tool<TaskGetInput, TaskGetOutput> = buildTool({
       throw new Error('TaskGet requires an active sessionId in tool context')
     }
 
-    const { task } = await getSessionTask(context.sessionId, input.taskId)
+    const { task } = await getExecutionSessionTask(context.sessionId, input.taskId)
     if (!task) {
       return {
         ok: true,

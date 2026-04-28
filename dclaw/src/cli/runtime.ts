@@ -31,9 +31,7 @@ import {
   createInvokedSkillState,
   restoreInvokedSkillsFromMessages,
 } from '../skills/state.js'
-import { summarizePendingTasks } from '../tasks/planAttachment.js'
-import { loadTaskBoardForSession } from '../tasks/store.js'
-import { getCurrentTask } from '../tasks/taskState.js'
+import { loadPlanBoardForSession } from '../tasks/store.js'
 import { createDefaultToolRegistry } from '../tools/index.js'
 import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/tool.js'
@@ -123,9 +121,8 @@ export async function prepareCliRuntime(
   }): Promise<string> => {
     const board =
       state.sessionId
-        ? await loadTaskBoardForSession(state.sessionId, configured.env)
+        ? await loadPlanBoardForSession(state.sessionId, configured.env)
         : null
-    const currentTask = board ? getCurrentTask(board) : undefined
     const memory = await loadPromptMemoryContext(
       options.cwd,
       state.userPrompt,
@@ -175,9 +172,6 @@ export async function prepareCliRuntime(
             boardPlan: board.plan,
             boardScope: board.scope,
             boardVerification: board.verification,
-            currentTaskTitle: currentTask?.subject,
-            currentStep: board.currentStep,
-            taskSummary: summarizePendingTasks(board),
           }
         : undefined,
       memory,

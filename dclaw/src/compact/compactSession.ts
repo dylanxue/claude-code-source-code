@@ -80,7 +80,7 @@ export async function compactSession(
       mode: 'interactive',
       provider: input.provider,
       model: input.model,
-      taskBoardId: sourceMeta?.taskBoardId,
+      planBoardId: sourceMeta?.planBoardId ?? sourceMeta?.taskBoardId,
       createdAt,
       updatedAt: createdAt,
       persistedToolResults: [],

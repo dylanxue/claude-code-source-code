@@ -57,9 +57,6 @@ type TaskBoard = {
 
   mode: 'inactive' | 'active' | 'enter_requested' | 'exit_requested'
   planFilePath?: string
-  currentTaskId?: string
-  currentStep?: string
-  tasks: TaskRecord[]
 }
 ```
 

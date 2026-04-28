@@ -28,10 +28,16 @@ export function getSessionsDir(
   return join(getDclawHomeDir(env), 'sessions')
 }
 
-export function getTaskBoardsDir(
+export function getPlanBoardsDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return join(getDclawHomeDir(env), 'task-boards')
+}
+
+export function getExecutionTaskBoardsDir(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getDclawHomeDir(env), 'execution-task-boards')
 }
 
 export function getPlansDir(
@@ -115,11 +121,18 @@ export function getSessionAgentLinksPath(
   return join(getSessionDir(sessionId, env), 'agents.json')
 }
 
-export function getTaskBoardPath(
+export function getPlanBoardPath(
   boardId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getTaskBoardsDir(env), `${boardId}.json`)
+  return join(getPlanBoardsDir(env), `${boardId}.json`)
+}
+
+export function getExecutionTaskBoardPath(
+  boardId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getExecutionTaskBoardsDir(env), `${boardId}.json`)
 }
 
 export function getPlanFilePath(

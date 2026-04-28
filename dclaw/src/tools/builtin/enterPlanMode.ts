@@ -1,7 +1,7 @@
 import {
-  ensureTaskBoardPlanFile,
-  getOrCreateTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  getOrCreatePlanBoardForSession,
+  updatePlanBoard,
 } from '../../tasks/store.js'
 import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
 import type { PermissionMode, ToolResult } from '../../types/tool.js'
@@ -81,8 +81,8 @@ export const enterPlanModeTool: Tool<
       throw new Error('EnterPlanMode requires an active session context')
     }
 
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(context.sessionId, context.cwd),
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(context.sessionId, context.cwd),
     )
 
     if (board.mode === 'active') {
@@ -107,7 +107,7 @@ export const enterPlanModeTool: Tool<
         ? board.resumePermissionMode ?? 'default'
         : context.permissionMode
     const updated =
-      (await updateTaskBoard(board.boardId, current => ({
+      (await updatePlanBoard(board.boardId, current => ({
         ...current,
         mode: 'active',
         enterRequest: undefined,

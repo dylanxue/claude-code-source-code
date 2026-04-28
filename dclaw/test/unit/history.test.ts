@@ -9,9 +9,9 @@ import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { listSessionHistory } from '../../src/session/history.js'
 import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import {
-  ensureTaskBoardPlanFile,
-  getOrCreateTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  getOrCreatePlanBoardForSession,
+  updatePlanBoard,
 } from '../../src/tasks/store.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 
@@ -285,7 +285,7 @@ test('runHistory can write to a provided output writer', async () => {
   assert.match(text, /last user: Inspect the file/)
 })
 
-test('runHistory prints planning summary when a task board is attached', async () => {
+test('runHistory prints planning summary when a plan board is attached', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-plan-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -302,15 +302,15 @@ test('runHistory prints planning summary when a task board is attached', async (
       sessionId: 'session-history-plan',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(
         session.sessionId,
         '/tmp/project',
         env,
       ),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -319,22 +319,8 @@ test('runHistory prints planning summary when a task board is attached', async (
         background: 'The user asked to continue planning after a context break.',
         plan: 'Review the auth flow before implementation.',
         scope: 'Auth flow planning only.',
-        verification: 'History output includes the task board brief.',
+        verification: 'History output includes the plan board brief.',
         mode: 'active',
-        currentTaskId: '1',
-        currentStep: 'Reviewing auth flow',
-        tasks: [
-          {
-            id: '1',
-            subject: 'Review auth flow',
-            description: 'Review auth flow before implementation',
-            status: 'in_progress',
-            blocks: [],
-            blockedBy: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
         updatedAt: new Date().toISOString(),
       }),
       env,
@@ -373,8 +359,8 @@ test('runHistory prints planning summary when a task board is attached', async (
   assert.match(text, /board plan: Review the auth flow before implementation\./)
   assert.match(text, /plan mode state: active/)
   assert.match(text, /plan file:/)
-  assert.match(text, /current task: Review auth flow/)
-  assert.match(text, /current step: Reviewing auth flow/)
+  assert.doesNotMatch(text, /current task:/)
+  assert.doesNotMatch(text, /current step:/)
 })
 
 test('runHistory prints compact boundary metadata for compacted sessions', async () => {

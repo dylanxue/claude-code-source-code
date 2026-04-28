@@ -179,11 +179,8 @@ type TaskBoard = {
   mode: PlanModeStatus
   createdAt: string
   updatedAt: string
-  currentTaskId?: string
-  currentStep?: string
   enterRequest?: PlanModeRequest
   exitRequest?: PlanModeRequest
-  tasks: TaskRecord[]
 }
 ```
 
@@ -235,7 +232,7 @@ type TaskRecord = {
 
 - 这里按 Claude Code 当前 `Task*` 的最小字段集对齐
 - `deleted` 不是持久状态，而是 `TaskUpdate` 时的特殊动作
-- `currentTaskId` 只是 `dclaw` 本地 runtime 的辅助索引，不属于 Claude Code `Task` 本体
+- planning 侧的 `PlanBoard` 不再保存 execution task 或 current step
 
 ## 6. 状态机
 
@@ -300,21 +297,19 @@ active
 
 - `plan mode: active/inactive`
 - `plan file path`
-- 当前 task
-- 当前步骤
-- 未完成工作摘要
+- plan board brief（title / purpose / background / plan / scope / verification）
 - 当前 board id
 
-### 7.2 `/plan start [title]`
+### 7.2 `/plan`（plan mode 已激活时）
 
 作用：
 
-- 在 `plan mode` 下创建或切换当前 task
+- 展示当前 `plan board` 与 `plan file` 状态
 
-首版可简化为：
+当前语义：
 
-- 若传 title，则创建新 task 并设为当前 task
-- 若不传 title，则只展示当前 task 信息
+- `plan mode` 只负责规划，不在 board 内创建 task
+- execution task 只在 `TaskCreate` 时启动，并进入单独的 execution `TaskBoard`
 
 ### 7.3 `/plan exit`
 
@@ -330,7 +325,7 @@ active
 
 - Claude Code 源码里仍存在 V1 `TodoWrite`
 - 但 `dclaw` 阶段 9 对外能力不再保留对应 tool 或 slash command
-- `TaskBoard` 现已只保留 `plan mode + plan file + task/current step` 这条主路径，不再继续保留内部 `todos` 字段
+- `PlanBoard` 现已只保留 `plan mode + plan file + board brief` 这条主路径，不再继续保留内部 task/current step
 - 首版继续优先围绕 `Task*` 主路径与 plan file 打磨体验
 
 ## 8. Prompt 注入设计
@@ -339,7 +334,7 @@ active
 
 这里再补一个 compact 相关边界：
 
-- 当前 `dclaw` 已允许通过 compact summary 文本把 planning reminder / plan file / current step / pending work 摘要带到 compact boundary 之后的上下文
+- 当前 `dclaw` 已允许通过 compact summary 文本把 planning reminder / plan file / plan board brief 带到 compact boundary 之后的上下文
 - 这解决的是“compact 后 planning 语义完全丢失”的问题
 - 但它还不等同于 Claude Code 的结构化 attachment / runtime 恢复；后续实现应从“文本 carry-over”继续升级，而不是重复造一套新 reminder
 
@@ -358,10 +353,8 @@ active
 ```text
 Current execution state:
 - plan mode: active
-- current task: implement memory recall
-- current step: define manifest format
 - plan file: .dclaw/plans/plan_xxx.md
-- pending work summary: define manifest format; implement manifest scanner; inject recall into system prompt
+- board plan: implement memory recall and document the migration path
 
 When in plan mode:
 - focus on exploration and implementation planning

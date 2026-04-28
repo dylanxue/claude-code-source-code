@@ -13,26 +13,7 @@ export type PlanModeRequest = {
   note?: string
 }
 
-export type TaskStatus =
-  | 'pending'
-  | 'in_progress'
-  | 'completed'
-
-export type TaskRecord = {
-  id: string
-  subject: string
-  description: string
-  activeForm?: string
-  owner?: string
-  status: TaskStatus
-  blocks: string[]
-  blockedBy: string[]
-  metadata?: Record<string, unknown>
-  createdAt: string
-  updatedAt: string
-}
-
-export type TaskBoard = {
+export type PlanBoard = {
   boardId: string
   workspaceId: string
   rootSessionId: string
@@ -48,13 +29,10 @@ export type TaskBoard = {
   resumePermissionMode?: PermissionMode
   createdAt: string
   updatedAt: string
-  currentTaskId?: string
-  currentStep?: string
   planModeReminderCount?: number
   lastPlanModeReminderTurnCount?: number
   hasExitedPlanModeInSession?: boolean
   needsPlanModeExitReminder?: boolean
   enterRequest?: PlanModeRequest
   exitRequest?: PlanModeRequest
-  tasks: TaskRecord[]
 }

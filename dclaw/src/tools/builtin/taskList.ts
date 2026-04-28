@@ -1,5 +1,5 @@
 import type { ToolResult } from '../../types/tool.js'
-import { listSessionTasks } from '../../tasks/store.js'
+import { listExecutionSessionTasks } from '../../taskboard/store.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './taskListPrompt.js'
 
@@ -9,7 +9,7 @@ export type TaskListOutput = {
   tasks: Array<{
     id: string
     subject: string
-    status: 'pending' | 'in_progress' | 'completed'
+    status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
     owner?: string
     blockedBy: string[]
   }>
@@ -38,7 +38,7 @@ export const taskListTool: Tool<TaskListInput, TaskListOutput> = buildTool({
             subject: { type: 'string' },
             status: {
               type: 'string',
-              enum: ['pending', 'in_progress', 'completed'],
+              enum: ['pending', 'in_progress', 'completed', 'cancelled'],
             },
             owner: { type: 'string' },
             blockedBy: {
@@ -72,7 +72,7 @@ export const taskListTool: Tool<TaskListInput, TaskListOutput> = buildTool({
       throw new Error('TaskList requires an active sessionId in tool context')
     }
 
-    const { tasks } = await listSessionTasks(context.sessionId)
+    const { tasks } = await listExecutionSessionTasks(context.sessionId)
     const outputTasks = tasks.map(task => ({
       id: task.id,
       subject: task.subject,
@@ -83,7 +83,7 @@ export const taskListTool: Tool<TaskListInput, TaskListOutput> = buildTool({
 
     const summary =
       outputTasks.length === 0
-        ? 'No tasks found'
+        ? 'No execution tasks found'
         : outputTasks
             .map(task => {
               const owner = task.owner ? ` (${task.owner})` : ''

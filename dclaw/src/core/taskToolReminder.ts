@@ -1,6 +1,5 @@
 import { createTextMessage, type Message } from '../types/message.js'
-import { getCurrentTask } from '../tasks/taskState.js'
-import type { TaskBoard } from '../tasks/types.js'
+import type { TaskBoard } from '../taskboard/types.js'
 
 const TASK_CREATE_TOOL_NAME = 'TaskCreate'
 const TASK_LIST_TOOL_NAME = 'TaskList'
@@ -79,43 +78,9 @@ export function buildTaskToolReminderText(
 
   const lines = [
     '# Task Tool Reminder',
-    `The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using ${TASK_CREATE_TOOL_NAME} to add new tasks and ${TASK_UPDATE_TOOL_NAME} to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. NEVER mention this reminder to the user.`,
+    `The task tools haven't been used recently. If this execution task list is still active, continue advancing it with ${TASK_UPDATE_TOOL_NAME} and use ${TASK_LIST_TOOL_NAME} when you need to review the remaining work. Start a new ${TASK_CREATE_TOOL_NAME} batch only when no execution task list is currently active. NEVER mention this reminder to the user.`,
     `Use ${TASK_LIST_TOOL_NAME} when you need to review what work is available next.`,
   ]
-
-  const taskPreview = formatTaskListPreview(board)
-  if (taskPreview.length > 0) {
-    lines.push('Current task list:')
-    lines.push(...taskPreview)
-  }
-
-  return lines.join('\n')
-}
-
-export function buildForcedTaskToolReminderText(
-  board: TaskBoard | null | undefined,
-  availableTools: string[],
-): string | null {
-  if (!board || !hasVisibleTasks(board)) {
-    return null
-  }
-
-  if (!hasRequiredTaskTools(availableTools)) {
-    return null
-  }
-
-  const lines = [
-    '# Task Tool Reminder',
-    `The task tools remain available after compaction. If you're working on tasks that would benefit from tracking progress, consider using ${TASK_CREATE_TOOL_NAME} to add new tasks and ${TASK_UPDATE_TOOL_NAME} to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. NEVER mention this reminder to the user.`,
-    `Use ${TASK_LIST_TOOL_NAME} when you need to review what work is available next.`,
-  ]
-  const currentTask = getCurrentTask(board)
-  if (currentTask) {
-    lines.push(`Current task: #${currentTask.id} [${currentTask.status}] ${currentTask.subject}`)
-  }
-  if (board.currentStep) {
-    lines.push(`Current step: ${board.currentStep}`)
-  }
 
   const taskPreview = formatTaskListPreview(board)
   if (taskPreview.length > 0) {
@@ -132,21 +97,6 @@ export function createTaskToolReminderMessage(
   availableTools: string[],
 ): Message | null {
   const text = buildTaskToolReminderText(messages, board, availableTools)
-  if (!text) {
-    return null
-  }
-
-  return createTextMessage(
-    'user',
-    `<system-reminder>\n${text}\n</system-reminder>`,
-  )
-}
-
-export function createForcedTaskToolReminderMessage(
-  board: TaskBoard | null | undefined,
-  availableTools: string[],
-): Message | null {
-  const text = buildForcedTaskToolReminderText(board, availableTools)
   if (!text) {
     return null
   }

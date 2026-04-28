@@ -22,10 +22,10 @@ import { ToolRegistry } from '../../src/tools/registry.js'
 import { buildTool } from '../../src/tools/types.js'
 import { createSession } from '../../src/session/store.js'
 import {
-  ensureTaskBoardPlanFile,
-  getOrCreateTaskBoardForSession,
-  loadTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  getOrCreatePlanBoardForSession,
+  loadPlanBoardForSession,
+  updatePlanBoard,
 } from '../../src/tasks/store.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
@@ -67,15 +67,15 @@ test('QueryEngine injects a plan_mode reminder as a temporary system-reminder me
       sessionId: 'session-plan-mode-reminder',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(
         session.sessionId,
         '/tmp/project',
         env,
       ),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -140,12 +140,12 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
       sessionId: 'session-plan-exit-reminder',
       env,
     })
-    const board = await getOrCreateTaskBoardForSession(
+    const board = await getOrCreatePlanBoardForSession(
       session.sessionId,
       '/tmp/project',
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -190,7 +190,7 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
       false,
     )
 
-    const boardAfterFirstTurn = await loadTaskBoardForSession(session.sessionId, env)
+    const boardAfterFirstTurn = await loadPlanBoardForSession(session.sessionId, env)
     assert.ok(boardAfterFirstTurn)
     assert.equal(boardAfterFirstTurn?.needsPlanModeExitReminder, false)
 
@@ -218,15 +218,15 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
       sessionId: 'session-plan-exit-mid-turn',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(
         session.sessionId,
         '/tmp/project',
         env,
       ),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -286,7 +286,7 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
         async call(_input, context) {
           context.setPermissionMode?.('default')
           context.setPlanFilePath?.(undefined)
-          await updateTaskBoard(
+          await updatePlanBoard(
             board.boardId,
             current => ({
               ...current,
@@ -359,12 +359,12 @@ test('QueryEngine injects a plan_mode_reentry reminder once when planning resume
       sessionId: 'session-plan-reentry-reminder',
       env,
     })
-    const board = await getOrCreateTaskBoardForSession(
+    const board = await getOrCreatePlanBoardForSession(
       session.sessionId,
       '/tmp/project',
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -410,7 +410,7 @@ test('QueryEngine injects a plan_mode_reentry reminder once when planning resume
       false,
     )
 
-    const boardAfterFirstTurn = await loadTaskBoardForSession(session.sessionId, env)
+    const boardAfterFirstTurn = await loadPlanBoardForSession(session.sessionId, env)
     assert.ok(boardAfterFirstTurn)
     assert.equal(boardAfterFirstTurn?.hasExitedPlanModeInSession, false)
 
@@ -450,31 +450,16 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
       summaryMessageId: compactSummary.id,
     }
     const compactBoundaryMessage = createCompactBoundaryMessage(compactSource)
-    const board = await getOrCreateTaskBoardForSession(
+    const board = await getOrCreatePlanBoardForSession(
       session.sessionId,
       '/tmp/project',
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
         mode: 'active',
-        tasks: [
-          {
-            id: '1',
-            subject: 'Review auth flow',
-            description: 'Review auth flow before implementation',
-            activeForm: 'Reviewing auth flow',
-            status: 'in_progress',
-            blocks: [],
-            blockedBy: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-        currentTaskId: '1',
-        currentStep: 'Reviewing auth flow',
         planModeReminderCount: 3,
         lastPlanModeReminderTurnCount: 99,
         updatedAt: new Date().toISOString(),
@@ -503,15 +488,12 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
     const result = await engine.submitUserPrompt('continue after compact')
 
     const reminders = findReminderMessages(client.requests[0])
-    assert.equal(reminders.length, 3)
+    assert.equal(reminders.length, 1)
     const reminderTexts = reminders.map(message => getTextContent(message))
     assert.ok(reminderTexts.some(text => /## Plan Mode/.test(text)))
     assert.ok(reminderTexts.some(text => /Do not start implementation yet/.test(text)))
-    assert.ok(reminderTexts.some(text => /# Post-Compact Task Board/.test(text)))
-    assert.ok(reminderTexts.some(text => /task board:/.test(text)))
-    assert.ok(reminderTexts.some(text => /Current task: Review auth flow/.test(text)))
-    assert.ok(reminderTexts.some(text => /Current step: Reviewing auth flow/.test(text)))
-    assert.ok(reminderTexts.some(text => /# Task Tool Reminder/.test(text)))
+    assert.ok(reminderTexts.every(text => !/# Post-Compact Task Board/.test(text)))
+    assert.ok(reminderTexts.every(text => !/# Task Tool Reminder/.test(text)))
     assert.equal(
       result.appendedMessages.some(message =>
         getTextContent(message).includes('## Plan Mode'),

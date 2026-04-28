@@ -168,8 +168,8 @@
 - 将 compact dry-run recommendation 接到 REPL `/session / info / doctor`、verbose 与 query trace
 - 将最小 autocompact 接到 `QueryEngine` 提交链路，并补上 same-session boundary 追加、trace 记录与失败回退
 - 明确阶段 9 的产品规则：`plan mode` 由模型可建议/发起，`EnterPlanMode` 负责直接进入高约束 planning，`ExitPlanMode` 负责交付计划并等待用户下一步；planning 会改变 LLM 的工作节奏而不只是限制工具
-- 为阶段 9 建立最小 `task board` 内核，并通过 session meta 挂接 `taskBoardId`
-- 为阶段 9 接通首批 REPL 入口：`/plan`、`/plan start`、`/plan exit`
+- 为阶段 9 建立最小 `plan board` 内核，并通过 session meta 挂接 planning 状态
+- 为阶段 9 接通首批 REPL 入口：`/plan`、`/plan exit`
 - 重新评估 Claude Code 源码后，明确阶段 9 主线应对齐 `plan mode + plan file + Task*`
 - 已移除 `TodoWrite` tool 与 `/todo` 系列命令，避免继续保留偏离当前主路径的 V1 checklist 能力
 - 已接通 Claude Code V2 最小 `TaskCreate / TaskList / TaskGet / TaskUpdate`，并按当前 task board 真值持久化

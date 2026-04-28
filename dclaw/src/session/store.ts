@@ -27,6 +27,7 @@ export type SessionMeta = {
   runtimeName?: string
   provider: string
   model?: string
+  planBoardId?: string
   taskBoardId?: string
   createdAt: string
   updatedAt: string
@@ -39,6 +40,7 @@ export type CreateSessionInput = {
   runtimeName?: string
   provider: string
   model?: string
+  planBoardId?: string
   taskBoardId?: string
   sessionId?: string
   env?: NodeJS.ProcessEnv
@@ -63,6 +65,10 @@ function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
     runtimeName:
       typeof meta.runtimeName === 'string' && meta.runtimeName.trim().length > 0
         ? meta.runtimeName
+        : undefined,
+    planBoardId:
+      typeof meta.planBoardId === 'string' && meta.planBoardId.trim().length > 0
+        ? meta.planBoardId
         : undefined,
     taskBoardId:
       typeof meta.taskBoardId === 'string' && meta.taskBoardId.trim().length > 0
@@ -140,6 +146,7 @@ export async function createSession(
     runtimeName: input.runtimeName,
     provider: input.provider,
     model: input.model,
+    planBoardId: input.planBoardId,
     taskBoardId: input.taskBoardId,
     createdAt: now,
     updatedAt: now,

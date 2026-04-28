@@ -21,10 +21,11 @@ import {
 } from '../../src/session/store.js'
 import { getSessionsDir } from '../../src/session/paths.js'
 import {
-  ensureTaskBoardPlanFile,
-  getOrCreateTaskBoardForSession,
-  updateTaskBoard,
+  ensurePlanBoardPlanFile,
+  getOrCreatePlanBoardForSession,
+  updatePlanBoard,
 } from '../../src/tasks/store.js'
+import { createExecutionTaskBoardForSession } from '../../src/taskboard/store.js'
 import { createSkillRegistry } from '../../src/skills/registry.js'
 import { recordInvokedSkill } from '../../src/skills/state.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
@@ -959,29 +960,15 @@ test('compactSession summarize prompt stays focused on transcript even when plan
       model: 'stub-model',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(source.sessionId, '/tmp/project', env),
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(source.sessionId, '/tmp/project', env),
       env,
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
         mode: 'active',
-        tasks: [
-          {
-            id: '1',
-            subject: 'Review auth flow',
-            description: 'Review auth flow before updating the planning doc',
-            activeForm: 'Reviewing auth flow',
-            status: 'in_progress',
-            blocks: [],
-            blockedBy: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-        currentStep: 'Reviewing auth flow',
         updatedAt: new Date().toISOString(),
       }),
       env,
@@ -1083,8 +1070,8 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
       sessionId: 'session-post-compact-attachments',
       env,
     })
-    const board = await ensureTaskBoardPlanFile(
-      await getOrCreateTaskBoardForSession(session.sessionId, '/tmp/project', env),
+    const board = await ensurePlanBoardPlanFile(
+      await getOrCreatePlanBoardForSession(session.sessionId, '/tmp/project', env),
       env,
     )
     await writeFile(
@@ -1092,7 +1079,7 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
       '# Plan\n\n- Preserve the current migration sequence.\n',
       'utf8',
     )
-    await updateTaskBoard(
+    await updatePlanBoard(
       board.boardId,
       current => ({
         ...current,
@@ -1167,17 +1154,6 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
     assert.match(firstRequestText, /export const restored = true/)
     assert.match(firstRequestText, /# Post-Compact Plan File/)
     assert.match(firstRequestText, /Preserve the current migration sequence/)
-    assert.match(firstRequestText, /# Post-Compact Task Board/)
-    assert.match(firstRequestText, /board title: Auth migration hardening/)
-    assert.match(
-      firstRequestText,
-      /board purpose: Keep the post-compact work batch recoverable\./,
-    )
-    assert.match(
-      firstRequestText,
-      /board plan: Restore the board brief before continuing implementation\./,
-    )
-
     assert.doesNotMatch(secondRequestText, /# Post-Compact Read File/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Plan File/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Task Board/)
@@ -1400,7 +1376,7 @@ test('QueryEngine does not replay skill listing after compact', async () => {
   )
 })
 
-test('QueryEngine forces a task reminder on the first post-compact turn when tasks exist', async () => {
+test('QueryEngine does not restore execution task reminders across compact boundaries', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-post-compact-task-reminder-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -1415,32 +1391,24 @@ test('QueryEngine forces a task reminder on the first post-compact turn when tas
       sessionId: 'session-post-compact-task-reminder',
       env,
     })
-    const board = await getOrCreateTaskBoardForSession(
+    await createExecutionTaskBoardForSession(
       session.sessionId,
       '/tmp/project',
-      env,
-    )
-    await updateTaskBoard(
-      board.boardId,
-      current => ({
-        ...current,
-        tasks: [
-          {
-            id: '1',
-            subject: 'Review auth flow',
-            description: 'Review auth flow before implementation',
-            activeForm: 'Reviewing auth flow',
-            status: 'in_progress',
-            blocks: [],
-            blockedBy: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-        currentTaskId: '1',
-        currentStep: 'Reviewing auth flow',
-        updatedAt: new Date().toISOString(),
-      }),
+      [
+        {
+          subject: 'Review auth flow',
+          description: 'Review auth flow before implementation',
+          activeForm: 'Reviewing auth flow',
+        },
+        {
+          subject: 'Update auth docs',
+          description: 'Update the docs after the implementation path is clear.',
+        },
+        {
+          subject: 'Validate auth regression coverage',
+          description: 'Confirm the task reminder logic is still exercised.',
+        },
+      ],
       env,
     )
 
@@ -1481,11 +1449,10 @@ test('QueryEngine forces a task reminder on the first post-compact turn when tas
       )
       .join('\n') ?? ''
 
-    assert.match(requestText, /# Task Tool Reminder/)
-    assert.match(requestText, /Current task: #1 \[in_progress\] Review auth flow/)
-    assert.match(requestText, /Current step: Reviewing auth flow/)
-    assert.match(requestText, /Current task list:/)
-    assert.match(requestText, /#1 \[in_progress\] Review auth flow/)
+    assert.doesNotMatch(requestText, /# Task Tool Reminder/)
+    assert.doesNotMatch(requestText, /Current task: #1 \[in_progress\] Review auth flow/)
+    assert.doesNotMatch(requestText, /Current step: Reviewing auth flow/)
+    assert.doesNotMatch(requestText, /Current task list:/)
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })

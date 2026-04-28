@@ -1,19 +1,19 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { getPlanFilePath } from '../session/paths.js'
-import type { TaskBoard } from './types.js'
+import type { PlanBoard } from './types.js'
 
 function getDefaultPlanFileIdForBoard(boardId: string): string {
   return `plan_${boardId}`
 }
 
-function buildPlanScaffold(board: TaskBoard): string {
+function buildPlanScaffold(board: PlanBoard): string {
   return [
-    `# ${board.title ?? 'Task Board Plan'}`,
+    `# ${board.title ?? 'Plan Board Plan'}`,
     '',
     '## Context',
     `- workspace: ${board.workspaceId}`,
-    `- task board: ${board.boardId}`,
+    `- plan board: ${board.boardId}`,
     `- root session: ${board.rootSessionId}`,
     ...(board.background ? [`- background: ${board.background}`] : []),
     '',
@@ -60,8 +60,8 @@ export async function writePlanFile(
   await writeFile(filePath, content.endsWith('\n') ? content : `${content}\n`, 'utf8')
 }
 
-export async function ensurePlanFileForTaskBoard(
-  board: TaskBoard,
+export async function ensurePlanFileForPlanBoard(
+  board: PlanBoard,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{
   created: boolean

@@ -1,5 +1,4 @@
-import { getCurrentTask } from './taskState.js'
-import type { TaskBoard } from './types.js'
+import type { PlanBoard } from './types.js'
 
 type PlanModeToolOutput = {
   status?: string
@@ -121,7 +120,7 @@ export function describePlanModeToolResult(
   return summary
 }
 
-export function getTaskBoardBriefObservationLines(board: TaskBoard): string[] {
+export function getPlanBoardBriefObservationLines(board: PlanBoard): string[] {
   return [
     ...(board.title ? [`board title: ${board.title}`] : []),
     ...(board.purpose ? [`board purpose: ${board.purpose}`] : []),
@@ -134,15 +133,11 @@ export function getTaskBoardBriefObservationLines(board: TaskBoard): string[] {
   ]
 }
 
-export function getTaskBoardObservationLines(board: TaskBoard): string[] {
-  const currentTask = getCurrentTask(board)
-
+export function getPlanBoardObservationLines(board: PlanBoard): string[] {
   return [
-    `task board: ${board.boardId}`,
-    ...getTaskBoardBriefObservationLines(board),
+    `plan board: ${board.boardId}`,
+    ...getPlanBoardBriefObservationLines(board),
     `plan mode state: ${board.mode}`,
     ...(board.planFilePath ? [`plan file: ${board.planFilePath}`] : []),
-    ...(currentTask ? [`current task: ${currentTask.subject}`] : []),
-    ...(board.currentStep ? [`current step: ${board.currentStep}`] : []),
   ]
 }
