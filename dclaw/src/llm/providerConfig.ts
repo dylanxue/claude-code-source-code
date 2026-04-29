@@ -16,12 +16,14 @@ export type AnthropicProviderConfig = {
   provider: 'anthropic'
   apiKey?: string
   baseUrl: string
+  proxyUrl?: string
 }
 
 export type OpenAiProviderConfig = {
   provider: 'openai'
   apiKey?: string
   baseUrl: string
+  proxyUrl?: string
   apiStyle: OpenAiApiStyle
   defaultTextVerbosity?: OpenAiTextVerbosity
   defaultReasoningEffort?: OpenAiReasoningEffort
@@ -49,6 +51,7 @@ export function resolveProviderConfig(
           profile.baseURL,
           'https://api.anthropic.com',
         ),
+        ...(profile.proxyURL ? { proxyUrl: profile.proxyURL } : {}),
       }
     case 'openai':
       return {
@@ -58,6 +61,7 @@ export function resolveProviderConfig(
           profile.baseURL,
           'https://api.openai.com/v1',
         ),
+        ...(profile.proxyURL ? { proxyUrl: profile.proxyURL } : {}),
         apiStyle: profile.apiStyle ?? 'responses',
         defaultTextVerbosity: profile.requestDefaults?.verbosity,
         defaultReasoningEffort: profile.requestDefaults?.reasoningEffort,

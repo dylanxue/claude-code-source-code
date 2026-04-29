@@ -150,6 +150,7 @@ CLI 入口也已经收口到：
         "type": "openai",
         "apiKey": "your-openai-api-key",
         "baseURL": "https://api.openai.com/v1",
+        "proxyURL": "http://127.0.0.1:7890",
         "apiStyle": "responses"
       },
       "anthropic-default": {

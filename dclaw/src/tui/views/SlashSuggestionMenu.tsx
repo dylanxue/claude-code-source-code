@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text } from '../../ink/index.js'
 import type { SlashSuggestion } from '../hooks/useSlashSuggestions.js'
 
 type Props = {

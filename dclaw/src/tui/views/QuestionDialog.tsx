@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text } from '../../ink/index.js'
 import type { AskUserQuestion, AskUserQuestionOption } from '../../types/tool.js'
 
 export type QuestionDialogMode = 'select' | 'custom' | 'notes' | 'next_action'

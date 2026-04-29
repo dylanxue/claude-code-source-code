@@ -24,6 +24,7 @@ test('resolveProviderConfig builds openai provider config from a typed profile',
     type: 'openai',
     apiKey: 'primary-key',
     baseURL: 'https://primary.example.com/v1/',
+    proxyURL: 'http://proxy.example:8080',
     apiStyle: 'chat-completions',
   })
 
@@ -31,6 +32,7 @@ test('resolveProviderConfig builds openai provider config from a typed profile',
     provider: 'openai',
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com/v1',
+    proxyUrl: 'http://proxy.example:8080',
     apiStyle: 'chat-completions',
     defaultTextVerbosity: undefined,
     defaultReasoningEffort: undefined,
@@ -397,6 +399,58 @@ test('OpenAiLlmClient supports Responses API requests', async () => {
         },
       ],
     })
+  } finally {
+    server.close()
+    await once(server, 'close')
+  }
+})
+
+test('OpenAiLlmClient accepts Responses SSE bodies from non-streaming requests', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write(
+        'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"compact "}\n\n',
+      )
+      response.write(
+        'event: response.completed\ndata: {"type":"response.completed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"compact summary"}]}]}}\n\n',
+      )
+      response.end()
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+      defaultModel: 'gpt-5',
+    })
+
+    const result = await client.createMessage({
+      messages: [createTextMessage('user', 'summarize')],
+    })
+
+    assert.deepEqual(result.message.content, [
+      { type: 'text', text: 'compact summary' },
+    ])
+    assert.equal((capturedBody as { stream?: boolean }).stream, false)
   } finally {
     server.close()
     await once(server, 'close')

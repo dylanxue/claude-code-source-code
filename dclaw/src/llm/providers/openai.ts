@@ -17,6 +17,7 @@ import {
   getStreamIdleTimeoutMs,
   isStreamWatchdogEnabled,
   NonRetryableError,
+  parseSseTextEvents,
   readSseEvents,
   RetryableHttpError,
   type SleepImpl,
@@ -1307,6 +1308,147 @@ function buildChatCompletionContent(
   return content
 }
 
+function isEventStreamContentType(contentType: string | null): boolean {
+  return contentType?.toLowerCase().includes('text/event-stream') ?? false
+}
+
+function looksLikeSseText(text: string): boolean {
+  const trimmed = text.trimStart()
+  return trimmed.startsWith('event:') || trimmed.startsWith('data:')
+}
+
+function shouldParseTextAsSse(text: string, contentType: string | null): boolean {
+  return isEventStreamContentType(contentType) || looksLikeSseText(text)
+}
+
+function parseResponsesSseContent(
+  text: string,
+  callbacks: CreateMessageStreamCallbacks,
+): ContentBlock[] {
+  const streamState: StreamingResponsesState = {
+    textByOutputIndex: new Map(),
+    annotationsByOutputIndex: new Map(),
+    reasoningByOutputIndex: new Map(),
+    toolCallsByOutputIndex: new Map(),
+    lastTextAppendByOutputIndex: new Map(),
+    outputOrder: [],
+  }
+  let terminalResponse: OpenAiResponsesResponse | undefined
+
+  parseSseTextEvents(text, (event: SseEvent) => {
+    if (event.data === '[DONE]') {
+      return
+    }
+
+    const payload = JSON.parse(event.data) as OpenAiResponsesStreamEvent
+    if (payload.type === 'error' && payload.error?.message) {
+      throw new Error(`OpenAI streaming request failed: ${payload.error.message}`)
+    }
+
+    if (
+      (payload.type === 'response.completed' ||
+        payload.type === 'response.done') &&
+      payload.response
+    ) {
+      terminalResponse = payload.response
+    }
+
+    parseResponsesStreamEvent(streamState, payload, callbacks)
+  })
+
+  const terminalContent = terminalResponse
+    ? parseResponsesResponse(terminalResponse)
+    : []
+  return terminalContent.length > 0
+    ? terminalContent
+    : buildResponsesStreamContent(streamState)
+}
+
+function parseChatCompletionSseContent(
+  text: string,
+  callbacks: CreateMessageStreamCallbacks,
+): ContentBlock[] {
+  let outputText = ''
+  let reasoning = ''
+  const toolCalls: StreamingToolCallState[] = []
+
+  parseSseTextEvents(text, (event: SseEvent) => {
+    if (event.data === '[DONE]') {
+      return
+    }
+
+    const chunk = JSON.parse(event.data) as OpenAiChatCompletionChunk
+    const delta = chunk.choices?.[0]?.delta
+    if (!delta) {
+      return
+    }
+
+    if (typeof delta.content === 'string' && delta.content.length > 0) {
+      outputText += delta.content
+      callbacks.onTextDelta?.(delta.content)
+    }
+
+    if (
+      typeof delta.reasoning_content === 'string' &&
+      delta.reasoning_content.length > 0
+    ) {
+      reasoning += delta.reasoning_content
+      callbacks.onReasoningDelta?.({
+        kind: 'thinking',
+        text: delta.reasoning_content,
+      })
+    }
+
+    for (const toolCallDelta of delta.tool_calls ?? []) {
+      const index = toolCallDelta.index ?? 0
+      if (!toolCalls[index]) {
+        toolCalls[index] = {
+          arguments: '',
+        }
+      }
+
+      const entry = toolCalls[index]!
+      if (toolCallDelta.id) {
+        entry.id = toolCallDelta.id
+      }
+      if (toolCallDelta.function?.name) {
+        entry.name = toolCallDelta.function.name
+      }
+      if (toolCallDelta.function?.arguments) {
+        entry.arguments += toolCallDelta.function.arguments
+      }
+    }
+  })
+
+  return buildChatCompletionContent(outputText, reasoning, toolCalls)
+}
+
+function parseResponsesResponseText(
+  text: string,
+  contentType: string | null,
+  callbacks: CreateMessageStreamCallbacks = {},
+): ContentBlock[] {
+  if (shouldParseTextAsSse(text, contentType)) {
+    return parseResponsesSseContent(text, callbacks)
+  }
+
+  return parseResponsesResponse(JSON.parse(text) as OpenAiResponsesResponse)
+}
+
+function parseChatCompletionResponseText(
+  text: string,
+  contentType: string | null,
+  callbacks: CreateMessageStreamCallbacks = {},
+): ContentBlock[] {
+  if (shouldParseTextAsSse(text, contentType)) {
+    return parseChatCompletionSseContent(text, callbacks)
+  }
+
+  return parseChatCompletionResponse(
+    JSON.parse(text) as OpenAiChatCompletionResponse,
+  )
+}
+
 function buildResponsesRequestBody(
   request: CreateMessageRequest,
   model: string,
@@ -1435,7 +1577,7 @@ export class OpenAiLlmClient implements LlmClient {
     validateImagesForProvider(request.messages)
 
     if (this.apiStyle === 'chat-completions') {
-      const parsed = await this.withRetry(async () => {
+      const content = await this.withRetry(async () => {
         return this.withRequestTimeout(async signal => {
           const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
             method: 'POST',
@@ -1459,10 +1601,13 @@ export class OpenAiLlmClient implements LlmClient {
             throw await this.createRequestError(response)
           }
 
-          return (await response.json()) as OpenAiChatCompletionResponse
+          const responseText = await response.text()
+          return parseChatCompletionResponseText(
+            responseText,
+            response.headers.get('content-type'),
+          )
         }, request.signal)
       })
-      const content = parseChatCompletionResponse(parsed)
       if (content.length === 0) {
         throw new Error('OpenAI response did not contain supported content blocks')
       }
@@ -1472,7 +1617,7 @@ export class OpenAiLlmClient implements LlmClient {
       }
     }
 
-    const parsed = await this.withRetry(async () => {
+    const content = await this.withRetry(async () => {
       return this.withRequestTimeout(async signal => {
         const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
           method: 'POST',
@@ -1498,10 +1643,13 @@ export class OpenAiLlmClient implements LlmClient {
           throw await this.createRequestError(response)
         }
 
-        return (await response.json()) as OpenAiResponsesResponse
+        const responseText = await response.text()
+        return parseResponsesResponseText(
+          responseText,
+          response.headers.get('content-type'),
+        )
       }, request.signal)
     })
-    const content = parseResponsesResponse(parsed)
     if (content.length === 0) {
       throw new Error('OpenAI response did not contain supported content blocks')
     }

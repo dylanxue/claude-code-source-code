@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text } from '../../ink/index.js'
 import { formatPathForDisplay } from '../../cli/welcome.js'
 import type { BottomSheetState } from '../hooks/useBottomSheet.js'
 import type { SlashSuggestion } from '../hooks/useSlashSuggestions.js'

@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks'
 import React, { useEffect, useReducer, useRef, useState } from 'react'
-import { Box, useApp, useInput, useStdin } from 'ink'
+import { useApp, useInput, useStdin } from '../ink/index.js'
 import { getCliErrorInfo } from '../cli/errorFormatting.js'
 import { formatProgressThinkingLine } from '../cli/outputFormatting.js'
 import {
@@ -25,7 +25,11 @@ import {
   filterSkills,
   type SkillsMenuState,
 } from './views/SkillsMenu.js'
-import { TranscriptPane } from './views/TranscriptPane.js'
+import {
+  computeTranscriptSliceStart,
+  TranscriptPane,
+  type TranscriptSliceAnchor,
+} from './views/TranscriptPane.js'
 import type { WelcomeCardData } from '../cli/welcome.js'
 import type { SessionHistoryEntry } from '../session/history.js'
 import type { SkillStatus } from '../skills/enablement.js'
@@ -49,6 +53,12 @@ import {
   getActiveSlashSuggestion,
   moveSlashSuggestionSelection,
 } from './hooks/useSlashSuggestions.js'
+import type { ScrollBoxHandle } from '../ink/components/ScrollBox.js'
+import {
+  isTuiFullscreenEnabled,
+  isTuiMouseTrackingEnabled,
+} from './runtime/fullscreen.js'
+import { TuiFullscreenLayout } from './views/TuiFullscreenLayout.js'
 
 const EXIT_COMMANDS = new Set([
   '/exit',
@@ -299,35 +309,6 @@ export function appendAssistantTextDeltaToBuffer(
   }
 }
 
-function isStaticTranscriptItemReady(
-  item: TranscriptItem,
-  nextItem?: TranscriptItem,
-): boolean {
-  if (item.kind === 'assistant_draft') {
-    return false
-  }
-
-  if (item.kind === 'assistant_stream_chunk') {
-    return nextItem !== undefined
-  }
-
-  if (item.kind === 'activity_group') {
-    return item.entries.every(entry => entry.status === 'completed')
-  }
-
-  return true
-}
-
-export function getStaticTranscriptPrefixLength(
-  transcript: TranscriptItem[],
-): number {
-  const firstMutableIndex = transcript.findIndex(
-    (item, index) => !isStaticTranscriptItemReady(item, transcript[index + 1]),
-  )
-
-  return firstMutableIndex === -1 ? transcript.length : firstMutableIndex
-}
-
 function clampMenuIndex(index: number, itemCount: number): number {
   if (itemCount <= 0) {
     return 0
@@ -434,11 +415,12 @@ export function TuiApp({
   >(undefined)
   const [activeTurnElapsedMs, setActiveTurnElapsedMs] = useState(0)
   const [queuedPrompts, setQueuedPrompts] = useState<string[]>([])
-  const [staticTranscriptLength, setStaticTranscriptLength] = useState(0)
   const isWaitingForQuestionDialog = questionDialog !== undefined
   const activeControllerRef = useRef<AbortController | undefined>(undefined)
   const activePromptRef = useRef<string | undefined>(undefined)
   const foregroundInterruptedPromptRef = useRef<string | undefined>(undefined)
+  const transcriptScrollRef = useRef<ScrollBoxHandle | null>(null)
+  const transcriptSliceAnchorRef = useRef<TranscriptSliceAnchor>(null)
   const lastRawInputRef = useRef('')
   const queueRef = useRef<string[]>([])
   const pendingQuestionDialogRef = useRef<PendingQuestionDialog | undefined>(
@@ -1310,17 +1292,6 @@ export function TuiApp({
     void submitPrompt(initialPrompt)
   }, [initialPrompt])
 
-  useEffect(() => {
-    const nextStaticLength = getStaticTranscriptPrefixLength(uiState.transcript)
-    setStaticTranscriptLength(currentLength => {
-      if (uiState.transcript.length < currentLength) {
-        return nextStaticLength
-      }
-
-      return Math.max(currentLength, nextStaticLength)
-    })
-  }, [uiState.transcript])
-
   useInput((input, key) => {
     const normalizedInput = input.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n')
     const rawInput = lastRawInputRef.current
@@ -1613,10 +1584,13 @@ export function TuiApp({
 
   const slashSuggestionState = buildSlashSuggestionState(inputValue)
 
+  const fullscreenEnabled = isTuiFullscreenEnabled()
+  const mouseTrackingEnabled = isTuiMouseTrackingEnabled()
+
   if (resumeOverlay) {
     const filteredResumeSessions = getFilteredResumeSessions(resumeOverlay)
 
-    return (
+    const resumeContent = (
       <ResumeSessionOverlay
         errorText={resumeOverlay.errorText}
         isLoading={resumeOverlay.isLoading}
@@ -1625,39 +1599,66 @@ export function TuiApp({
         sessions={filteredResumeSessions}
       />
     )
+
+    return (
+      <TuiFullscreenLayout
+        bottom={null}
+        fullscreen={fullscreenEnabled}
+        mouseTracking={mouseTrackingEnabled}
+        scrollRef={transcriptScrollRef}
+        scrollable={resumeContent}
+      />
+    )
   }
 
+  const transcriptSliceStart = fullscreenEnabled
+    ? 0
+    : computeTranscriptSliceStart(uiState.transcript, transcriptSliceAnchorRef)
+  const visibleTranscriptEntries = fullscreenEnabled
+    ? uiState.transcript
+    : uiState.transcript.slice(transcriptSliceStart)
+
+  const transcript = (
+    <TranscriptPane
+      activeStatusText={
+        activeTurnStartedAt === undefined || isWaitingForQuestionDialog
+          ? undefined
+          : formatActiveTurnStatusText(activeTurnElapsedMs)
+      }
+      entries={visibleTranscriptEntries}
+      showWelcomeCard={transcriptSliceStart === 0}
+      welcomeCard={welcomeCard}
+    />
+  )
+  const bottomDock = (
+    <BottomDock
+      activeSuggestionIndex={slashSuggestionState.activeIndex}
+      bottomSheet={bottomSheet}
+      cursorIndex={composerInput.cursorIndex}
+      cwd={bottomDockMeta.cwd}
+      inputValue={inputValue}
+      isBusy={isBusy}
+      permissionLabel={bottomDockMeta.permissionLabel}
+      placeholder={
+        isBusy
+          ? 'Queue a prompt while DCLAW is working'
+          : DEFAULT_COMPOSER_PLACEHOLDER
+      }
+      questionDialog={questionDialog}
+      queuedPrompts={queuedPrompts}
+      runtimeLabel={bottomDockMeta.runtimeLabel}
+      skillsMenu={skillsMenu}
+      slashSuggestions={slashSuggestionState.suggestions}
+    />
+  )
+
   return (
-    <Box flexDirection="column" height="100%">
-      <TranscriptPane
-        activeStatusText={
-          activeTurnStartedAt === undefined || isWaitingForQuestionDialog
-            ? undefined
-            : formatActiveTurnStatusText(activeTurnElapsedMs)
-        }
-        entries={uiState.transcript.slice(staticTranscriptLength)}
-        staticEntries={uiState.transcript.slice(0, staticTranscriptLength)}
-        welcomeCard={welcomeCard}
-      />
-      <BottomDock
-        activeSuggestionIndex={slashSuggestionState.activeIndex}
-        bottomSheet={bottomSheet}
-        cursorIndex={composerInput.cursorIndex}
-        cwd={bottomDockMeta.cwd}
-        inputValue={inputValue}
-        isBusy={isBusy}
-        permissionLabel={bottomDockMeta.permissionLabel}
-        placeholder={
-          isBusy
-            ? 'Queue a prompt while DCLAW is working'
-            : DEFAULT_COMPOSER_PLACEHOLDER
-        }
-        questionDialog={questionDialog}
-        queuedPrompts={queuedPrompts}
-        runtimeLabel={bottomDockMeta.runtimeLabel}
-        skillsMenu={skillsMenu}
-        slashSuggestions={slashSuggestionState.suggestions}
-      />
-    </Box>
+    <TuiFullscreenLayout
+      bottom={bottomDock}
+      fullscreen={fullscreenEnabled}
+      mouseTracking={mouseTrackingEnabled}
+      scrollRef={transcriptScrollRef}
+      scrollable={transcript}
+    />
   )
 }

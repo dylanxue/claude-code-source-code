@@ -12,6 +12,7 @@ import {
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import {
   appendModelLimitLines,
+  appendProxyConfigLines,
   appendVisionRuntimeLines,
   appendReliabilityConfigLines,
   getLimitsConfigStatus,
@@ -85,6 +86,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     const config = runtime.primary.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
     lines.push(statusLine('base url', config.baseUrl))
+    appendProxyConfigLines(lines, config, configured.env)
     lines.push(statusLine('resolved model', runtime.primary.model ?? 'none'))
     lines.push(statusLine('model source', runtime.primary.modelSource))
     lines.push(statusLine('limits config', getLimitsConfigStatus()))
@@ -101,6 +103,7 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     const config = runtime.primary.providerConfig
     lines.push(statusLine('api key', config.apiKey ? 'configured' : 'missing'))
     lines.push(statusLine('base url', config.baseUrl))
+    appendProxyConfigLines(lines, config, configured.env)
     lines.push(statusLine('api style', config.apiStyle))
     lines.push(statusLine('resolved model', runtime.primary.model ?? 'none'))
     lines.push(statusLine('model source', runtime.primary.modelSource))

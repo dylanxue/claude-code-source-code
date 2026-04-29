@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import React from 'react'
-import { Box, Static, Text } from 'ink'
+import { Box, Text } from '../../ink/index.js'
 import type { WelcomeCardData } from '../../cli/welcome.js'
 import type {
   ActivityEntry,
@@ -14,21 +14,70 @@ import { WelcomeCard } from './WelcomeCard.js'
 type Props = {
   activeStatusText?: string
   entries: TranscriptItem[]
-  staticEntries?: TranscriptItem[]
+  showWelcomeCard?: boolean
   welcomeCard: WelcomeCardData
 }
 
-type StaticTranscriptItem =
-  | {
-      id: 'welcome'
-      kind: 'welcome'
-      welcomeCard: WelcomeCardData
-    }
+export const MAIN_SCREEN_TRANSCRIPT_CAP = 200
+export const MAIN_SCREEN_TRANSCRIPT_STEP = 50
+
+export type TranscriptSliceAnchor = {
+  id: string
+  index: number
+} | null
+
+type TranscriptSliceAnchorRef = {
+  current: TranscriptSliceAnchor
+}
+
+type AssistantStreamChunkEntry = Extract<
+  TranscriptItem,
+  { kind: 'assistant_stream_chunk' }
+>
+
+type TranscriptSliceUnit = {
+  id: string
+  entryIndex: number
+}
+
+export type TranscriptRenderItem =
   | {
       id: string
       kind: 'entry'
       entry: TranscriptItem
+      nextEntry?: TranscriptItem
+      previousEntry?: TranscriptItem
     }
+  | {
+      id: string
+      kind: 'stream_group'
+      entries: AssistantStreamChunkEntry[]
+      nextEntry?: TranscriptItem
+      previousEntry?: TranscriptItem
+      text: string
+    }
+
+function getTranscriptSliceUnits(
+  entries: ReadonlyArray<Pick<TranscriptItem, 'id' | 'kind'>>,
+): TranscriptSliceUnit[] {
+  const units: TranscriptSliceUnit[] = []
+
+  entries.forEach((entry, entryIndex) => {
+    if (
+      entry.kind === 'assistant_stream_chunk' &&
+      entries[entryIndex - 1]?.kind === 'assistant_stream_chunk'
+    ) {
+      return
+    }
+
+    units.push({
+      id: entry.id,
+      entryIndex,
+    })
+  })
+
+  return units
+}
 
 type MultilineTextBlockProps = {
   text: string
@@ -86,6 +135,91 @@ export function getTranscriptEntryMarginBottom(
   }
 
   return 1
+}
+
+export function computeTranscriptSliceStart(
+  entries: ReadonlyArray<Pick<TranscriptItem, 'id' | 'kind'>>,
+  anchorRef: TranscriptSliceAnchorRef,
+  cap = MAIN_SCREEN_TRANSCRIPT_CAP,
+  step = MAIN_SCREEN_TRANSCRIPT_STEP,
+): number {
+  const normalizedCap = Math.max(1, cap)
+  const normalizedStep = Math.max(0, step)
+  const units = getTranscriptSliceUnits(entries)
+
+  if (units.length === 0) {
+    anchorRef.current = null
+    return 0
+  }
+
+  let unitStart = 0
+  const maxUnitStart = Math.max(0, units.length - normalizedCap)
+  const anchor = anchorRef.current
+
+  if (units.length > normalizedCap) {
+    if (!anchor) {
+      unitStart = maxUnitStart
+    } else {
+      const anchorIndex = units.findIndex(unit => unit.id === anchor.id)
+      unitStart =
+        anchorIndex >= 0 ? anchorIndex : Math.min(anchor.index, maxUnitStart)
+
+      if (units.length - unitStart > normalizedCap + normalizedStep) {
+        unitStart = maxUnitStart
+      }
+    }
+  }
+
+  const unitAtStart = units[unitStart]
+  anchorRef.current = {
+    id: unitAtStart?.id ?? units[0].id,
+    index: unitStart,
+  }
+
+  return unitAtStart?.entryIndex ?? 0
+}
+
+export function getTranscriptRenderItems(
+  entries: TranscriptItem[],
+): TranscriptRenderItem[] {
+  const renderItems: TranscriptRenderItem[] = []
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+    if (!entry) {
+      continue
+    }
+
+    if (entry.kind !== 'assistant_stream_chunk') {
+      renderItems.push({
+        id: entry.id,
+        kind: 'entry',
+        entry,
+        nextEntry: entries[index + 1],
+        previousEntry: entries[index - 1],
+      })
+      continue
+    }
+
+    const streamEntries: AssistantStreamChunkEntry[] = [entry]
+    let nextIndex = index + 1
+    while (entries[nextIndex]?.kind === 'assistant_stream_chunk') {
+      streamEntries.push(entries[nextIndex] as AssistantStreamChunkEntry)
+      nextIndex += 1
+    }
+
+    renderItems.push({
+      id: entry.id,
+      kind: 'stream_group',
+      entries: streamEntries,
+      nextEntry: entries[nextIndex],
+      previousEntry: entries[index - 1],
+      text: streamEntries.map(streamEntry => streamEntry.text).join(''),
+    })
+    index = nextIndex - 1
+  }
+
+  return renderItems
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -464,73 +598,56 @@ function ActivityGroup({ entry }: { entry: Extract<TranscriptItem, { kind: 'acti
 export function TranscriptPane({
   activeStatusText,
   entries,
-  staticEntries = [],
+  showWelcomeCard = true,
   welcomeCard,
 }: Props) {
-  const staticItems: StaticTranscriptItem[] = [
-    {
-      id: 'welcome',
-      kind: 'welcome',
-      welcomeCard,
-    },
-    ...staticEntries.map(entry => ({
-      id: entry.id,
-      kind: 'entry' as const,
-      entry,
-    })),
-  ]
+  const renderItems = getTranscriptRenderItems(entries)
 
   return (
-    <>
-      <Static items={staticItems}>
-        {(item, index) => {
-          const previousItem = staticItems[index - 1]
-          const previousEntry =
-            previousItem?.kind === 'entry' ? previousItem.entry : undefined
-          const nextItem = staticItems[index + 1]
-          const nextEntry =
-            nextItem?.kind === 'entry' ? nextItem.entry : undefined
-
-          return item.kind === 'welcome' ? (
-            <Box
-              key={item.id}
-              marginBottom={1}
-              flexDirection="column"
-              paddingX={1}
-              paddingTop={1}
-            >
-              <WelcomeCard card={item.welcomeCard} />
-            </Box>
-          ) : (
-            <TranscriptEntry
-              key={item.id}
-              entry={item.entry}
-              nextEntry={nextEntry}
-              previousEntry={previousEntry}
-            />
-          )
-        }}
-      </Static>
-      <Box flexDirection="column" flexGrow={1} paddingX={1} paddingTop={1}>
-        {entries.map((entry, index) => (
+    <Box flexDirection="column" flexGrow={1} paddingX={1} paddingTop={1}>
+      {showWelcomeCard ? (
+        <Box marginBottom={1} flexDirection="column">
+          <WelcomeCard card={welcomeCard} />
+        </Box>
+      ) : null}
+      {renderItems.map(item =>
+        item.kind === 'stream_group' ? (
+          <TranscriptStreamGroup key={item.id} item={item} />
+        ) : (
           <TranscriptEntry
-            key={entry.id}
-            entry={entry}
-            nextEntry={entries[index + 1]}
-            previousEntry={entries[index - 1] ?? staticEntries.at(-1)}
+            key={item.id}
+            entry={item.entry}
+            nextEntry={item.nextEntry}
+            previousEntry={item.previousEntry}
           />
-        ))}
-        {activeStatusText ? (
-          <Box marginBottom={1}>
-            <MultilineTextBlock
-              dimColor
-              prefix="• "
-              text={activeStatusText}
-            />
-          </Box>
-        ) : null}
-      </Box>
-    </>
+        ),
+      )}
+      {activeStatusText ? (
+        <Box marginBottom={1}>
+          <MultilineTextBlock dimColor prefix="• " text={activeStatusText} />
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+function TranscriptStreamGroup({
+  item,
+}: {
+  item: Extract<TranscriptRenderItem, { kind: 'stream_group' }>
+}) {
+  const lastEntry = item.entries.at(-1) ?? item.entries[0]
+
+  return (
+    <Box
+      flexDirection="column"
+      marginBottom={getTranscriptEntryMarginBottom(lastEntry, item.nextEntry)}
+    >
+      <StreamingTextBlock
+        showBullet={item.previousEntry?.kind !== 'assistant_stream_chunk'}
+        text={item.text}
+      />
+    </Box>
   )
 }
 

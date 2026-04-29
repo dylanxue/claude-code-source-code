@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { listSlashCommands } from '../../src/cli/slashCommands.js'
 import { getActivityGroupTitle } from '../../src/tui/presenters/activityPresenter.js'
-import { presentSlashCommandResult } from '../../src/tui/presenters/slashCommandPresenter.js'
+import {
+  COMPACT_COMMAND_PROGRESS_TEXT,
+  presentSlashCommandResult,
+  presentSlashCommandStart,
+} from '../../src/tui/presenters/slashCommandPresenter.js'
 
 test('presentSlashCommandResult renders /status output as a structured card', () => {
   const presentation = presentSlashCommandResult(
@@ -62,6 +66,37 @@ test('presentSlashCommandResult renders /resume output as transcript prose', () 
   assert.equal(noteEvent.type, 'assistant_progress_message')
   assert.match(noteEvent.text, /restored transcript preview:/)
   assert.match(noteEvent.text, /assistant: restored assistant/)
+})
+
+test('presentSlashCommandStart renders immediate /compact progress', () => {
+  const presentation = presentSlashCommandStart('/compact keep key details')
+
+  assert.deepEqual(
+    presentation.events.map(event => event.type),
+    ['command_logged', 'tool_use_started'],
+  )
+  const activityEvent = presentation.events[1]
+  assert.ok(activityEvent)
+  assert.equal(activityEvent.type, 'tool_use_started')
+  assert.equal(activityEvent.title, 'Session')
+  assert.equal(activityEvent.toolName, 'Compact')
+  assert.equal(activityEvent.text, COMPACT_COMMAND_PROGRESS_TEXT)
+})
+
+test('presentSlashCommandResult can skip command logging after start progress', () => {
+  const presentation = presentSlashCommandResult(
+    '/compact',
+    [
+      'Compacted conversation into a summary within the current session.',
+      'session id: abc123',
+    ].join('\n'),
+    { includeCommandLog: false },
+  )
+
+  assert.deepEqual(
+    presentation.events.map(event => event.type),
+    ['structured_card_added'],
+  )
 })
 
 test('presentSlashCommandResult keeps long structured card rows on one line', () => {

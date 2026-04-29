@@ -3,6 +3,7 @@ import { OpenAiLlmClient } from './providers/openai.js'
 import { StubLlmClient } from './providers/stub.js'
 import type { ModelCatalogOverrides } from './config.js'
 import type { ResolvedProviderConfig } from './providerConfig.js'
+import { createProxyFetch } from './proxy.js'
 import type { LlmClient } from './types.js'
 export { SUPPORTED_LLM_PROVIDERS } from './providerNames.js'
 
@@ -19,6 +20,7 @@ export function createLlmClient(
         env,
         apiKey: providerConfig.apiKey,
         baseUrl: providerConfig.baseUrl,
+        fetchImpl: createProxyFetch(providerConfig, env),
         modelCatalogOverrides,
       })
     case 'openai':
@@ -30,6 +32,7 @@ export function createLlmClient(
         defaultTextVerbosity: providerConfig.defaultTextVerbosity,
         defaultReasoningEffort: providerConfig.defaultReasoningEffort,
         defaultStore: providerConfig.defaultStore,
+        fetchImpl: createProxyFetch(providerConfig, env),
         modelCatalogOverrides,
       })
   }

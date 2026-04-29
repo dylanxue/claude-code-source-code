@@ -218,6 +218,22 @@ export function sleep(ms: number): Promise<void> {
   })
 }
 
+export function parseSseTextEvents(
+  text: string,
+  onEvent: (event: SseEvent) => void,
+): void {
+  const parser = createParser({
+    onEvent(event) {
+      onEvent({
+        event: event.event,
+        data: event.data,
+      })
+    },
+  })
+
+  parser.feed(text)
+}
+
 function parsePositiveInteger(
   raw: string | undefined,
 ): number | undefined {

@@ -5,14 +5,16 @@ import {
   createAssistantTextBufferState,
   formatQueuedPromptsForSubmission,
   flushAssistantTextBufferState,
-  getStaticTranscriptPrefixLength,
   isShiftTabRawInput,
 } from '../../src/tui/App.js'
 import {
   createInitialUiState,
   reduceUiEvent,
 } from '../../src/tui/state/index.js'
-import { getTranscriptEntryMarginBottom } from '../../src/tui/views/TranscriptPane.js'
+import {
+  getTranscriptEntryMarginBottom,
+  getTranscriptRenderItems,
+} from '../../src/tui/views/TranscriptPane.js'
 import { formatPermissionStatusLabel } from '../../src/tui/views/BottomDock.js'
 
 test('formatQueuedPromptsForSubmission keeps queued prompts separated by a blank line', () => {
@@ -36,90 +38,6 @@ test('formatPermissionStatusLabel makes plan mode explicit in bottom status', ()
     'PLAN MODE (Shift+Tab to exit plan)',
   )
   assert.equal(formatPermissionStatusLabel('default'), 'default')
-})
-
-test('getStaticTranscriptPrefixLength stops before trailing mutable transcript entries', () => {
-  assert.equal(
-    getStaticTranscriptPrefixLength([
-      {
-        id: '1',
-        kind: 'user_prompt',
-        text: 'hello',
-      },
-      {
-        id: '2',
-        kind: 'assistant_draft',
-        text: 'working',
-      },
-      {
-        id: '3',
-        kind: 'system',
-        text: 'later',
-      },
-    ]),
-    1,
-  )
-
-  assert.equal(
-    getStaticTranscriptPrefixLength([
-      {
-        id: '1',
-        kind: 'assistant_stream_chunk',
-        text: 'streaming',
-      },
-    ]),
-    0,
-  )
-
-  assert.equal(
-    getStaticTranscriptPrefixLength([
-      {
-        id: '1',
-        kind: 'assistant_stream_chunk',
-        text: 'streaming',
-      },
-      {
-        id: '2',
-        kind: 'assistant_stream_chunk',
-        text: 'more streaming',
-      },
-    ]),
-    1,
-  )
-
-  assert.equal(
-    getStaticTranscriptPrefixLength([
-      {
-        id: '1',
-        kind: 'assistant_stream_chunk',
-        text: 'streaming',
-      },
-      {
-        id: '2',
-        kind: 'system',
-        text: 'later',
-      },
-    ]),
-    2,
-  )
-
-  assert.equal(
-    getStaticTranscriptPrefixLength([
-      {
-        id: '1',
-        kind: 'activity_group',
-        title: 'Activity',
-        entries: [
-          {
-            toolUseId: 'tool_1',
-            status: 'started',
-            text: 'Reading',
-          },
-        ],
-      },
-    ]),
-    0,
-  )
 })
 
 test('reduceUiEvent records interruption and clears the active turn', () => {
@@ -225,5 +143,33 @@ test('transcript spacing keeps consecutive stream chunks tight but separates lat
       },
     ),
     1,
+  )
+})
+
+test('transcript render groups consecutive stream chunks before laying out text', () => {
+  const renderItems = getTranscriptRenderItems([
+    {
+      id: 'tx_1',
+      kind: 'assistant_stream_chunk',
+      text: '# 6.',
+    },
+    {
+      id: 'tx_2',
+      kind: 'assistant_stream_chunk',
+      text: '1 枚举定义\n\n```ts\n',
+    },
+    {
+      id: 'tx_3',
+      kind: 'assistant_stream_chunk',
+      text: "export type Side = 'red' | 'black';\n```",
+    },
+  ])
+
+  assert.equal(renderItems.length, 1)
+  const streamGroup = renderItems[0]
+  assert.equal(streamGroup?.kind, 'stream_group')
+  assert.equal(
+    streamGroup?.kind === 'stream_group' ? streamGroup.text : '',
+    "# 6.1 枚举定义\n\n```ts\nexport type Side = 'red' | 'black';\n```",
   )
 })

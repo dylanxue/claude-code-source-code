@@ -216,3 +216,54 @@ test('createLlmClient uses resolved provider config directly', async () => {
     await rm(workspaceDir, { recursive: true, force: true })
   }
 })
+
+test('createLlmClient applies provider proxy config to fetch requests', async () => {
+  const originalFetch = globalThis.fetch
+  let hasDispatcher = false
+
+  try {
+    globalThis.fetch = (async (_input, init) => {
+      hasDispatcher = Boolean(
+        (init as RequestInit & { dispatcher?: unknown } | undefined)
+          ?.dispatcher,
+      )
+
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'ok',
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    }) as typeof fetch
+
+    const client = createLlmClient(
+      {
+        provider: 'openai',
+        apiKey: 'config-key',
+        baseUrl: 'https://example.test/v1',
+        proxyUrl: 'http://proxy.example:8080',
+        apiStyle: 'chat-completions',
+      },
+      {},
+    )
+
+    await client.createMessage({
+      model: 'gpt-4.1-mini',
+      messages: [],
+    })
+
+    assert.equal(hasDispatcher, true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

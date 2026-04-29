@@ -1,8 +1,13 @@
 import React from 'react'
-import { render } from 'ink'
+import { render } from '../ink/index.js'
 import { TuiApp } from '../tui/App.js'
 import type { UiEvent } from '../tui/state/index.js'
-import { presentSlashCommandResult } from '../tui/presenters/slashCommandPresenter.js'
+import {
+  COMPACT_COMMAND_DONE_TEXT,
+  COMPACT_COMMAND_FAILED_TEXT,
+  presentSlashCommandResult,
+  presentSlashCommandStart,
+} from '../tui/presenters/slashCommandPresenter.js'
 import { getCliErrorInfo } from './errorFormatting.js'
 import { createInteractiveContext, getInteractiveRuntimeLabel } from './interactiveContext.js'
 import { canStartInteractiveTui } from './interactiveUi.js'
@@ -63,12 +68,15 @@ function emitLocalCommandResult(
   prompt: string,
   result: CapturedCommandResult,
   onUiEvent: (event: UiEvent) => void,
+  options: { includeCommandLog?: boolean } = {},
 ): boolean {
   if (!result.handled && result.error === undefined) {
     return false
   }
 
-  const presentation = presentSlashCommandResult(prompt, result.outputText)
+  const presentation = presentSlashCommandResult(prompt, result.outputText, {
+    includeCommandLog: options.includeCommandLog,
+  })
   presentation.events.forEach(onUiEvent)
   if (result.error !== undefined) {
     onUiEvent({
@@ -83,6 +91,15 @@ function emitLocalCommandResult(
 function shouldRefreshTaskSnapshotAfterLocalCommand(prompt: string): boolean {
   const [commandName] = prompt.trim().split(/\s+/u)
   return commandName === '/resume' || commandName === '/compact'
+}
+
+function findStartedActivityEvent(
+  events: UiEvent[],
+): Extract<UiEvent, { type: 'tool_use_started' }> | undefined {
+  return events.find(
+    (event): event is Extract<UiEvent, { type: 'tool_use_started' }> =>
+      event.type === 'tool_use_started',
+  )
 }
 
 export async function runInteractiveTui(
@@ -110,7 +127,7 @@ export async function runInteractiveTui(
     cwd: interactiveContext.interactiveOptions.cwd,
   })
 
-  const app = render(
+  const app = await render(
     <TuiApp
       getBottomDockMeta={() => ({
         cwd: interactiveContext.interactiveOptions.cwd,
@@ -176,13 +193,34 @@ export async function runInteractiveTui(
         return interactiveContext.slashCommandContext.listSkillStatuses()
       }}
       onLocalCommand={async (prompt, options) => {
+        const startPresentation = presentSlashCommandStart(prompt)
+        startPresentation.events.forEach(options.onUiEvent)
+        const startLoggedCommand = startPresentation.events.some(
+          event => event.type === 'command_logged',
+        )
+        const startedActivityEvent = findStartedActivityEvent(
+          startPresentation.events,
+        )
         const result = await captureCommandResult(async writeOutput =>
           maybeHandleSlashCommand(prompt, interactiveContext.slashCommandContext, {
             allowDuringActivePrompt: options.allowDuringActivePrompt,
             writeOutput,
           }),
         )
-        const handled = emitLocalCommandResult(prompt, result, options.onUiEvent)
+        if (startedActivityEvent) {
+          options.onUiEvent({
+            type: 'tool_result_received',
+            toolUseId: startedActivityEvent.toolUseId,
+            text:
+              result.error === undefined
+                ? COMPACT_COMMAND_DONE_TEXT
+                : COMPACT_COMMAND_FAILED_TEXT,
+          })
+        }
+
+        const handled = emitLocalCommandResult(prompt, result, options.onUiEvent, {
+          includeCommandLog: !startLoggedCommand,
+        })
         if (handled && shouldRefreshTaskSnapshotAfterLocalCommand(prompt)) {
           const board = await loadExecutionTaskBoardForSession(
             interactiveContext.interactiveSession.sessionId,

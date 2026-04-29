@@ -15,6 +15,10 @@ import {
   resolveStreamWatchdogEnabled,
   type RuntimeConfigSource,
 } from '../llm/providerUtils.js'
+import {
+  resolveLlmProxyConfig,
+  type LlmProxyConfig,
+} from '../llm/proxy.js'
 import type { LlmProviderName } from '../llm/providerNames.js'
 import type { ResolvedModelRuntimeConfig } from '../llm/runtimeConfig.js'
 
@@ -111,6 +115,20 @@ export function appendReliabilityConfigLines(
     statusLine(
       'stream idle timeout',
       `${streamIdleTimeout.value}ms (${streamIdleTimeout.source})`,
+    ),
+  )
+}
+
+export function appendProxyConfigLines(
+  lines: string[],
+  config: LlmProxyConfig | undefined,
+  env: NodeJS.ProcessEnv,
+): void {
+  const proxy = resolveLlmProxyConfig(config, env)
+  lines.push(
+    statusLine(
+      'proxy',
+      proxy.proxyUrl ? `${proxy.proxyUrl} (${proxy.source})` : 'not configured',
     ),
   )
 }

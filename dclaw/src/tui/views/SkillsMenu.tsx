@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text } from '../../ink/index.js'
 import type { SkillStatus } from '../../skills/enablement.js'
 
 export type SkillsMenuMode = 'root' | 'list' | 'configure'

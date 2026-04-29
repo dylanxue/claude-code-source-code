@@ -23,12 +23,14 @@ test('resolveProviderConfig builds anthropic provider config from a typed profil
     type: 'anthropic',
     apiKey: 'primary-key',
     baseURL: 'https://primary.example.com/',
+    proxyURL: 'http://proxy.example:8080',
   })
 
   assert.deepEqual(config, {
     provider: 'anthropic',
     apiKey: 'primary-key',
     baseUrl: 'https://primary.example.com',
+    proxyUrl: 'http://proxy.example:8080',
   })
 })
 

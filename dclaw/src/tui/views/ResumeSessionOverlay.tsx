@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text } from '../../ink/index.js'
 import type { SessionHistoryEntry } from '../../session/history.js'
 
 const MAX_VISIBLE_SESSIONS = 28

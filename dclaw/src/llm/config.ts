@@ -16,6 +16,7 @@ type BaseProviderProfileConfig = {
   type: ProviderProfileType
   apiKey?: string
   baseURL?: string
+  proxyURL?: string
 }
 
 export type AnthropicProviderProfileConfig = BaseProviderProfileConfig & {
@@ -151,6 +152,9 @@ function parseProviderProfileConfig(
         parseOptionalString(value.baseURL),
         DEFAULT_ANTHROPIC_BASE_URL,
       ),
+      ...(parseOptionalString(value.proxyURL)
+        ? { proxyURL: parseOptionalString(value.proxyURL) }
+        : {}),
     }
   }
 
@@ -194,6 +198,9 @@ function parseProviderProfileConfig(
       ),
       ...(parseOpenAiApiStyle(value.apiStyle)
         ? { apiStyle: parseOpenAiApiStyle(value.apiStyle) }
+        : {}),
+      ...(parseOptionalString(value.proxyURL)
+        ? { proxyURL: parseOptionalString(value.proxyURL) }
         : {}),
       ...(requestDefaults && Object.keys(requestDefaults).length > 0
         ? { requestDefaults }

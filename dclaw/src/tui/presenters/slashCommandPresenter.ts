@@ -8,6 +8,16 @@ type SlashCommandPresentation = {
   events: UiEvent[]
 }
 
+type PresentSlashCommandResultOptions = {
+  includeCommandLog?: boolean
+}
+
+const COMPACT_COMMAND_ACTIVITY_ID = 'local-command-compact-context'
+export const COMPACT_COMMAND_PROGRESS_TEXT =
+  'Compacting conversation context...'
+export const COMPACT_COMMAND_DONE_TEXT = 'Compact command finished.'
+export const COMPACT_COMMAND_FAILED_TEXT = 'Context compaction failed.'
+
 function normalizeCommandName(value: string): string {
   return value.trim().split(/\s+/u)[0]?.toLowerCase() ?? ''
 }
@@ -95,17 +105,46 @@ function buildStructuredCardEntries(
   return entries
 }
 
+export function presentSlashCommandStart(
+  prompt: string,
+): SlashCommandPresentation {
+  const metadata = findSlashCommandMetadata(prompt)
+  if (metadata?.name !== '/compact') {
+    return { events: [] }
+  }
+
+  return {
+    events: [
+      {
+        type: 'command_logged',
+        prompt,
+      },
+      {
+        type: 'tool_use_started',
+        toolUseId: COMPACT_COMMAND_ACTIVITY_ID,
+        title: 'Session',
+        toolName: 'Compact',
+        text: COMPACT_COMMAND_PROGRESS_TEXT,
+      },
+    ],
+  }
+}
+
 export function presentSlashCommandResult(
   prompt: string,
   outputText: string,
+  options: PresentSlashCommandResultOptions = {},
 ): SlashCommandPresentation {
   const metadata = findSlashCommandMetadata(prompt)
-  const events: UiEvent[] = [
-    {
-      type: 'command_logged',
-      prompt,
-    },
-  ]
+  const includeCommandLog = options.includeCommandLog ?? true
+  const events: UiEvent[] = includeCommandLog
+    ? [
+        {
+          type: 'command_logged',
+          prompt,
+        },
+      ]
+    : []
   const normalizedOutputText = outputText.trim()
   if (normalizedOutputText.length === 0) {
     return { events }
