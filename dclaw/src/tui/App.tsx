@@ -208,9 +208,107 @@ export function formatQueuedPromptsForSubmission(prompts: string[]): string {
   return prompts.join('\n\n')
 }
 
-function isStaticTranscriptItemReady(item: TranscriptItem): boolean {
+export type AssistantTextBufferState = {
+  length: number
+  segments: string[]
+}
+
+const ASSISTANT_TEXT_EAGER_FLUSH_LENGTH = 48
+
+function shouldEagerlyFlushAssistantText(text: string): boolean {
+  const trimmed = text.trimEnd()
+  if (trimmed.length === 0) {
+    return false
+  }
+
+  return (
+    trimmed.length >= ASSISTANT_TEXT_EAGER_FLUSH_LENGTH ||
+    /[.!?。！？]$/u.test(trimmed)
+  )
+}
+
+export function createAssistantTextBufferState(): AssistantTextBufferState {
+  return {
+    segments: [],
+    length: 0,
+  }
+}
+
+export function flushAssistantTextBufferState(
+  state: AssistantTextBufferState,
+): {
+  nextState: AssistantTextBufferState
+  text?: string
+} {
+  if (state.length === 0) {
+    return {
+      nextState: state,
+    }
+  }
+
+  return {
+    nextState: createAssistantTextBufferState(),
+    text: state.segments.join(''),
+  }
+}
+
+export function appendAssistantTextDeltaToBuffer(
+  state: AssistantTextBufferState,
+  text: string,
+): {
+  completedChunks: string[]
+  nextState: AssistantTextBufferState
+} {
+  const completedChunks: string[] = []
+  let nextSegments = [...state.segments]
+  let nextLength = state.length
+  let remaining = text
+
+  while (remaining.length > 0) {
+    const lineBreakIndex = remaining.indexOf('\n')
+    if (lineBreakIndex === -1) {
+      nextSegments.push(remaining)
+      nextLength += remaining.length
+      break
+    }
+
+    const completedChunk = remaining.slice(0, lineBreakIndex + 1)
+    nextSegments.push(completedChunk)
+    nextLength += completedChunk.length
+    completedChunks.push(nextSegments.join(''))
+    nextSegments = []
+    nextLength = 0
+    remaining = remaining.slice(lineBreakIndex + 1)
+  }
+
+  if (nextLength > 0) {
+    const pendingText = nextSegments.join('')
+    if (shouldEagerlyFlushAssistantText(pendingText)) {
+      completedChunks.push(pendingText)
+      nextSegments = []
+      nextLength = 0
+    }
+  }
+
+  return {
+    completedChunks,
+    nextState: {
+      segments: nextSegments,
+      length: nextLength,
+    },
+  }
+}
+
+function isStaticTranscriptItemReady(
+  item: TranscriptItem,
+  nextItem?: TranscriptItem,
+): boolean {
   if (item.kind === 'assistant_draft') {
     return false
+  }
+
+  if (item.kind === 'assistant_stream_chunk') {
+    return nextItem !== undefined
   }
 
   if (item.kind === 'activity_group') {
@@ -224,7 +322,7 @@ export function getStaticTranscriptPrefixLength(
   transcript: TranscriptItem[],
 ): number {
   const firstMutableIndex = transcript.findIndex(
-    item => !isStaticTranscriptItemReady(item),
+    (item, index) => !isStaticTranscriptItemReady(item, transcript[index + 1]),
   )
 
   return firstMutableIndex === -1 ? transcript.length : firstMutableIndex
@@ -346,7 +444,9 @@ export function TuiApp({
   const pendingQuestionDialogRef = useRef<PendingQuestionDialog | undefined>(
     undefined,
   )
-  const pendingAssistantDeltaRef = useRef('')
+  const assistantTextBufferRef = useRef<AssistantTextBufferState>(
+    createAssistantTextBufferState(),
+  )
   const initialPromptHandledRef = useRef(false)
   const mountedRef = useRef(true)
 
@@ -402,21 +502,24 @@ export function TuiApp({
   }
 
   const flushPendingAssistantDelta = (): void => {
-    const text = pendingAssistantDeltaRef.current
-    pendingAssistantDeltaRef.current = ''
-    dispatchAssistantStreamChunk(text)
+    const { nextState, text } = flushAssistantTextBufferState(
+      assistantTextBufferRef.current,
+    )
+    assistantTextBufferRef.current = nextState
+    if (text) {
+      dispatchAssistantStreamChunk(text)
+    }
   }
 
-  const flushCompletedAssistantLines = (): void => {
-    const text = pendingAssistantDeltaRef.current
-    const lastLineBreakIndex = text.lastIndexOf('\n')
-    if (lastLineBreakIndex === -1) {
-      return
+  const bufferAssistantTextDelta = (text: string): void => {
+    const { completedChunks, nextState } = appendAssistantTextDeltaToBuffer(
+      assistantTextBufferRef.current,
+      text,
+    )
+    assistantTextBufferRef.current = nextState
+    for (const chunk of completedChunks) {
+      dispatchAssistantStreamChunk(chunk)
     }
-
-    const stableText = text.slice(0, lastLineBreakIndex + 1)
-    pendingAssistantDeltaRef.current = text.slice(lastLineBreakIndex + 1)
-    dispatchAssistantStreamChunk(stableText)
   }
 
   const dispatchUiEvent = (event: UiEvent): void => {
@@ -428,22 +531,19 @@ export function TuiApp({
     }
 
     if (event.type === 'assistant_text_delta') {
-      pendingAssistantDeltaRef.current += event.text
-      flushCompletedAssistantLines()
+      bufferAssistantTextDelta(event.text)
       return
     }
+
+    // Preserve transcript ordering: any buffered assistant prose that arrived
+    // before tool activity or other turn events should be materialized first.
+    flushPendingAssistantDelta()
 
     if (
       event.type === 'turn_interrupted' &&
       foregroundInterruptedPromptRef.current === event.prompt
     ) {
       return
-    }
-
-    if (event.type === 'turn_completed') {
-      flushPendingAssistantDelta()
-    } else if (event.type === 'turn_interrupted') {
-      flushPendingAssistantDelta()
     }
 
     if (mountedRef.current) {

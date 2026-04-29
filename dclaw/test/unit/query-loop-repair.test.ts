@@ -4,7 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { executeSingleTurn } from '../../src/core/queryLoop.js'
-import { QueryLoopLlmError } from '../../src/core/queryErrors.js'
+import {
+  QueryLoopAbortError,
+  QueryLoopLlmError,
+} from '../../src/core/queryErrors.js'
 import {
   createFileQueryTraceSink,
   createQueryTraceFilePath,
@@ -105,6 +108,33 @@ class RepeatingStreamClient implements LlmClient {
     this.requests.push(request)
     for (let index = 0; index < 32; index += 1) {
       callbacks.onTextDelta?.('你')
+    }
+
+    return {
+      message: createTextMessage('assistant', 'should not complete'),
+    }
+  }
+}
+
+class AbortAwareRepeatingStreamClient implements LlmClient {
+  readonly providerName = 'repair-test'
+  readonly requests: CreateMessageRequest[] = []
+  emittedTextDeltaCount = 0
+
+  async createMessage(
+    _request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    throw new Error('streaming path expected')
+  }
+
+  async createMessageStream(
+    request: CreateMessageRequest,
+    callbacks: CreateMessageStreamCallbacks,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    for (let index = 0; index < 32; index += 1) {
+      this.emittedTextDeltaCount += 1
+      callbacks.onTextDelta?.('x')
     }
 
     return {
@@ -282,6 +312,37 @@ test('query loop aborts streaming when estimated output approaches max tokens', 
       return true
     },
   )
+})
+
+test('query loop aborts immediately when the stream handler cancels mid-output', async () => {
+  const registry = createDefaultToolRegistry()
+  const client = new AbortAwareRepeatingStreamClient()
+  const controller = new AbortController()
+  let receivedTextDeltaCount = 0
+
+  await assert.rejects(
+    () =>
+      executeSingleTurn({
+        client,
+        messages: [createTextMessage('user', 'stream until interrupted')],
+        toolRegistry: registry,
+        toolContext: createToolContext({
+          availableTools: registry.list().map(tool => tool.name),
+          permissionMode: 'default',
+        }),
+        abortSignal: controller.signal,
+        streamHandlers: {
+          onTextDelta() {
+            receivedTextDeltaCount += 1
+            controller.abort()
+          },
+        },
+      }),
+    error => error instanceof QueryLoopAbortError,
+  )
+
+  assert.equal(receivedTextDeltaCount, 1)
+  assert.equal(client.emittedTextDeltaCount, 1)
 })
 
 test('query trace records streaming output guard triggers', async () => {

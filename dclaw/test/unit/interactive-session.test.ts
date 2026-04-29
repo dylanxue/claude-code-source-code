@@ -245,6 +245,154 @@ test('runInteractiveSessionPrompt emits UI events for transcript rendering', asy
   assert.equal(events[2]?.text, ' answer')
 })
 
+test('runInteractiveSessionPrompt preserves streamed thinking before visible tool-use content in TUI events', async () => {
+  const homeDir = await mkdtemp(
+    join(tmpdir(), 'dclaw-interactive-session-ui-thinking-'),
+  )
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    model: 'stub-model',
+    env,
+  })
+  const events: Array<{ type: string; text?: string }> = []
+
+  const engine = {
+    messages: [] as ReturnType<typeof createTextMessage>[],
+    async submitUserPrompt() {
+      throw new Error('submitUserPrompt should not be used in UI event mode')
+    },
+    async submitUserPromptWithHandlers(
+      prompt: string,
+      handlers?: {
+        onTextDelta?: (text: string) => void
+        onReasoningDelta?: (delta: {
+          iteration: number
+          kind: 'reasoning' | 'thinking'
+          text: string
+        }) => void
+        onAssistantMessage?: (message: {
+          iteration: number
+          id: string
+          role: 'assistant'
+          content: Array<
+            | {
+                type: 'thinking'
+                thinking: string
+              }
+            | {
+                type: 'text'
+                text: string
+              }
+            | {
+                type: 'tool_use'
+                id: string
+                name: string
+                input: Record<string, unknown>
+              }
+          >
+        }) => void
+        onToolUse?: (toolUse: {
+          iteration: number
+          id: string
+          name: string
+          input: Record<string, unknown>
+        }) => void
+      },
+    ) {
+      assert.equal(prompt, 'inspect the file')
+      handlers?.onReasoningDelta?.({
+        iteration: 1,
+        kind: 'thinking',
+        text: 'I will inspect the current file first.',
+      })
+      handlers?.onTextDelta?.('Checking the current file now.')
+      handlers?.onAssistantMessage?.({
+        iteration: 1,
+        id: 'msg_thinking',
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'I will inspect the current file first.',
+          },
+          {
+            type: 'text',
+            text: 'Checking the current file now.',
+          },
+          {
+            type: 'tool_use',
+            id: 'tool_read_1',
+            name: 'Read',
+            input: { file_path: '/tmp/example.txt' },
+          },
+        ],
+      })
+      handlers?.onToolUse?.({
+        iteration: 1,
+        id: 'tool_read_1',
+        name: 'Read',
+        input: { file_path: '/tmp/example.txt' },
+      })
+
+      return {
+        appendedMessages: [
+          createTextMessage('user', prompt),
+          createTextMessage('assistant', 'Final answer'),
+        ],
+        outputText: 'Final answer',
+      }
+    },
+    getSessionId() {
+      return session.sessionId
+    },
+    getMessages() {
+      return this.messages
+    },
+  }
+
+  try {
+    await runInteractiveSessionPrompt({
+      engine: engine as never,
+      sessionId: session.sessionId,
+      prompt: 'inspect the file',
+      stream: true,
+      env,
+      writeOutput() {},
+      flushOutput() {},
+      onUiEvent(event) {
+        events.push({
+          type: event.type,
+          ...('text' in event ? { text: event.text } : {}),
+        })
+      },
+    })
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  assert.deepEqual(
+    events.map(event => event.type),
+    [
+      'turn_started',
+      'assistant_progress_message',
+      'assistant_text_delta',
+      'tool_use_started',
+      'turn_completed',
+    ],
+  )
+  assert.equal(
+    events.find(event => event.type === 'assistant_progress_message')?.text,
+    'I will inspect the current file first.',
+  )
+  assert.equal(
+    events.find(event => event.type === 'assistant_text_delta')?.text,
+    'Checking the current file now.',
+  )
+})
+
 test('runInteractiveSessionPrompt falls back to generic thinking only when no concrete progress appears quickly', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-session-generic-'))
   const env = { ...process.env, HOME: homeDir }

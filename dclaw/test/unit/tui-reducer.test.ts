@@ -121,7 +121,31 @@ test('reduceUiEvent finalizes an assistant draft on turn completion', () => {
   assert.equal(note.text, 'Final answer')
 })
 
-test('reduceUiEvent does not duplicate streamed assistant chunks on turn completion', () => {
+test('reduceUiEvent keeps streamed assistant chunks split so earlier chunks can move into static transcript output', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'turn_started',
+    prompt: 'continue',
+    promptKind: 'prompt',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: '1.',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: ' 把这份方案再细化成开发排期',
+  })
+
+  const streamChunks = state.transcript.filter(
+    item => item.kind === 'assistant_stream_chunk',
+  )
+  assert.equal(streamChunks.length, 2)
+  assert.equal(streamChunks[0]?.text, '1.')
+  assert.equal(streamChunks[1]?.text, ' 把这份方案再细化成开发排期')
+})
+
+test('reduceUiEvent collapses streamed assistant chunks into a single note on turn completion', () => {
   let state = createInitialUiState()
   state = reduceUiEvent(state, {
     type: 'turn_started',
@@ -141,15 +165,95 @@ test('reduceUiEvent does not duplicate streamed assistant chunks on turn complet
     outputText: 'First line\nSecond line',
   })
 
-  assert.deepEqual(
-    state.transcript
-      .filter(item => item.kind === 'assistant_stream_chunk')
-      .map(item => (item.kind === 'assistant_stream_chunk' ? item.text : '')),
-    ['First line\n', 'Second line'],
-  )
   assert.equal(
-    state.transcript.some(item => item.kind === 'assistant_note'),
+    state.transcript.some(item => item.kind === 'assistant_stream_chunk'),
     false,
+  )
+  const note = [...state.transcript]
+    .reverse()
+    .find(item => item.kind === 'assistant_note')
+  assert.ok(note)
+  assert.equal(note.text, 'First line\nSecond line')
+})
+
+test('reduceUiEvent seals pre-tool streamed assistant prose before tool activity starts', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'turn_started',
+    prompt: 'continue',
+    promptKind: 'prompt',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: 'Checking the workspace first.',
+  })
+  state = reduceUiEvent(state, {
+    type: 'tool_use_started',
+    toolUseId: 'tool_glob_1',
+    text: 'Searching files matching "*"',
+    title: 'Explored',
+    toolName: 'Glob',
+    input: { pattern: '*', path: '/tmp/project' },
+  })
+
+  const note = state.transcript.find(item => item.kind === 'assistant_note')
+  assert.ok(note)
+  assert.equal(note.text, 'Checking the workspace first.')
+  assert.equal(
+    state.transcript.some(item => item.kind === 'assistant_stream_chunk'),
+    false,
+  )
+})
+
+test('reduceUiEvent seals streamed assistant prose before interruption notices', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'turn_started',
+    prompt: 'continue',
+    promptKind: 'prompt',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: 'Checking whether the session should stop early.',
+  })
+  state = reduceUiEvent(state, {
+    type: 'turn_interrupted',
+    prompt: 'continue',
+  })
+
+  assert.equal(
+    state.transcript.some(item => item.kind === 'assistant_stream_chunk'),
+    false,
+  )
+  assert.deepEqual(
+    state.transcript.map(item => item.kind),
+    ['user_prompt', 'assistant_note', 'system'],
+  )
+})
+
+test('reduceUiEvent seals streamed assistant prose before local commands are logged', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'turn_started',
+    prompt: 'continue',
+    promptKind: 'prompt',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: 'Inspecting the current task state.',
+  })
+  state = reduceUiEvent(state, {
+    type: 'command_logged',
+    prompt: '/help',
+  })
+
+  assert.equal(
+    state.transcript.some(item => item.kind === 'assistant_stream_chunk'),
+    false,
+  )
+  assert.deepEqual(
+    state.transcript.map(item => item.kind),
+    ['user_prompt', 'assistant_note', 'user_command'],
   )
 })
 

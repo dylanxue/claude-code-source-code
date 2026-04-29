@@ -74,6 +74,20 @@ function StreamingTextBlock({
   )
 }
 
+export function getTranscriptEntryMarginBottom(
+  entry: TranscriptItem,
+  nextEntry?: TranscriptItem,
+): number {
+  if (
+    entry.kind === 'assistant_stream_chunk' &&
+    nextEntry?.kind === 'assistant_stream_chunk'
+  ) {
+    return 0
+  }
+
+  return 1
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
@@ -317,7 +331,7 @@ function ExploredActivityGroup({ entries }: { entries: ActivityEntry[] }) {
   const otherEntries = entries.filter(entry => entry.toolName !== 'Read')
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column">
       <Text>
         <Text dimColor>• </Text>
         <Text bold>Explored</Text>
@@ -361,7 +375,7 @@ function QuestionsActivityGroup({ entries }: { entries: ActivityEntry[] }) {
   const rows = entries.flatMap(getQuestionAnswerRows)
   if (rows.length === 0) {
     return (
-      <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="column">
         <Text>
           <Text dimColor>• </Text>
           <Text bold>Questions</Text>
@@ -371,7 +385,7 @@ function QuestionsActivityGroup({ entries }: { entries: ActivityEntry[] }) {
   }
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column">
       <Text>
         <Text dimColor>• </Text>
         <Text bold>Questions</Text>
@@ -394,13 +408,17 @@ function QuestionsActivityGroup({ entries }: { entries: ActivityEntry[] }) {
 
 function RanActivityGroup({ entries }: { entries: ActivityEntry[] }) {
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {entries.map(entry => {
+    <Box flexDirection="column">
+      {entries.map((entry, index) => {
         const command = getBashCommand(entry) ?? entry.text.replace(/^Ran\s+/u, '')
         const outputLines = getBashOutputPreview(entry)
 
         return (
-          <Box key={entry.toolUseId} flexDirection="column" marginBottom={1}>
+          <Box
+            key={entry.toolUseId}
+            flexDirection="column"
+            marginBottom={index < entries.length - 1 ? 1 : 0}
+          >
             <Text>
               <Text color="green">• </Text>
               <Text bold>Ran </Text>
@@ -469,6 +487,9 @@ export function TranscriptPane({
           const previousItem = staticItems[index - 1]
           const previousEntry =
             previousItem?.kind === 'entry' ? previousItem.entry : undefined
+          const nextItem = staticItems[index + 1]
+          const nextEntry =
+            nextItem?.kind === 'entry' ? nextItem.entry : undefined
 
           return item.kind === 'welcome' ? (
             <Box
@@ -484,6 +505,7 @@ export function TranscriptPane({
             <TranscriptEntry
               key={item.id}
               entry={item.entry}
+              nextEntry={nextEntry}
               previousEntry={previousEntry}
             />
           )
@@ -494,6 +516,7 @@ export function TranscriptPane({
           <TranscriptEntry
             key={entry.id}
             entry={entry}
+            nextEntry={entries[index + 1]}
             previousEntry={entries[index - 1] ?? staticEntries.at(-1)}
           />
         ))}
@@ -513,15 +536,17 @@ export function TranscriptPane({
 
 function TranscriptEntry({
   entry,
+  nextEntry,
   previousEntry,
 }: {
   entry: TranscriptItem
+  nextEntry?: TranscriptItem
   previousEntry?: TranscriptItem
 }) {
   return (
     <Box
       flexDirection="column"
-      marginBottom={entry.kind === 'assistant_stream_chunk' ? 0 : 1}
+      marginBottom={getTranscriptEntryMarginBottom(entry, nextEntry)}
     >
       {entry.kind === 'user_prompt' ? (
         <Box backgroundColor="#f2f2f2" paddingX={1} paddingY={1}>

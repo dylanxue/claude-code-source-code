@@ -199,9 +199,62 @@ function getActivityEntriesForToolResult(
   ]
 }
 
+function sealTrailingAssistantStreamChunks(
+  state: UiState,
+  replacementText?: string,
+): UiState {
+  let startIndex = state.transcript.length
+  while (
+    startIndex > 0 &&
+    state.transcript[startIndex - 1]?.kind === 'assistant_stream_chunk'
+  ) {
+    startIndex -= 1
+  }
+
+  if (startIndex === state.transcript.length) {
+    return state
+  }
+
+  const trailingChunks = state.transcript.slice(startIndex)
+  const fallbackText = trailingChunks
+    .map(item =>
+      item.kind === 'assistant_stream_chunk' ? item.text : '',
+    )
+    .join('')
+    .trimEnd()
+  const nextText = replacementText?.trimEnd() ?? fallbackText
+  const firstChunk = trailingChunks[0]
+  const nextTranscript = state.transcript.slice(0, startIndex)
+
+  if (nextText.length > 0 && firstChunk) {
+    nextTranscript.push({
+      id: firstChunk.id,
+      kind: 'assistant_note',
+      text: nextText,
+    })
+  }
+
+  return {
+    ...state,
+    transcript: nextTranscript,
+    activeTurn: {
+      ...state.activeTurn,
+      streamedAssistantText: undefined,
+    },
+  }
+}
+
 function finalizeAssistantDraft(state: UiState, outputText: string): UiState {
   const normalizedOutput = outputText.trimEnd()
   if (!state.activeTurn.assistantDraftId) {
+    const stateAfterSealedStreamChunks = sealTrailingAssistantStreamChunks(
+      state,
+      normalizedOutput.length > 0 ? normalizedOutput : undefined,
+    )
+    if (stateAfterSealedStreamChunks !== state) {
+      return stateAfterSealedStreamChunks
+    }
+
     if (normalizedOutput.length === 0) {
       return state
     }
@@ -317,16 +370,19 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
         return state
       }
 
-      return appendTranscriptItem(state, {
+      return appendTranscriptItem(sealTrailingAssistantStreamChunks(state), {
         kind: 'user_command',
         text: event.prompt,
       })
 
     case 'turn_started': {
-      const nextState = appendTranscriptItem(state, {
-        kind: event.promptKind === 'slash' ? 'user_command' : 'user_prompt',
-        text: event.prompt,
-      })
+      const nextState = appendTranscriptItem(
+        sealTrailingAssistantStreamChunks(state),
+        {
+          kind: event.promptKind === 'slash' ? 'user_command' : 'user_prompt',
+          text: event.prompt,
+        },
+      )
 
       return {
         ...nextState,
@@ -404,14 +460,16 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
         return state
       }
 
-      return appendTranscriptItem(state, {
+      return appendTranscriptItem(sealTrailingAssistantStreamChunks(state), {
         kind: 'assistant_note',
         text: event.text,
       })
     }
 
     case 'tool_use_started': {
-      const stateBeforeToolUse = sealAssistantDraftInPlace(state)
+      const stateBeforeToolUse = sealTrailingAssistantStreamChunks(
+        sealAssistantDraftInPlace(state),
+      )
       const title = event.title ?? 'Activity'
       const recentActivityGroup = getRecentActivityGroupForTitle(
         stateBeforeToolUse.transcript,
@@ -487,11 +545,12 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
     }
 
     case 'tool_result_received': {
+      const stateBeforeToolResult = sealTrailingAssistantStreamChunks(state)
       const activityGroupId =
-        state.activeTurn.activityToolGroupIds?.[event.toolUseId]
+        stateBeforeToolResult.activeTurn.activityToolGroupIds?.[event.toolUseId]
 
       if (!activityGroupId) {
-        const nextState = appendTranscriptItem(state, {
+        const nextState = appendTranscriptItem(stateBeforeToolResult, {
           kind: 'activity_group',
           title: 'Activity',
           entries: [
@@ -510,7 +569,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
       }
 
       const updatedTranscript = updateTranscriptItem(
-        state.transcript,
+        stateBeforeToolResult.transcript,
         activityGroupId,
         item => {
           if (item.kind !== 'activity_group') {
@@ -530,7 +589,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
       )
 
       return {
-        ...state,
+        ...stateBeforeToolResult,
         transcript: updatedTranscript,
       }
     }
@@ -540,20 +599,22 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
         return state
       }
 
-      return appendTranscriptItem(state, {
+      return appendTranscriptItem(sealTrailingAssistantStreamChunks(state), {
         kind: 'system',
         text: event.text,
       })
 
     case 'structured_card_added':
-      return appendTranscriptItem(state, {
+      return appendTranscriptItem(sealTrailingAssistantStreamChunks(state), {
         kind: 'structured_card',
         title: event.title,
         entries: getCardEntriesForStructuredOutput(event.entries),
       })
 
     case 'task_board_updated': {
-      const stateBeforeSnapshot = sealAssistantDraftInPlace(state)
+      const stateBeforeSnapshot = sealTrailingAssistantStreamChunks(
+        sealAssistantDraftInPlace(state),
+      )
       const lastSnapshot = getLastTaskSnapshotForBoard(
         stateBeforeSnapshot.transcript,
         event.snapshot.boardId,
@@ -580,7 +641,9 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
     }
 
     case 'plan_mode_updated': {
-      const stateBeforeSnapshot = sealAssistantDraftInPlace(state)
+      const stateBeforeSnapshot = sealTrailingAssistantStreamChunks(
+        sealAssistantDraftInPlace(state),
+      )
       const lastSnapshot = getLastPlanSnapshotForSession(
         stateBeforeSnapshot.transcript,
         event.snapshot.sessionId,
@@ -610,7 +673,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
     case 'turn_interrupted':
       return appendTranscriptItem(
         {
-          ...state,
+          ...sealTrailingAssistantStreamChunks(state),
           activeTurn: {},
         },
         {
@@ -632,7 +695,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
         return state
       }
 
-      return appendTranscriptItem(state, {
+      return appendTranscriptItem(sealTrailingAssistantStreamChunks(state), {
         kind: 'time_separator',
         text: event.text,
       })

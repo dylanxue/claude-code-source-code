@@ -878,6 +878,10 @@ export async function executeSingleTurn(
                 },
                 {
                   onTextDelta: text => {
+                    throwIfAborted(request, {
+                      addedMessages,
+                      usedPostCompactAttachments,
+                    })
                     streamedTextChars += text.length
                     const asciiChars = countAsciiChars(text)
                     streamedAsciiChars += asciiChars
@@ -890,9 +894,17 @@ export async function executeSingleTurn(
                       iteration,
                     )
                     request.streamHandlers?.onTextDelta?.(text)
+                    throwIfAborted(request, {
+                      addedMessages,
+                      usedPostCompactAttachments,
+                    })
                     throwIfStreamOutputGuardExceeded()
                   },
                   onReasoningDelta: delta => {
+                    throwIfAborted(request, {
+                      addedMessages,
+                      usedPostCompactAttachments,
+                    })
                     streamedReasoningChars += delta.text.length
                     const asciiChars = countAsciiChars(delta.text)
                     streamedAsciiChars += asciiChars
@@ -911,6 +923,10 @@ export async function executeSingleTurn(
                       iteration,
                       kind: delta.kind,
                       text: delta.text,
+                    })
+                    throwIfAborted(request, {
+                      addedMessages,
+                      usedPostCompactAttachments,
                     })
                     throwIfStreamOutputGuardExceeded()
                   },
