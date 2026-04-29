@@ -573,6 +573,29 @@ test('Read returns isPartial for ranged reads', async () => {
   }
 })
 
+test('Read treats offset 1 with a limit reaching EOF as a full read', async () => {
+  const dir = await createTempDir('dclaw-read-full-range-')
+  const filePath = join(dir, 'sample.txt')
+  const context = createToolContext()
+
+  try {
+    await writeFile(filePath, 'a\nb\nc\n', 'utf8')
+    const result = await readFileTool.call(
+      { file_path: filePath, offset: 1, limit: 1000 },
+      context,
+    )
+
+    assert.equal(result.ok, true)
+    expectTextOutput(result.output)
+    assert.equal(result.output.isPartial, false)
+    assert.equal(result.output.didReadToEnd, true)
+    assert.equal(result.output.file.content, 'a\nb\nc')
+    assert.equal(context.readState.get(filePath)?.isPartialView, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('Read returns warning for empty files', async () => {
   const dir = await createTempDir('dclaw-read-empty-')
   const filePath = join(dir, 'empty.txt')

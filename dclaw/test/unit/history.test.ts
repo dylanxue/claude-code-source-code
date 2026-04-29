@@ -7,21 +7,22 @@ import { runHistory } from '../../src/cli/history.js'
 import { compactSession } from '../../src/compact/compactSession.js'
 import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { listSessionHistory } from '../../src/session/history.js'
-import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import {
-  ensurePlanBoardPlanFile,
-  getOrCreatePlanBoardForSession,
-  updatePlanBoard,
-} from '../../src/tasks/store.js'
+  appendSessionMessages,
+  createSession,
+  ensureSessionPlanFile,
+  updateSessionPlanMode,
+} from '../../src/session/store.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 
 test('listSessionHistory sorts sessions by updatedAt descending', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-'))
   const env = { ...process.env, HOME: homeDir }
+  const cwd = '/tmp/history'
 
   try {
     const first = await createSession({
-      cwd: '/tmp/one',
+      cwd,
       mode: 'interactive',
       provider: 'stub',
       model: 'stub-model',
@@ -31,7 +32,7 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
     await appendSessionMessages(first.sessionId, [createTextMessage('user', 'first')], env)
 
     const second = await createSession({
-      cwd: '/tmp/two',
+      cwd,
       mode: 'exec',
       provider: 'stub',
       model: 'stub-model',
@@ -39,7 +40,7 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
       env,
     })
     await createSession({
-      cwd: '/tmp/empty',
+      cwd,
       mode: 'interactive',
       provider: 'stub',
       model: 'stub-model',
@@ -84,7 +85,7 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
       env,
     )
 
-    const sessions = await listSessionHistory(env)
+    const sessions = await listSessionHistory(cwd, env)
 
     assert.equal(sessions.length, 2)
     assert.equal(
@@ -111,10 +112,11 @@ test('listSessionHistory sorts sessions by updatedAt descending', async () => {
 test('listSessionHistory derives conversation titles from recent meaningful user messages', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-title-'))
   const env = { ...process.env, HOME: homeDir }
+  const cwd = '/tmp/title'
 
   try {
     const session = await createSession({
-      cwd: '/tmp/title',
+      cwd,
       mode: 'interactive',
       provider: 'stub',
       model: 'stub-model',
@@ -135,7 +137,7 @@ test('listSessionHistory derives conversation titles from recent meaningful user
       env,
     )
 
-    const sessions = await listSessionHistory(env)
+    const sessions = await listSessionHistory(cwd, env)
 
     assert.equal(sessions[0]?.conversationTitle, '继续开发13.5阶段4')
     assert.equal(sessions[0]?.lastUserText, '继续')
@@ -143,6 +145,55 @@ test('listSessionHistory derives conversation titles from recent meaningful user
     await rm(homeDir, { recursive: true, force: true })
   }
 })
+
+test('listSessionHistory is scoped to the requested workspace', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-workspace-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const one = await createSession({
+      cwd: '/tmp/workspace-one',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-workspace-one',
+      env,
+    })
+    const two = await createSession({
+      cwd: '/tmp/workspace-two',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'session-workspace-two',
+      env,
+    })
+    await appendSessionMessages(
+      one.sessionId,
+      [createTextMessage('user', 'one')],
+      { ...env, DCLAW_WORKSPACE_ROOT: '/tmp/workspace-one' },
+    )
+    await appendSessionMessages(
+      two.sessionId,
+      [createTextMessage('user', 'two')],
+      { ...env, DCLAW_WORKSPACE_ROOT: '/tmp/workspace-two' },
+    )
+
+    const oneHistory = await listSessionHistory('/tmp/workspace-one', env)
+    const twoHistory = await listSessionHistory('/tmp/workspace-two', env)
+
+    assert.deepEqual(
+      oneHistory.map(session => session.meta.sessionId),
+      ['session-workspace-one'],
+    )
+    assert.deepEqual(
+      twoHistory.map(session => session.meta.sessionId),
+      ['session-workspace-two'],
+    )
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
 
 test('runHistory prints recent sessions', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-'))
@@ -285,7 +336,7 @@ test('runHistory can write to a provided output writer', async () => {
   assert.match(text, /last user: Inspect the file/)
 })
 
-test('runHistory prints planning summary when a plan board is attached', async () => {
+test('runHistory prints planning summary from session plan mode', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-history-plan-'))
   const env = { ...process.env, HOME: homeDir }
   const originalEnv = process.env
@@ -302,26 +353,14 @@ test('runHistory prints planning summary when a plan board is attached', async (
       sessionId: 'session-history-plan',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(
-        session.sessionId,
-        '/tmp/project',
-        env,
-      ),
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        title: 'Auth flow migration',
-        purpose: 'Make the auth work batch visible in history.',
-        background: 'The user asked to continue planning after a context break.',
-        plan: 'Review the auth flow before implementation.',
-        scope: 'Auth flow planning only.',
-        verification: 'History output includes the plan board brief.',
-        mode: 'active',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
+        resumePermissionMode: 'default',
       }),
       env,
     )
@@ -354,11 +393,12 @@ test('runHistory prints planning summary when a plan board is attached', async (
 
   const text = output.join('')
   assert.match(text, /session-history-plan/)
-  assert.match(text, /board title: Auth flow migration/)
-  assert.match(text, /board purpose: Make the auth work batch visible in history\./)
-  assert.match(text, /board plan: Review the auth flow before implementation\./)
-  assert.match(text, /plan mode state: active/)
+  assert.match(text, /plan mode: active/)
   assert.match(text, /plan file:/)
+  assert.match(text, /resume permissions: default/)
+  assert.doesNotMatch(text, /board title:/)
+  assert.doesNotMatch(text, /board purpose:/)
+  assert.doesNotMatch(text, /board plan:/)
   assert.doesNotMatch(text, /current task:/)
   assert.doesNotMatch(text, /current step:/)
 })

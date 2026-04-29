@@ -3,6 +3,12 @@ import { resolve } from 'node:path'
 import { loadResolvedLlmConfig } from '../llm/config.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import { getMemoryDir, getMemoryEntrypointPath } from '../memory/paths.js'
+import {
+  getProjectExecutionTaskBoardsDir,
+  getProjectPlanBoardsDir,
+  getProjectQueryTracesDir,
+  getProjectSessionsDir,
+} from '../session/paths.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import {
   appendModelLimitLines,
@@ -51,6 +57,13 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
       command.options.systemPrompt ? 'provided' : 'none',
     ),
     statusLine('memory dir', getMemoryDir(cwd, configured.env)),
+    statusLine('session dir', getProjectSessionsDir(cwd, configured.env)),
+    statusLine('query trace dir', getProjectQueryTracesDir(cwd, configured.env)),
+    statusLine('plan board dir', getProjectPlanBoardsDir(cwd, configured.env)),
+    statusLine(
+      'execution task board dir',
+      getProjectExecutionTaskBoardsDir(cwd, configured.env),
+    ),
     statusLine(
       'memory entrypoint',
       getMemoryEntrypointPath(cwd, configured.env),

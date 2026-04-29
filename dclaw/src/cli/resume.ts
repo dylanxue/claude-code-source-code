@@ -6,19 +6,16 @@ import { formatCompactBoundaryLabel } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { loadSessionForResume } from '../session/resume.js'
 import type { SessionSubagentSummary } from '../agent/observability.js'
-import type { SessionPersistedToolResultRecord } from '../session/store.js'
+import {
+  loadSessionMeta,
+  type PlanModeState,
+  type SessionPersistedToolResultRecord,
+} from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
-import { getPlanBoardObservationLines } from '../tasks/observability.js'
-import { recoverPlanBoardPlanFile } from '../tasks/planSnapshots.js'
-import { loadPlanBoardForSession } from '../tasks/store.js'
+import { recoverSessionPlanFile } from '../tasks/planSnapshots.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
-import { runInteractiveReplLoop } from './repl.js'
-import {
-  maybeHandleReplCommand,
-  type ReplCommandContext,
-  type ReplSessionState,
-} from './replCommands.js'
+import type { InteractiveSessionState } from './slashCommands.js'
 import { prepareCliRuntime } from './runtime.js'
 import { getCliErrorOutput } from './errorFormatting.js'
 import type { ResumeCommand } from './types.js'
@@ -49,6 +46,17 @@ function formatSubagentSummaryLines(
     ...(subagents.lastTracePath
       ? [`last subagent trace: ${subagents.lastTracePath}`]
       : []),
+  ]
+}
+
+function formatPlanModeLines(planMode: PlanModeState | undefined): string[] {
+  if (!planMode) {
+    return []
+  }
+
+  return [
+    `plan mode: ${planMode.status}`,
+    ...(planMode.planFilePath ? [`plan file: ${planMode.planFilePath}`] : []),
   ]
 }
 
@@ -98,7 +106,7 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     return
   }
 
-  let {
+  const {
     runtime,
     dclawMdEntries,
     toolRegistry,
@@ -107,13 +115,12 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     drainBackgroundWork,
     permissionMode,
     permissionModeSource,
-    listSkillStatuses,
-    setSkillEnabled,
+    env,
   } = await prepareCliRuntime(command.options, 'interactive', resumed.messages)
   const persistedToolResultInfo =
     getPersistedToolResultInfoFromMeta(resumed.meta.persistedToolResults) ??
     getPersistedToolResultInfo(resumed.messages)
-  const replSession: ReplSessionState = {
+  const interactiveSession: InteractiveSessionState = {
     sessionId: resumed.meta.sessionId,
     mode: 'resume',
     runtimeName: runtime.runtimeName,
@@ -124,69 +131,16 @@ export async function runResume(command: ResumeCommand): Promise<void> {
     permissionMode,
     permissionModeSource,
   }
-  const replOptions = { ...command.options }
-  const replContext: ReplCommandContext = {
-    engine,
-    options: replOptions,
-    session: replSession,
-    rotateQueryTrace,
-    switchRuntime: async (runtimeName: string) => {
-      await drainBackgroundWork()
-      const nextOptions = {
-        ...replOptions,
-        runtime: runtimeName,
-        permissionMode: replSession.permissionMode as typeof replOptions.permissionMode,
-      }
-      const prepared = await prepareCliRuntime(
-        nextOptions,
-        'interactive',
-        replContext.engine.getMessages(),
-      )
-      const nextEngine = prepared.engine
-      nextEngine.setSessionId(replSession.sessionId)
-      nextEngine.setPlanFilePath(replContext.engine.getPlanFilePath())
-      nextEngine.setPermissionMode(replSession.permissionMode as typeof permissionMode)
-      const nextQueryTracePath =
-        await prepared.rotateQueryTrace(replSession.sessionId)
-
-      runtime = prepared.runtime
-      dclawMdEntries = prepared.dclawMdEntries
-      toolRegistry = prepared.toolRegistry
-      engine = nextEngine
-      rotateQueryTrace = prepared.rotateQueryTrace
-      drainBackgroundWork = prepared.drainBackgroundWork
-      listSkillStatuses = prepared.listSkillStatuses
-      setSkillEnabled = prepared.setSkillEnabled
-      permissionMode = replSession.permissionMode as typeof permissionMode
-      permissionModeSource = replSession.permissionModeSource as typeof permissionModeSource
-      replOptions.runtime = runtimeName
-      replContext.engine = nextEngine
-      replContext.rotateQueryTrace = prepared.rotateQueryTrace
-      replContext.listSkillStatuses = prepared.listSkillStatuses
-      replContext.setSkillEnabled = prepared.setSkillEnabled
-      replSession.runtimeName = runtime.runtimeName
-      replSession.provider = runtime.provider
-      replSession.providerSource = runtime.providerSource
-      replSession.model = runtime.model
-      replSession.modelSource = runtime.modelSource
-
-      return {
-        runtime,
-        queryTracePath: nextQueryTracePath,
-      }
-    },
-  }
-  engine.setSessionId(replSession.sessionId)
-  const queryTracePath = await rotateQueryTrace(replSession.sessionId)
-  const loadedPlanBoard = await loadPlanBoardForSession(replSession.sessionId)
-  const planBoard = loadedPlanBoard
-    ? await recoverPlanBoardPlanFile(loadedPlanBoard, resumed.messages)
-    : null
-  if (planBoard?.mode === 'active') {
+  engine.setSessionId(interactiveSession.sessionId)
+  const queryTracePath = await rotateQueryTrace(interactiveSession.sessionId)
+  await recoverSessionPlanFile(interactiveSession.sessionId, resumed.messages, env)
+  const resumedMeta = await loadSessionMeta(interactiveSession.sessionId, env)
+  const planMode = resumedMeta?.planMode
+  if (planMode?.status === 'active') {
     engine.setPermissionMode('plan')
-    engine.setPlanFilePath(planBoard.planFilePath)
-    replSession.permissionMode = 'plan'
-    replSession.permissionModeSource = 'plan_board'
+    engine.setPlanFilePath(planMode.planFilePath)
+    interactiveSession.permissionMode = 'plan'
+    interactiveSession.permissionModeSource = 'plan_mode'
   }
   const lines = [
     'dclaw resume mode is ready.',
@@ -207,10 +161,10 @@ export async function runResume(command: ResumeCommand): Promise<void> {
       : []),
     `image input: ${runtime.primary.modelCapabilities.supportsImageInput ? 'supported' : 'not supported'}`,
     `vision side query: ${runtime.imageFallback ? `${runtime.imageFallback.provider} / ${runtime.imageFallback.model ?? 'default'}` : 'not configured'}`,
-    `permission mode: ${replSession.permissionMode}`,
-    `permission mode source: ${replSession.permissionModeSource}`,
+    `permission mode: ${interactiveSession.permissionMode}`,
+    `permission mode source: ${interactiveSession.permissionModeSource}`,
     `stream: ${command.options.stream ? 'enabled' : 'disabled'}`,
-    ...(planBoard ? getPlanBoardObservationLines(planBoard) : []),
+    ...formatPlanModeLines(planMode),
     ...formatSubagentSummaryLines(resumed.subagents),
   ]
 
@@ -259,98 +213,26 @@ export async function runResume(command: ResumeCommand): Promise<void> {
 
   process.stdout.write(lines.join('\n') + '\n')
 
-  if (!command.prompt && !process.stdin.isTTY) {
-    process.stdout.write(
-      'Interactive REPL requires a TTY when no prompt is provided.\n',
-    )
+  if (!command.prompt) {
     return
   }
 
-  await runInteractiveReplLoop({
-    initialPrompt: command.prompt,
-    async onImmediatePrompt(prompt, control) {
-      try {
-        return await maybeHandleReplCommand(prompt, {
-          engine: replContext.engine,
-          options: replContext.options,
-          session: replContext.session,
-          rotateQueryTrace: replContext.rotateQueryTrace,
-          switchRuntime: replContext.switchRuntime,
-          listSkillStatuses: replContext.listSkillStatuses,
-          setSkillEnabled: replContext.setSkillEnabled,
-        }, {
-          writeOutput: control.writeOutput,
-        })
-      } finally {
-        control.flushOutput()
-      }
-    },
-    onPrompt: async (prompt, control) => {
-      if (
-        await maybeHandleReplCommand(prompt, {
-          engine: replContext.engine,
-          options: replContext.options,
-          session: replContext.session,
-          rotateQueryTrace: replContext.rotateQueryTrace,
-          switchRuntime: replContext.switchRuntime,
-          listSkillStatuses: replContext.listSkillStatuses,
-          setSkillEnabled: replContext.setSkillEnabled,
-        })
-      ) {
-        return
-      }
-
-      const result = await runInteractiveSessionPrompt({
-        engine: replContext.engine,
-        sessionId: replSession.sessionId,
-        prompt,
-        stream: replContext.options.stream,
-        signal: control.signal,
-        writeOutput: control.writeOutput,
-        flushOutput: control.flushOutput,
-      })
-      replSession.sessionId = result.sessionId
-      const runtimePermissionMode = replContext.engine.getPermissionMode()
-      if (runtimePermissionMode !== replSession.permissionMode) {
-        replSession.permissionMode = runtimePermissionMode
-        replSession.permissionModeSource = 'tool_runtime'
-      }
-    },
-    onPromptError(error) {
-      const output = getCliErrorOutput(command, error)
-      if (output.stream === 'stdout') {
-        process.stdout.write(output.text)
-        return
-      }
-
+  try {
+    await runInteractiveSessionPrompt({
+      engine,
+      sessionId: interactiveSession.sessionId,
+      prompt: command.prompt,
+      stream: command.options.stream,
+      env,
+    })
+  } catch (error) {
+    const output = getCliErrorOutput(command, error)
+    if (output.stream === 'stdout') {
+      process.stdout.write(output.text)
+    } else {
       process.stderr.write(output.text)
-    },
-    async onBusyPrompt(prompt, busy) {
-      try {
-        return await maybeHandleReplCommand(
-          prompt,
-          {
-            engine: replContext.engine,
-            options: replContext.options,
-            session: replContext.session,
-            rotateQueryTrace: replContext.rotateQueryTrace,
-            switchRuntime: replContext.switchRuntime,
-          },
-          {
-            allowDuringActivePrompt: true,
-            writeOutput: busy.writeOutput,
-          },
-        )
-      } finally {
-        busy.flushOutput()
-      }
-    },
-    onPromptQueued(_prompt, pendingCount, writeOutput) {
-      writeOutput(`Queued prompt. Pending prompts: ${pendingCount}\n`)
-    },
-    onPromptInterrupted(_prompt, writeOutput) {
-      writeOutput('Current response interrupted.\n')
-    },
-  })
-  await drainBackgroundWork()
+    }
+  } finally {
+    await drainBackgroundWork()
+  }
 }

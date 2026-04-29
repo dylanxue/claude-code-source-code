@@ -634,6 +634,7 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
     const didReadToEnd = startIndex >= lines.length
       ? true
       : startIndex + selectedLines.length >= lines.length
+    const isPartial = startLine > 1 || !didReadToEnd
     const output: ReadTextToolOutput = {
       type: 'text',
       file: {
@@ -644,7 +645,7 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
         endLine,
         totalLines: lines.length,
       },
-      isPartial: startLine > 1 || limit !== undefined,
+      isPartial,
       didReadToEnd,
       warning:
         lines.length === 0
@@ -657,9 +658,9 @@ export const readFileTool: Tool<ReadFileToolInput, ReadToolOutput> = buildTool({
     context.readState.set(absolutePath, {
       content: output.file.content,
       timestamp: Math.floor(fileStat.mtimeMs),
-      isPartialView: output.isPartial,
+      isPartialView: isPartial,
       offset: startLine > 1 ? startLine : undefined,
-      limit,
+      limit: isPartial ? limit : undefined,
     })
 
     return {

@@ -27,7 +27,7 @@ import {
   getSessionDir,
   getSessionAgentMessagesPath,
   getSessionAgentMetaPath,
-  getPlanBoardsDir,
+  getProjectPlanBoardsDir,
 } from '../../src/session/paths.js'
 import { listSessionHistory } from '../../src/session/history.js'
 import { createSession, appendSessionMessages, loadSessionMessages } from '../../src/session/store.js'
@@ -114,10 +114,7 @@ test('agent store persists records and parent session links', async () => {
     assert.equal(
       getSessionAgentMetaPath(session.sessionId, created.agentId, env),
       join(
-        homeDir,
-        '.dclaw',
-        'sessions',
-        session.sessionId,
+        getSessionDir(session.sessionId, env),
         'subagents',
         `agent-${created.agentId}.meta.json`,
       ),
@@ -211,10 +208,7 @@ test('agent session keeps child messages separate from the parent session transc
     assert.equal(
       getSessionAgentMessagesPath(session.sessionId, agent.agentId, env),
       join(
-        homeDir,
-        '.dclaw',
-        'sessions',
-        session.sessionId,
+        getSessionDir(session.sessionId, env),
         'subagents',
         `agent-${agent.agentId}.jsonl`,
       ),
@@ -447,7 +441,7 @@ test('agent tool supports spawn, send, wait, and transcript-safe completion summ
       ),
     )
 
-    const history = await listSessionHistory(env)
+    const history = await listSessionHistory(workspaceDir, env)
     const historyEntry = history.find(
       entry => entry.meta.sessionId === session.sessionId,
     )
@@ -752,7 +746,7 @@ test('subagent execution does not create top-level session or plan-board artifac
     )
 
     assert.deepEqual(
-      await readdir(getPlanBoardsDir(env)).catch(() => []),
+      await readdir(getProjectPlanBoardsDir(workspaceDir, env)).catch(() => []),
       [],
     )
     assert.deepEqual(

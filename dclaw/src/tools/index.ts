@@ -2,7 +2,6 @@ import { bashTool } from './builtin/bash.js'
 import { askUserQuestionTool } from './builtin/askUserQuestion.js'
 import { agentTool } from './builtin/agent.js'
 import { editTool } from './builtin/edit.js'
-import { enterPlanModeTool } from './builtin/enterPlanMode.js'
 import { exitPlanModeTool } from './builtin/exitPlanMode.js'
 import { globTool } from './builtin/glob.js'
 import { grepTool } from './builtin/grep.js'
@@ -32,7 +31,6 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(reloadSkillsTool)
   registry.register(agentTool)
   registry.register(askUserQuestionTool)
-  registry.register(enterPlanModeTool)
   registry.register(exitPlanModeTool)
   registry.register(taskCreateTool)
   registry.register(taskListTool)

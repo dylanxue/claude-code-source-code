@@ -160,23 +160,10 @@ test('parseArgs rejects combining doctor with exec', () => {
   )
 })
 
-test('parseArgs accepts the experimental TUI flag', () => {
-  const command = parseArgs(['--tui', 'hello'])
-
-  assert.equal(command.mode, 'interactive')
-  assert.equal(command.options.interactiveUi, 'tui')
-})
-
-test('parseArgs accepts the legacy REPL flag', () => {
-  const command = parseArgs(['--legacy-repl', 'hello'])
-
-  assert.equal(command.mode, 'interactive')
-  assert.equal(command.options.interactiveUi, 'legacy-repl')
-})
-
-test('parseArgs rejects conflicting interactive UI flags', () => {
+test('parseArgs rejects removed interactive UI flags', () => {
+  assert.throws(() => parseArgs(['--tui', 'hello']), /Unknown option: --tui/)
   assert.throws(
-    () => parseArgs(['--tui', '--legacy-repl', 'hello']),
-    /cannot be combined/,
+    () => parseArgs(['--legacy-repl', 'hello']),
+    /Unknown option: --legacy-repl/,
   )
 })

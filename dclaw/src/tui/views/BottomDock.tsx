@@ -24,6 +24,12 @@ type Props = {
   slashSuggestions: SlashSuggestion[]
 }
 
+export function formatPermissionStatusLabel(permissionLabel: string): string {
+  return permissionLabel === 'plan'
+    ? 'PLAN MODE (Shift+Tab to exit plan)'
+    : permissionLabel
+}
+
 export function BottomDock({
   activeSuggestionIndex,
   bottomSheet,
@@ -42,7 +48,7 @@ export function BottomDock({
   const displayCwd = formatPathForDisplay(cwd)
   const metaParts = [
     runtimeLabel,
-    permissionLabel,
+    formatPermissionStatusLabel(permissionLabel),
     displayCwd,
     ...(isBusy ? ['busy'] : []),
     ...(queuedPrompts.length > 0 ? [`queued:${queuedPrompts.length}`] : []),

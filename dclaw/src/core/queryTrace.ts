@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { getQueryTracesDir } from '../session/paths.js'
+import { getProjectQueryTracesDir } from '../session/paths.js'
 
 export type QueryTraceEvent = {
   timestamp: string
@@ -35,6 +35,7 @@ export function shouldEnableQueryTrace(
 export function createQueryTraceFilePath(
   env: NodeJS.ProcessEnv = process.env,
   sessionId?: string,
+  workspaceRoot: string = env.DCLAW_WORKSPACE_ROOT ?? process.cwd(),
 ): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const sessionLabel =
@@ -42,7 +43,7 @@ export function createQueryTraceFilePath(
       ? `${sessionId.trim()}-`
       : ''
   return join(
-    getQueryTracesDir(env),
+    getProjectQueryTracesDir(workspaceRoot, env),
     `${stamp}-${sessionLabel}${randomUUID()}.jsonl`,
   )
 }

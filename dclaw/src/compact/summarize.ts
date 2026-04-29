@@ -33,6 +33,7 @@ export async function summarizeCompactSession(
           transcriptLines: input.transcriptLines,
           instructionText: input.instructionText,
           contextStats: input.contextStats,
+          sessionMemory: input.sessionMemory,
         }),
       ),
     ],

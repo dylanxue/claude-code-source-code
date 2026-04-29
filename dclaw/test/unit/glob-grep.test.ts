@@ -68,6 +68,28 @@ test('Glob validation rejects non-directory paths', async () => {
   }
 })
 
+test('Glob validation rejects missing paths without throwing', async () => {
+  const dir = await createTempDir('dclaw-glob-missing-')
+  const missingPath = join(dir, 'missing-tests')
+
+  try {
+    const validation = await globTool.validate?.(
+      {
+        pattern: '**/*.mjs',
+        path: missingPath,
+      },
+      createToolContext(),
+    )
+
+    assert.deepEqual(validation, {
+      ok: false,
+      error: `Glob path does not exist: ${missingPath}`,
+    })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('Grep defaults to files_with_matches mode', async () => {
   const dir = await createTempDir('dclaw-grep-default-')
   const filePath = join(dir, 'sample.txt')
@@ -149,6 +171,28 @@ test('Grep supports content mode without line numbers', async () => {
     assert.equal(result.output.engine, 'ripgrep')
     assert.ok(result.output.durationMs >= 0)
     assert.equal(result.output.truncated, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Grep validation rejects missing paths without throwing', async () => {
+  const dir = await createTempDir('dclaw-grep-missing-')
+  const missingPath = join(dir, 'missing-tests')
+
+  try {
+    const validation = await grepTool.validate?.(
+      {
+        pattern: 'needle',
+        path: missingPath,
+      },
+      createToolContext(),
+    )
+
+    assert.deepEqual(validation, {
+      ok: false,
+      error: `Grep path does not exist: ${missingPath}`,
+    })
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

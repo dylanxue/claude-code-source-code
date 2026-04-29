@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { listReplCommands } from '../../src/cli/replCommands.js'
+import { listSlashCommands } from '../../src/cli/slashCommands.js'
 import {
   completeBottomSheetSelection,
   createBottomSheetForInput,
@@ -35,7 +35,7 @@ test('createBottomSheetForInput opens enum command sheets without arguments', ()
   const permissionsSheet = createBottomSheetForInput(
     '/permissions',
     optionsByCommand,
-    listReplCommands(),
+    listSlashCommands(),
   )
   assert.ok(permissionsSheet)
   assert.equal(permissionsSheet.command.name, '/permissions')
@@ -48,7 +48,7 @@ test('createBottomSheetForInput opens enum command sheets without arguments', ()
   const runtimeSheet = createBottomSheetForInput(
     '/runtime ',
     optionsByCommand,
-    listReplCommands(),
+    listSlashCommands(),
   )
   assert.ok(runtimeSheet)
   assert.equal(runtimeSheet.command.name, '/runtime')
@@ -61,7 +61,7 @@ test('createBottomSheetForInput skips enum commands once an argument is typed', 
   const sheet = createBottomSheetForInput(
     '/permissions default',
     optionsByCommand,
-    listReplCommands(),
+    listSlashCommands(),
   )
 
   assert.equal(sheet, undefined)
@@ -71,7 +71,7 @@ test('bottom sheet selection wraps and completes to a command prompt', () => {
   const sheet = createBottomSheetForInput(
     '/permissions',
     optionsByCommand,
-    listReplCommands(),
+    listSlashCommands(),
   )
   assert.ok(sheet)
 

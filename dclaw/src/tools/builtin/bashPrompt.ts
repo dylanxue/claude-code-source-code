@@ -10,6 +10,11 @@ Prefer specialized tools over Bash when they are a better fit:
 - Use Glob to find files by path patterns
 - Use Grep to search file contents with regex
 
+Plan mode:
+
+- When plan mode is active, do not use Bash to write the plan file
+- Use Edit or Write for allowed plan-file changes instead of cat, heredocs, tee, or shell redirection
+
 Usage notes:
 
 - Provide a concise description when the command is not obvious at a glance

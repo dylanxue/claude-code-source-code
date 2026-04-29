@@ -13,6 +13,8 @@ import {
 import type { LineRenderer } from '../renderers/lineRenderer.js'
 import type { UiEvent } from '../state/types.js'
 import { getActivityGroupTitle } from './activityPresenter.js'
+import { presentPlanModeSnapshot } from './planSnapshotPresenter.js'
+import { presentTaskBoardSnapshot } from './taskSnapshotPresenter.js'
 
 type PendingAssistantProgress = {
   lines: string[]
@@ -194,7 +196,9 @@ export function createTurnPresenter(
         type: 'tool_use_started',
         toolUseId: toolUse.id,
         text: formatProgressToolUseLine(toolUse),
-        title: getActivityGroupTitle(toolUse.name),
+        title: getActivityGroupTitle(toolUse.name, toolUse.input),
+        toolName: toolUse.name,
+        input: toolUse.input,
       })
     },
     onToolResult(toolResult) {
@@ -216,7 +220,24 @@ export function createTurnPresenter(
           activeToolUses.get(toolResult.toolUseId),
           toolResult.output,
         ),
+        output: toolResult.output,
       })
+
+      if (toolResult.taskBoard) {
+        emit({
+          type: 'task_board_updated',
+          snapshot: presentTaskBoardSnapshot(toolResult.taskBoard),
+        })
+      }
+      if (toolResult.planMode && toolResult.sessionId) {
+        emit({
+          type: 'plan_mode_updated',
+          snapshot: presentPlanModeSnapshot(
+            toolResult.sessionId,
+            toolResult.planMode,
+          ),
+        })
+      }
     },
     onLlmError() {},
     onCompactDryRun() {},

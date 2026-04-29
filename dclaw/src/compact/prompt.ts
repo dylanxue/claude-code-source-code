@@ -7,6 +7,10 @@ export type BuildCompactPromptInput = {
   transcriptLines: string[]
   instructionText?: string
   contextStats?: ContextStats
+  sessionMemory?: {
+    path: string
+    content: string
+  }
 }
 
 export function getCompactSystemPrompt(): string {
@@ -43,11 +47,21 @@ export function buildCompactUserPrompt(
           '',
         ]
       : []
+  const sessionMemorySection =
+    input.sessionMemory
+      ? [
+          '## Session Memory',
+          `path: ${input.sessionMemory.path}`,
+          input.sessionMemory.content.trim(),
+          '',
+        ]
+      : []
   return [
     ...summaryGoalLines,
     '',
     ...instructionSection,
     ...contextStatsSection,
+    ...sessionMemorySection,
     '## Transcript',
     ...(input.transcriptLines.length > 0 ? input.transcriptLines : ['<empty>']),
   ].join('\n')

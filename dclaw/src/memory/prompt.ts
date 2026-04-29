@@ -10,6 +10,7 @@ export const MAX_RECALLED_MEMORY_LINES = 200
 export const MAX_RECALLED_MEMORY_BYTES = 4096
 export const MAX_MEMORY_ENTRYPOINT_LINES = 200
 export const MAX_MEMORY_ENTRYPOINT_BYTES = 25_000
+export const MAX_SURFACED_MEMORY_SESSION_BYTES = 64_000
 
 export type PromptMemoryEntry = MemoryManifestEntry & {
   content: string
@@ -23,6 +24,9 @@ export type PromptMemoryContext = {
   entrypointWasTruncated: boolean
   manifestCount: number
   recalledEntries: PromptMemoryEntry[]
+  recalledBytes: number
+  skippedAlreadySurfacedCount: number
+  skippedBySessionByteLimitCount: number
 }
 
 function truncateToByteLimit(value: string, byteLimit: number): string {
@@ -96,6 +100,65 @@ async function loadPromptMemoryEntry(
   }
 }
 
+function getMemoryEntryByteSize(entry: PromptMemoryEntry): number {
+  return Buffer.byteLength(entry.content, 'utf8')
+}
+
+function filterAlreadySurfacedEntries(
+  entries: MemoryManifestEntry[],
+  excludedPaths: ReadonlySet<string> | undefined,
+): {
+  entries: MemoryManifestEntry[]
+  skippedCount: number
+} {
+  if (!excludedPaths || excludedPaths.size === 0) {
+    return { entries, skippedCount: 0 }
+  }
+
+  const filtered = entries.filter(
+    entry =>
+      !excludedPaths.has(entry.path) &&
+      !excludedPaths.has(entry.relativePath),
+  )
+
+  return {
+    entries: filtered,
+    skippedCount: entries.length - filtered.length,
+  }
+}
+
+function applySessionByteLimit(
+  entries: PromptMemoryEntry[],
+  remainingBytes: number | undefined,
+): {
+  entries: PromptMemoryEntry[]
+  bytes: number
+  skippedCount: number
+} {
+  const limit =
+    typeof remainingBytes === 'number' && Number.isFinite(remainingBytes)
+      ? Math.max(0, remainingBytes)
+      : MAX_SURFACED_MEMORY_SESSION_BYTES
+  const selected: PromptMemoryEntry[] = []
+  let usedBytes = 0
+
+  for (const entry of entries) {
+    const entryBytes = getMemoryEntryByteSize(entry)
+    if (usedBytes + entryBytes > limit) {
+      continue
+    }
+
+    selected.push(entry)
+    usedBytes += entryBytes
+  }
+
+  return {
+    entries: selected,
+    bytes: usedBytes,
+    skippedCount: entries.length - selected.length,
+  }
+}
+
 function truncateMemoryEntrypoint(
   content: string,
   filePath: string,
@@ -166,6 +229,10 @@ export async function loadPromptMemoryContext(
     client?: LlmClient
     model?: string
     queryTraceSink?: QueryTraceSink
+    excludedPaths?: ReadonlySet<string>
+    remainingSessionBytes?: number
+    recentTools?: string[]
+    signal?: AbortSignal
   },
 ): Promise<PromptMemoryContext> {
   const memoryDir = getMemoryDir(workspaceRoot, env)
@@ -174,7 +241,11 @@ export async function loadPromptMemoryContext(
   try {
     const manifest = await loadMemoryManifest(workspaceRoot, env)
     const entrypoint = await loadMemoryEntrypoint(entrypointPath)
-    if (manifest.length === 0 || query.trim().length === 0) {
+    const surfacedFilter = filterAlreadySurfacedEntries(
+      manifest,
+      options?.excludedPaths,
+    )
+    if (manifest.length === 0 || surfacedFilter.entries.length === 0 || query.trim().length === 0) {
       return {
         memoryDir,
         entrypointPath,
@@ -182,6 +253,9 @@ export async function loadPromptMemoryContext(
         entrypointWasTruncated: entrypoint.wasTruncated,
         manifestCount: manifest.length,
         recalledEntries: [],
+        recalledBytes: 0,
+        skippedAlreadySurfacedCount: surfacedFilter.skippedCount,
+        skippedBySessionByteLimitCount: 0,
       }
     }
 
@@ -191,15 +265,21 @@ export async function loadPromptMemoryContext(
             client: options.client,
             model: options.model,
             query,
-            entries: manifest,
+            entries: surfacedFilter.entries,
+            recentTools: options.recentTools,
+            signal: options.signal,
             queryTraceSink: options.queryTraceSink,
           })
         : []
-    const recalledEntries = (
+    const loadedEntries = (
       await Promise.all(
         recalled.map(entry => loadPromptMemoryEntry(entry, memoryDir)),
       )
     ).filter((entry): entry is PromptMemoryEntry => entry !== null)
+    const limitedEntries = applySessionByteLimit(
+      loadedEntries,
+      options?.remainingSessionBytes,
+    )
 
     return {
       memoryDir,
@@ -207,7 +287,10 @@ export async function loadPromptMemoryContext(
       entrypointContent: entrypoint.content,
       entrypointWasTruncated: entrypoint.wasTruncated,
       manifestCount: manifest.length,
-      recalledEntries,
+      recalledEntries: limitedEntries.entries,
+      recalledBytes: limitedEntries.bytes,
+      skippedAlreadySurfacedCount: surfacedFilter.skippedCount,
+      skippedBySessionByteLimitCount: limitedEntries.skippedCount,
     }
   } catch {
     return {
@@ -218,6 +301,9 @@ export async function loadPromptMemoryContext(
       entrypointWasTruncated: false,
       manifestCount: 0,
       recalledEntries: [],
+      recalledBytes: 0,
+      skippedAlreadySurfacedCount: 0,
+      skippedBySessionByteLimitCount: 0,
     }
   }
 }

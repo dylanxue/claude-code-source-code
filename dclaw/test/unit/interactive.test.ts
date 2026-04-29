@@ -12,7 +12,7 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, JSON.stringify(value, null, 2), 'utf8')
 }
 
-test('runInteractive reports that a TTY is required when started without a prompt', async () => {
+test('runInteractive reports that a TTY is required for the TUI', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-'))
   const env = { ...process.env, HOME: homeDir }
   const originalWrite = process.stdout.write.bind(process.stdout)
@@ -42,15 +42,10 @@ test('runInteractive reports that a TTY is required when started without a promp
   }
 
   const text = output.join('')
-  assert.match(text, /:: DCLAW \(v0\.1\.0\)/)
-  assert.match(text, /runtime:\s+stub\s+\/runtime to change/)
-  assert.match(
-    text,
-    /Interactive REPL requires a TTY when no prompt is provided\./,
-  )
+  assert.match(text, /Interactive TUI requires a TTY\./)
 })
 
-test('runInteractive keeps the startup header concise after runtime resolution', async () => {
+test('runInteractive checks TTY before resolving runtime context', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-canonical-'))
   const workspaceDir = await mkdtemp(join(tmpdir(), 'dclaw-interactive-workspace-'))
   const env = { ...process.env, HOME: homeDir }
@@ -103,9 +98,8 @@ test('runInteractive keeps the startup header concise after runtime resolution',
   }
 
   const text = output.join('')
-  assert.match(text, /runtime:\s+openrouter-claude\s+\/runtime to change/)
-  assert.match(text, /permission mode: default/)
-  assert.doesNotMatch(text, /\[meta\]/)
+  assert.match(text, /Interactive TUI requires a TTY\./)
+  assert.doesNotMatch(text, /openrouter-claude/)
 })
 
 test('getInteractiveRuntimeLabel prefers the resolved runtime name', () => {
@@ -114,7 +108,7 @@ test('getInteractiveRuntimeLabel prefers the resolved runtime name', () => {
       runtime: {
         runtimeName: 'gpt-5.4-mini',
       } as Parameters<typeof getInteractiveRuntimeLabel>[0]['runtime'],
-      replSession: {
+      interactiveSession: {
         sessionId: 'session-123',
         mode: 'interactive',
         runtimeName: 'legacy-runtime',
@@ -130,8 +124,8 @@ test('getInteractiveRuntimeLabel prefers the resolved runtime name', () => {
   )
 })
 
-test('runInteractive routes to the TUI runner when requested', async () => {
-  let selected: 'legacy' | 'tui' | undefined
+test('runInteractive routes to the TUI runner by default', async () => {
+  let selected: 'tui' | undefined
 
   await runInteractive(
     {
@@ -139,13 +133,9 @@ test('runInteractive routes to the TUI runner when requested', async () => {
       options: {
         cwd: '/tmp/project',
         stream: false,
-        interactiveUi: 'tui',
       },
     },
     {
-      async runLegacyRepl() {
-        selected = 'legacy'
-      },
       async runTui() {
         selected = 'tui'
       },
@@ -153,28 +143,4 @@ test('runInteractive routes to the TUI runner when requested', async () => {
   )
 
   assert.equal(selected, 'tui')
-})
-
-test('runInteractive keeps the legacy REPL as the default path during phase 0', async () => {
-  let selected: 'legacy' | 'tui' | undefined
-
-  await runInteractive(
-    {
-      mode: 'interactive',
-      options: {
-        cwd: '/tmp/project',
-        stream: false,
-      },
-    },
-    {
-      async runLegacyRepl() {
-        selected = 'legacy'
-      },
-      async runTui() {
-        selected = 'tui'
-      },
-    },
-  )
-
-  assert.equal(selected, 'legacy')
 })

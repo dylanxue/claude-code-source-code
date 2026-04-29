@@ -6,12 +6,12 @@ import test from 'node:test'
 import { runResume } from '../../src/cli/resume.js'
 import { compactSession } from '../../src/compact/compactSession.js'
 import { StubLlmClient } from '../../src/llm/providers/stub.js'
-import { appendSessionMessages, createSession } from '../../src/session/store.js'
 import {
-  ensurePlanBoardPlanFile,
-  getOrCreatePlanBoardForSession,
-  updatePlanBoard,
-} from '../../src/tasks/store.js'
+  appendSessionMessages,
+  createSession,
+  ensureSessionPlanFile,
+  updateSessionPlanMode,
+} from '../../src/session/store.js'
 import { createPlanSnapshotMessage } from '../../src/tasks/planSnapshots.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 
@@ -113,10 +113,7 @@ test('runResume prints restored transcript when no prompt is provided', async ()
     text,
     /Read \/tmp\/example\.txt \(saved to \/tmp\/dclaw\/tool-results\/read\.txt; preview\)/,
   )
-  assert.match(
-    text,
-    /Interactive REPL requires a TTY when no prompt is provided\./,
-  )
+  assert.doesNotMatch(text, /Interactive TUI requires a TTY/)
 })
 
 test('runResume shows compact boundary metadata for compacted sessions', async () => {
@@ -206,26 +203,13 @@ test('runResume prints planning summary for sessions with an attached plan board
       sessionId: 'resume-plan-session',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(
-        session.sessionId,
-        '/tmp/project',
-        env,
-      ),
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        title: 'Auth flow migration',
-        purpose: 'Make the auth work batch visible after resume.',
-        background: 'The session has an attached plan board.',
-        plan: 'Review the auth flow before implementation.',
-        scope: 'Auth flow planning only.',
-        verification: 'Resume output includes the plan board brief.',
-        mode: 'active',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
       }),
       env,
     )
@@ -251,11 +235,7 @@ test('runResume prints planning summary for sessions with an attached plan board
   }
 
   const text = output.join('')
-  assert.match(text, /plan board:/)
-  assert.match(text, /board title: Auth flow migration/)
-  assert.match(text, /board purpose: Make the auth work batch visible after resume\./)
-  assert.match(text, /board plan: Review the auth flow before implementation\./)
-  assert.match(text, /plan mode state: active/)
+  assert.match(text, /plan mode: active/)
   assert.match(text, /plan file:/)
   assert.doesNotMatch(text, /current task:/)
   assert.doesNotMatch(text, /current step:/)
@@ -285,36 +265,29 @@ test('runResume recovers a missing plan file for inactive sessions from transcri
       sessionId: 'resume-plan-recovery-session',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(
-        session.sessionId,
-        '/tmp/project',
-        env,
-      ),
-      env,
-    )
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
     const recoveredPlan = [
       '# Plan',
       '',
       '## Goal',
       '- Recover the missing planning document from transcript clues.',
     ].join('\n')
-    await writeFile(board.planFilePath!, recoveredPlan, 'utf8')
+    await writeFile(filePath, recoveredPlan, 'utf8')
     await appendSessionMessages(
       session.sessionId,
-      [createPlanSnapshotMessage(board.planFilePath!, recoveredPlan, 'test-seed')],
+      [createPlanSnapshotMessage(filePath, recoveredPlan, 'test-seed')],
       env,
     )
-    await updatePlanBoard(
-      board.boardId,
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        mode: 'inactive',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'inactive',
+        planFilePath: filePath,
       }),
       env,
     )
-    await unlink(board.planFilePath!)
+    await unlink(filePath)
 
     await runResume({
       mode: 'resume',
@@ -326,8 +299,8 @@ test('runResume recovers a missing plan file for inactive sessions from transcri
       },
     })
 
-    const restored = await readFile(board.planFilePath!, 'utf8')
-    assert.equal(restored, recoveredPlan)
+    const restored = await readFile(filePath, 'utf8')
+    assert.equal(restored.trimEnd(), recoveredPlan)
   } finally {
     process.env = originalEnv
     process.stdout.write = originalWrite as typeof process.stdout.write
@@ -335,7 +308,80 @@ test('runResume recovers a missing plan file for inactive sessions from transcri
   }
 
   const text = output.join('')
-  assert.match(text, /plan mode state: inactive/)
+  assert.match(text, /plan mode: inactive/)
   assert.match(text, /plan file:/)
   assert.match(text, /permission mode: default/)
+})
+
+test('runResume recovers active Plan Mode with a missing plan file', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-resume-active-plan-recovery-'))
+  const env = { ...process.env, HOME: homeDir }
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const originalEnv = process.env
+  const output: string[] = []
+
+  try {
+    process.env = env
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      sessionId: 'resume-active-plan-recovery-session',
+      env,
+    })
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    const recoveredPlan = [
+      '# Plan',
+      '',
+      '## Goal',
+      '- Resume active planning with the recovered plan file.',
+    ].join('\n')
+    await writeFile(filePath, recoveredPlan, 'utf8')
+    await appendSessionMessages(
+      session.sessionId,
+      [createPlanSnapshotMessage(filePath, recoveredPlan, 'test-seed')],
+      env,
+    )
+    await updateSessionPlanMode(
+      session.sessionId,
+      current => ({
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
+      }),
+      env,
+    )
+    await unlink(filePath)
+
+    await runResume({
+      mode: 'resume',
+      sessionId: session.sessionId,
+      options: {
+        cwd: '/tmp/project',
+        permissionMode: 'default',
+        stream: false,
+      },
+    })
+
+    const restored = await readFile(filePath, 'utf8')
+    assert.equal(restored.trimEnd(), recoveredPlan)
+  } finally {
+    process.env = originalEnv
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  const text = output.join('')
+  assert.match(text, /plan mode: active/)
+  assert.match(text, /permission mode: plan/)
+  assert.match(text, /permission mode source: plan_mode/)
+  assert.match(text, /plan file:/)
 })

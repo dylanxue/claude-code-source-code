@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { listReplCommands } from '../../src/cli/replCommands.js'
+import { listSlashCommands } from '../../src/cli/slashCommands.js'
 import { getActivityGroupTitle } from '../../src/tui/presenters/activityPresenter.js'
-import { presentReplCommandResult } from '../../src/tui/presenters/replCommandPresenter.js'
+import { presentSlashCommandResult } from '../../src/tui/presenters/slashCommandPresenter.js'
 
-test('presentReplCommandResult renders /status output as a structured card', () => {
-  const presentation = presentReplCommandResult(
+test('presentSlashCommandResult renders /status output as a structured card', () => {
+  const presentation = presentSlashCommandResult(
     '/status',
     [
       'status:',
@@ -38,8 +38,8 @@ test('presentReplCommandResult renders /status output as a structured card', () 
   ])
 })
 
-test('presentReplCommandResult renders /resume output as transcript prose', () => {
-  const presentation = presentReplCommandResult(
+test('presentSlashCommandResult renders /resume output as transcript prose', () => {
+  const presentation = presentSlashCommandResult(
     '/resume session-123',
     [
       'Resumed session: session-123',
@@ -64,9 +64,9 @@ test('presentReplCommandResult renders /resume output as transcript prose', () =
   assert.match(noteEvent.text, /assistant: restored assistant/)
 })
 
-test('presentReplCommandResult keeps long structured card rows on one line', () => {
+test('presentSlashCommandResult keeps long structured card rows on one line', () => {
   const longSessionId = '86509d3c-082f-4f34-a70a-0118b5e76194'
-  const presentation = presentReplCommandResult(
+  const presentation = presentSlashCommandResult(
     '/status',
     [
       'status:',
@@ -87,8 +87,8 @@ test('presentReplCommandResult keeps long structured card rows on one line', () 
   ])
 })
 
-test('status-style REPL commands are cataloged for structured card presentation', () => {
-  const commands = listReplCommands()
+test('status-style slash commands are cataloged for structured card presentation', () => {
+  const commands = listSlashCommands()
   const commandPresentation = new Map(
     commands.map(command => [
       command.name,
@@ -127,11 +127,14 @@ test('status-style REPL commands are cataloged for structured card presentation'
     kind: 'structured_card',
     title: 'Session Reset',
   })
+  assert.deepEqual(commandPresentation.get('/plan'), {
+    kind: 'structured_card',
+    title: 'Plan Mode',
+  })
   assert.equal(commandPresentation.has('/help'), false)
   assert.equal(commandPresentation.has('/history'), false)
   assert.equal(commandPresentation.has('/doctor'), false)
   assert.equal(commandPresentation.has('/interrupt'), false)
-  assert.equal(commandPresentation.has('/plan'), false)
   assert.equal(commandPresentation.has('/transcript'), false)
   assert.equal(commandPresentation.has('/config'), false)
   assert.equal(commandPresentation.has('/cls'), false)
@@ -146,8 +149,8 @@ test('status-style REPL commands are cataloged for structured card presentation'
   )
 })
 
-test('REPL command catalog includes TUI metadata for slash controls', () => {
-  const commands = listReplCommands()
+test('slash command catalog includes TUI metadata for slash controls', () => {
+  const commands = listSlashCommands()
   const commandMetadata = new Map(
     commands.map(command => [
       command.name,
@@ -179,11 +182,15 @@ test('REPL command catalog includes TUI metadata for slash controls', () => {
     argKind: 'none',
     argumentHint: undefined,
   })
+  assert.deepEqual(commandMetadata.get('/plan'), {
+    displayName: 'Plan',
+    argKind: 'enum',
+    argumentHint: '[enter|exit|show]',
+  })
   assert.equal(commandMetadata.has('/help'), false)
   assert.equal(commandMetadata.has('/history'), false)
   assert.equal(commandMetadata.has('/doctor'), false)
   assert.equal(commandMetadata.has('/interrupt'), false)
-  assert.equal(commandMetadata.has('/plan'), false)
   assert.equal(commandMetadata.has('/transcript'), false)
   assert.equal(commandMetadata.has('/config'), false)
   assert.equal(commandMetadata.has('/cls'), false)
@@ -208,6 +215,8 @@ test('REPL command catalog includes TUI metadata for slash controls', () => {
 test('getActivityGroupTitle maps core tool categories to transcript groups', () => {
   assert.equal(getActivityGroupTitle('Read'), 'Explored')
   assert.equal(getActivityGroupTitle('Bash'), 'Ran')
+  assert.equal(getActivityGroupTitle('Bash', { command: 'ls src' }), 'Explored')
+  assert.equal(getActivityGroupTitle('AskUserQuestion'), 'Questions')
   assert.equal(getActivityGroupTitle('StructuredPatch'), 'Edited')
   assert.equal(getActivityGroupTitle('Agent'), 'Delegated')
   assert.equal(getActivityGroupTitle('TaskBoardUpdate'), 'Planned')

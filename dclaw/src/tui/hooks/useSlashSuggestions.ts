@@ -1,6 +1,6 @@
-import { listReplCommands, type ReplCommandCatalogItem } from '../../cli/replCommands.js'
+import { listSlashCommands, type SlashCommandCatalogItem } from '../../cli/slashCommands.js'
 
-export type SlashSuggestion = ReplCommandCatalogItem & {
+export type SlashSuggestion = SlashCommandCatalogItem & {
   matchedAlias?: string
 }
 
@@ -31,7 +31,7 @@ function getSlashFilter(inputValue: string): string | undefined {
 }
 
 function matchesCommand(
-  command: ReplCommandCatalogItem,
+  command: SlashCommandCatalogItem,
   filter: string,
 ): SlashSuggestion | undefined {
   if (command.name.toLowerCase().startsWith(filter)) {
@@ -53,7 +53,7 @@ function matchesCommand(
 
 export function createSlashSuggestionState(
   inputValue: string,
-  commands: ReplCommandCatalogItem[] = listReplCommands(),
+  commands: SlashCommandCatalogItem[] = listSlashCommands(),
   activeIndex = 0,
 ): SlashSuggestionState {
   const filter = getSlashFilter(inputValue)
@@ -122,5 +122,5 @@ export function useSlashSuggestions(
   inputValue: string,
   activeIndex = 0,
 ): SlashSuggestionState {
-  return createSlashSuggestionState(inputValue, listReplCommands(), activeIndex)
+  return createSlashSuggestionState(inputValue, listSlashCommands(), activeIndex)
 }

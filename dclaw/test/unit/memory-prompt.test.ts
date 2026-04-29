@@ -11,6 +11,7 @@ import {
 } from '../../src/memory/prompt.js'
 import { StubLlmClient } from '../../src/llm/providers/stub.js'
 import { writeMemoryFile } from '../../src/memory/store.js'
+import { getMemoryFilePath } from '../../src/memory/paths.js'
 
 test('prompt memory recall caps injected memory count at five entries', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-memory-prompt-limit-'))
@@ -118,6 +119,99 @@ test('prompt memory recall truncates oversized memory bodies for prompt injectio
       byteEntry?.content ?? '',
       new RegExp(`${MAX_RECALLED_MEMORY_BYTES} byte limit`),
     )
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('prompt memory recall excludes already surfaced or read memories', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-memory-prompt-dedupe-'))
+  const env = { ...process.env, HOME: homeDir }
+  const workspaceRoot = join(homeDir, 'workspace')
+
+  try {
+    await writeMemoryFile({
+      workspaceRoot,
+      env,
+      relativePath: 'project/read-memory.md',
+      frontmatter: {
+        name: 'Read Migration Memory',
+        description: 'postgres migration staging read memory',
+        type: 'project',
+        updated_at: '2026-04-20T10:00:00.000Z',
+      },
+      body: 'This memory was already read.',
+    })
+    await writeMemoryFile({
+      workspaceRoot,
+      env,
+      relativePath: 'project/fresh-memory.md',
+      frontmatter: {
+        name: 'Fresh Migration Memory',
+        description: 'postgres migration staging fresh memory',
+        type: 'project',
+        updated_at: '2026-04-20T11:00:00.000Z',
+      },
+      body: 'This memory should be recalled.',
+    })
+
+    const memory = await loadPromptMemoryContext(
+      workspaceRoot,
+      'postgres migration staging memory',
+      env,
+      {
+        client: new StubLlmClient(),
+        model: 'stub-model',
+        excludedPaths: new Set([
+          getMemoryFilePath(workspaceRoot, 'project/read-memory.md', env),
+        ]),
+      },
+    )
+
+    assert.equal(memory.skippedAlreadySurfacedCount, 1)
+    assert.deepEqual(
+      memory.recalledEntries.map(entry => entry.relativePath),
+      ['project/fresh-memory.md'],
+    )
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('prompt memory recall applies session byte budget across entries', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-memory-prompt-budget-'))
+  const env = { ...process.env, HOME: homeDir }
+  const workspaceRoot = join(homeDir, 'workspace')
+
+  try {
+    for (const relativePath of ['project/one.md', 'project/two.md']) {
+      await writeMemoryFile({
+        workspaceRoot,
+        env,
+        relativePath,
+        frontmatter: {
+          name: relativePath,
+          description: 'postgres migration staging budget memory',
+          type: 'project',
+          updated_at: '2026-04-20T10:00:00.000Z',
+        },
+        body: 'budgeted memory body',
+      })
+    }
+
+    const memory = await loadPromptMemoryContext(
+      workspaceRoot,
+      'postgres migration staging budget memory',
+      env,
+      {
+        client: new StubLlmClient(),
+        model: 'stub-model',
+        remainingSessionBytes: 1,
+      },
+    )
+
+    assert.equal(memory.recalledEntries.length, 0)
+    assert.equal(memory.skippedBySessionByteLimitCount, 2)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

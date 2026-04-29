@@ -5,7 +5,7 @@ import type { MemoryManifestEntry } from './manifest.js'
 
 const MEMORY_SELECTOR_SYSTEM_PROMPT = [
   'You are selecting memories that will be useful to dclaw as it processes a user query.',
-  'You will be given the current user query and a list of available memory files with their relative paths, names, descriptions, and types.',
+  'You will be given the current user query, recent successful tool activity when available, and a list of available memory files with their relative paths, names, descriptions, and types.',
   'Return a JSON object with shape {"selected_memories":["relative/path.md"]}.',
   'Only include memory files that will clearly be useful for the current query.',
   'If you are unsure whether a memory will help, leave it out.',
@@ -21,6 +21,17 @@ function formatSelectionManifest(entries: MemoryManifestEntry[]): string {
         `- [${entry.type}] ${entry.relativePath} | ${entry.name} (${entry.updatedAt}): ${entry.description}`,
     )
     .join('\n')
+}
+
+function formatRecentTools(tools: string[] | undefined): string {
+  if (!tools || tools.length === 0) {
+    return 'Recent tools: none'
+  }
+
+  return [
+    'Recent tools:',
+    ...tools.map(tool => `- ${tool}`),
+  ].join('\n')
 }
 
 function extractJsonPayload(text: string): string | null {
@@ -85,6 +96,8 @@ export async function selectRelevantMemoryEntries(input: {
   model?: string
   query: string
   entries: MemoryManifestEntry[]
+  recentTools?: string[]
+  signal?: AbortSignal
   queryTraceSink?: QueryTraceSink
 }): Promise<MemoryManifestEntry[]> {
   if (input.entries.length === 0 || input.query.trim().length === 0) {
@@ -99,6 +112,7 @@ export async function selectRelevantMemoryEntries(input: {
     data: {
       model: input.model ?? 'default',
       manifestCount: input.entries.length,
+      recentToolCount: input.recentTools?.length ?? 0,
     },
   })
 
@@ -112,6 +126,8 @@ export async function selectRelevantMemoryEntries(input: {
           [
             `Query: ${input.query}`,
             '',
+            formatRecentTools(input.recentTools),
+            '',
             'Available memories:',
             formatSelectionManifest(input.entries),
             '',
@@ -119,6 +135,7 @@ export async function selectRelevantMemoryEntries(input: {
           ].join('\n'),
         ),
       ],
+      signal: input.signal,
     })
     const selectedRelativePaths = parseSelectedMemoryPaths(
       getTextContent(response.message),

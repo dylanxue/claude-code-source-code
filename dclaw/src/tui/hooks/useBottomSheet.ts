@@ -1,4 +1,4 @@
-import { listReplCommands, type ReplCommandCatalogItem } from '../../cli/replCommands.js'
+import { listSlashCommands, type SlashCommandCatalogItem } from '../../cli/slashCommands.js'
 
 export type BottomSheetOption = {
   value: string
@@ -7,7 +7,7 @@ export type BottomSheetOption = {
 }
 
 export type BottomSheetState = {
-  command: ReplCommandCatalogItem
+  command: SlashCommandCatalogItem
   title: string
   description: string
   dismissInputValue: string
@@ -17,11 +17,11 @@ export type BottomSheetState = {
 
 export type BottomSheetOptionsByCommand = Record<string, BottomSheetOption[]>
 
-function getBottomSheetTitle(command: ReplCommandCatalogItem): string {
+function getBottomSheetTitle(command: SlashCommandCatalogItem): string {
   return `Select ${command.displayName}`
 }
 
-function getBottomSheetDescription(command: ReplCommandCatalogItem): string {
+function getBottomSheetDescription(command: SlashCommandCatalogItem): string {
   if (command.name === '/runtime') {
     return 'Selecting a runtime takes effect immediately. Switching runtime during a conversation may reduce answer quality.'
   }
@@ -37,10 +37,10 @@ function parseCommandName(inputValue: string): string {
   return inputValue.trim().split(/\s+/u)[0]?.toLowerCase() ?? ''
 }
 
-export function findReplCommandForInput(
+export function findSlashCommandForInput(
   inputValue: string,
-  commands: ReplCommandCatalogItem[] = listReplCommands(),
-): ReplCommandCatalogItem | undefined {
+  commands: SlashCommandCatalogItem[] = listSlashCommands(),
+): SlashCommandCatalogItem | undefined {
   const commandName = parseCommandName(inputValue)
   if (!commandName) {
     return undefined
@@ -66,9 +66,9 @@ export function hasCommandArgument(inputValue: string): boolean {
 export function createBottomSheetForInput(
   inputValue: string,
   optionsByCommand: BottomSheetOptionsByCommand,
-  commands: ReplCommandCatalogItem[] = listReplCommands(),
+  commands: SlashCommandCatalogItem[] = listSlashCommands(),
 ): BottomSheetState | undefined {
-  const command = findReplCommandForInput(inputValue, commands)
+  const command = findSlashCommandForInput(inputValue, commands)
   if (!command || command.argKind !== 'enum' || hasCommandArgument(inputValue)) {
     return undefined
   }

@@ -5,7 +5,7 @@
 - 项目名称：`dclaw`
 - 当前阶段：`v0.3` 早期实施
 - 当前版本目标：`v0.3`
-- 总体状态：`implementing v0.3`
+- 总体状态：`implementing v0.3`；TUI 阶段 7 已切默认并移除旧 readline REPL 主循环
 
 ## 阶段进展
 
@@ -173,6 +173,8 @@
 - 重新评估 Claude Code 源码后，明确阶段 9 主线应对齐 `plan mode + plan file + Task*`
 - 已移除 `TodoWrite` tool 与 `/todo` 系列命令，避免继续保留偏离当前主路径的 V1 checklist 能力
 - 已接通 Claude Code V2 最小 `TaskCreate / TaskList / TaskGet / TaskUpdate`，并按当前 task board 真值持久化
+- TUI interactive 入口已切为默认 Ink 路径，`--tui / --legacy-repl` 已移除并由 CLI 参数解析拒绝
+- TUI 退出时会清理 Ink instance 并限时 drain 后台工作；queue / interrupt / permissions / resume compact / task snapshot 的阶段 7 回归护栏已补齐。首版 transcript viewport 已撤回，resize / scrollback / autofollow 暂不启用，避免破坏 Bottom Dock 与主布局
 
 ## 当前风险与注意事项
 

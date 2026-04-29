@@ -113,6 +113,63 @@ test('askUserQuestionsInteractively prints option previews inline', async () => 
   }
 })
 
+test('askUserQuestionsInteractively prints question previews once above options', async () => {
+  const restoreStdin = setTtyFlag(process.stdin, true)
+  const restoreStdout = setTtyFlag(process.stdout, true)
+  const prompts: string[] = []
+  const unregister = registerInteractiveQuestionHost({
+    async question(prompt: string) {
+      prompts.push(prompt)
+      return '2'
+    },
+  })
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+      )
+      return true
+    }) as typeof process.stdout.write
+
+    const result = await askUserQuestionsInteractively([
+      {
+        id: 'exit_plan_mode_decision',
+        header: 'Plan Ready',
+        question: 'Choose how to continue with this plan.',
+        preview: '# Plan\n\n- Implement the selected design',
+        options: [
+          {
+            label: 'Accept and implement',
+            description: 'Exit plan mode and start implementation.',
+          },
+          {
+            label: 'Keep planning',
+            description: 'Stay in plan mode.',
+          },
+        ],
+      },
+    ])
+
+    assert.deepEqual(result, { exit_plan_mode_decision: 'Keep planning' })
+    const text = output.join('')
+    assert.match(text, /\[Plan Ready\] Choose how to continue with this plan\./)
+    assert.match(text, /---\n# Plan\n\n- Implement the selected design\n---/)
+    assert.match(text, /1\. Accept and implement - Exit plan mode and start implementation\./)
+    assert.match(text, /2\. Keep planning - Stay in plan mode\./)
+    assert.equal((text.match(/# Plan/g) ?? []).length, 1)
+    assert.doesNotMatch(text, /3\. Other - Provide a custom answer in your own words\./)
+    assert.deepEqual(prompts, ['选择一个编号: '])
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+    unregister()
+    restoreStdin()
+    restoreStdout()
+  }
+})
+
 test('askUserQuestionsInteractively can return the preview question chat exit', async () => {
   const restoreStdin = setTtyFlag(process.stdin, true)
   const restoreStdout = setTtyFlag(process.stdout, true)

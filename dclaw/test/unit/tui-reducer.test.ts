@@ -1,6 +1,49 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createInitialUiState, reduceUiEvent } from '../../src/tui/state/index.js'
+import {
+  createInitialUiState,
+  reduceUiEvent,
+  type TaskListSnapshot,
+  type TranscriptItem,
+} from '../../src/tui/state/index.js'
+
+function createTaskSnapshot(
+  overrides: Partial<TaskListSnapshot> = {},
+): TaskListSnapshot {
+  return {
+    boardId: 'taskboard_1',
+    title: 'TUI rollout',
+    executionState: 'active',
+    updatedAt: '2026-04-29T00:00:00.000Z',
+    completedCount: 1,
+    totalCount: 3,
+    currentTaskId: '2',
+    tasks: [
+      {
+        id: '1',
+        subject: 'Define snapshot state',
+        status: 'completed',
+        blockedBy: [],
+        isCurrent: false,
+      },
+      {
+        id: '2',
+        subject: 'Render snapshot',
+        status: 'in_progress',
+        blockedBy: [],
+        isCurrent: true,
+      },
+      {
+        id: '3',
+        subject: 'Test snapshot',
+        status: 'pending',
+        blockedBy: ['2'],
+        isCurrent: false,
+      },
+    ],
+    ...overrides,
+  }
+}
 
 test('reduceUiEvent appends assistant deltas into a single draft item', () => {
   let state = createInitialUiState()
@@ -78,6 +121,38 @@ test('reduceUiEvent finalizes an assistant draft on turn completion', () => {
   assert.equal(note.text, 'Final answer')
 })
 
+test('reduceUiEvent does not duplicate streamed assistant chunks on turn completion', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'turn_started',
+    prompt: 'continue',
+    promptKind: 'prompt',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: 'First line\n',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_stream_chunk',
+    text: 'Second line',
+  })
+  state = reduceUiEvent(state, {
+    type: 'turn_completed',
+    outputText: 'First line\nSecond line',
+  })
+
+  assert.deepEqual(
+    state.transcript
+      .filter(item => item.kind === 'assistant_stream_chunk')
+      .map(item => (item.kind === 'assistant_stream_chunk' ? item.text : '')),
+    ['First line\n', 'Second line'],
+  )
+  assert.equal(
+    state.transcript.some(item => item.kind === 'assistant_note'),
+    false,
+  )
+})
+
 test('reduceUiEvent logs local slash commands without replacing the active turn', () => {
   let state = createInitialUiState()
   state = reduceUiEvent(state, {
@@ -153,6 +228,122 @@ test('reduceUiEvent appends structured cards and time separators', () => {
   const separator = state.transcript.find(item => item.kind === 'time_separator')
   assert.ok(separator)
   assert.equal(separator.text, 'Worked for 1.4s')
+})
+
+test('reduceUiEvent appends full task snapshots', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'turn_started',
+    prompt: 'implement the task list',
+    promptKind: 'prompt',
+  })
+  state = reduceUiEvent(state, {
+    type: 'assistant_text_delta',
+    text: 'Creating tasks',
+  })
+  state = reduceUiEvent(state, {
+    type: 'task_board_updated',
+    snapshot: createTaskSnapshot(),
+  })
+
+  assert.deepEqual(
+    state.transcript.map(item => item.kind),
+    ['user_prompt', 'assistant_note', 'task_list_snapshot'],
+  )
+  const snapshot = state.transcript.find(
+    item => item.kind === 'task_list_snapshot',
+  )
+  assert.ok(snapshot)
+  assert.equal(snapshot.collapsed, false)
+  assert.equal(snapshot.snapshot.completedCount, 1)
+  assert.equal(snapshot.snapshot.tasks[1]?.isCurrent, true)
+  assert.equal(state.activeTurn.assistantDraftId, undefined)
+})
+
+test('reduceUiEvent keeps task snapshots expanded and skips identical repeats', () => {
+  let state = createInitialUiState()
+  state = reduceUiEvent(state, {
+    type: 'task_board_updated',
+    snapshot: createTaskSnapshot(),
+  })
+  state = reduceUiEvent(state, {
+    type: 'task_board_updated',
+    snapshot: createTaskSnapshot(),
+  })
+
+  assert.equal(
+    state.transcript.filter(item => item.kind === 'task_list_snapshot').length,
+    1,
+  )
+
+  state = reduceUiEvent(state, {
+    type: 'task_board_updated',
+    snapshot: createTaskSnapshot({
+      updatedAt: '2026-04-29T00:01:00.000Z',
+      completedCount: 2,
+      currentTaskId: '3',
+      tasks: [
+        {
+          id: '1',
+          subject: 'Define snapshot state',
+          status: 'completed',
+          blockedBy: [],
+          isCurrent: false,
+        },
+        {
+          id: '2',
+          subject: 'Render snapshot',
+          status: 'completed',
+          blockedBy: [],
+          isCurrent: false,
+        },
+        {
+          id: '3',
+          subject: 'Test snapshot',
+          status: 'in_progress',
+          blockedBy: [],
+          isCurrent: true,
+        },
+      ],
+    }),
+  })
+
+  const snapshots = state.transcript.filter(
+    (
+      item,
+    ): item is Extract<TranscriptItem, { kind: 'task_list_snapshot' }> =>
+      item.kind === 'task_list_snapshot',
+  )
+  assert.equal(snapshots.length, 2)
+  assert.equal(snapshots[0]?.collapsed, false)
+  assert.equal(snapshots[1]?.collapsed, false)
+  assert.equal(snapshots[1]?.snapshot.currentTaskId, '3')
+})
+
+test('reduceUiEvent appends plan snapshots and skips identical repeats', () => {
+  let state = createInitialUiState()
+  const snapshot = {
+    sessionId: 'session_1',
+    status: 'active' as const,
+    updatedAt: '2026-04-29T00:00:00.000Z',
+    planFilePath: '/tmp/PLAN.md',
+  }
+
+  state = reduceUiEvent(state, {
+    type: 'plan_mode_updated',
+    snapshot,
+  })
+  state = reduceUiEvent(state, {
+    type: 'plan_mode_updated',
+    snapshot,
+  })
+
+  const snapshots = state.transcript.filter(
+    (item): item is Extract<TranscriptItem, { kind: 'plan_mode_snapshot' }> =>
+      item.kind === 'plan_mode_snapshot',
+  )
+  assert.equal(snapshots.length, 1)
+  assert.equal(snapshots[0]?.snapshot.status, 'active')
 })
 
 test('reduceUiEvent keeps tool results attached to their own activity groups', () => {

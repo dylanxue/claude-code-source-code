@@ -15,6 +15,7 @@ import {
   getModelVisibleMessages,
   getTextContent,
   getToolUseBlocks,
+  repairDanglingToolUseMessages,
   type ContentBlock,
   type Message,
 } from '../types/message.js'
@@ -33,11 +34,13 @@ import {
 } from './toolResultBudget.js'
 import { QueryLoopAbortError, QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
+import type { RelevantMemoryRecentTool } from './relevantMemoryPrefetch.js'
 import {
   isExecutionBoardActive,
   loadExecutionTaskBoardForSession,
 } from '../taskboard/store.js'
 import type { TaskBoard } from '../taskboard/types.js'
+import { loadSessionMeta, type PlanModeState } from '../session/store.js'
 
 const APPROX_ASCII_CHARS_PER_TOKEN = 4
 const STREAM_OUTPUT_GUARD_RATIO = 0.95
@@ -59,6 +62,10 @@ export type QueryLoopRequest = {
   toolResultBudgetOptions?: ToolResultBudgetOptions
   queryTraceSink?: QueryTraceSink
   abortSignal?: AbortSignal
+  onToolResultsComplete?: (state: {
+    iteration: number
+    tools: RelevantMemoryRecentTool[]
+  }) => void
   streamHandlers?: {
     onTextDelta?: (text: string) => void
     onReasoningDelta?: (delta: {
@@ -82,6 +89,9 @@ export type QueryLoopRequest = {
       iteration: number
       toolUseId: string
       output: unknown
+      sessionId?: string
+      taskBoard?: TaskBoard
+      planMode?: PlanModeState
     }) => void
     onLlmError?: (error: {
       iteration: number
@@ -126,6 +136,35 @@ export type QueryLoopResult = {
 
 export const DEFAULT_QUERY_MAX_ITERATIONS = 128
 
+function shouldEmitTaskBoardSnapshot(
+  toolName: string,
+  result: ToolExecutionResult<unknown>,
+): boolean {
+  if (toolName === 'TaskCreate') {
+    return result.ok
+  }
+
+  if (toolName !== 'TaskUpdate' || !result.ok) {
+    return false
+  }
+
+  if (typeof result.output !== 'object' || result.output === null) {
+    return false
+  }
+
+  return (result.output as { success?: unknown }).success === true
+}
+
+function shouldEmitPlanModeSnapshot(
+  toolName: string,
+  result: ToolExecutionResult<unknown>,
+): boolean {
+  return (
+    result.ok &&
+    toolName === 'ExitPlanMode'
+  )
+}
+
 function throwIfAborted(
   request: QueryLoopRequest,
   options: {
@@ -140,7 +179,12 @@ function throwIfAborted(
   recordTrace(request.queryTraceSink, 'turn.abort', {
     addedMessageCount: options.addedMessages?.length ?? 0,
   })
-  throw new QueryLoopAbortError(options)
+  throw new QueryLoopAbortError({
+    ...options,
+    addedMessages: options.addedMessages
+      ? repairDanglingToolUseMessages(options.addedMessages)
+      : undefined,
+  })
 }
 
 function countAsciiChars(text: string): number {
@@ -882,7 +926,7 @@ export async function executeSingleTurn(
       } catch (error) {
         if (request.abortSignal?.aborted) {
           throw new QueryLoopAbortError({
-            addedMessages,
+            addedMessages: repairDanglingToolUseMessages(addedMessages),
             usedPostCompactAttachments,
           })
         }
@@ -1296,10 +1340,27 @@ export async function executeSingleTurn(
             },
             iteration,
           )
+          const taskBoardSnapshot =
+            request.toolContext.sessionId &&
+            shouldEmitTaskBoardSnapshot(tool.name, result)
+              ? await loadExecutionTaskBoardForSession(
+                  request.toolContext.sessionId,
+                )
+              : null
+          const planModeSnapshot =
+            request.toolContext.sessionId &&
+            shouldEmitPlanModeSnapshot(tool.name, result)
+              ? (await loadSessionMeta(request.toolContext.sessionId))?.planMode
+              : null
           request.streamHandlers?.onToolResult?.({
             iteration,
             toolUseId: block.id,
             output: result,
+            ...(request.toolContext.sessionId
+              ? { sessionId: request.toolContext.sessionId }
+              : {}),
+            ...(taskBoardSnapshot ? { taskBoard: taskBoardSnapshot } : {}),
+            ...(planModeSnapshot ? { planMode: planModeSnapshot } : {}),
           })
         } catch (error) {
           const message =
@@ -1331,6 +1392,43 @@ export async function executeSingleTurn(
         toolResultMetadata,
         request.toolResultBudgetOptions,
       )
+      const recentTools = toolUseBlocks.map(block => {
+        const resultMessage = toolResultMessages.find(message => {
+          const resultBlock = message.content[0]
+          return (
+            resultBlock?.type === 'tool_result' &&
+            resultBlock.toolUseId === block.id
+          )
+        })
+        const rawOutput =
+          resultMessage?.content[0]?.type === 'tool_result'
+            ? resultMessage.content[0].rawOutput
+            : undefined
+        const output =
+          resultMessage?.content[0]?.type === 'tool_result'
+            ? resultMessage.content[0].output
+            : undefined
+        const rawObject =
+          typeof rawOutput === 'object' && rawOutput !== null
+            ? rawOutput as { ok?: unknown; summary?: unknown }
+            : undefined
+
+        return {
+          name: block.name,
+          ok: rawObject?.ok === true || !(
+            typeof output === 'object' &&
+            output !== null &&
+            'error' in output
+          ),
+          ...(typeof rawObject?.summary === 'string'
+            ? { summary: rawObject.summary }
+            : {}),
+        }
+      })
+      request.onToolResultsComplete?.({
+        iteration,
+        tools: recentTools,
+      })
       if (budgetedToolResults.replacements.length > 0) {
         recordTrace(
           request.queryTraceSink,

@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { sanitizeProjectKey } from '../projectKey.js'
 
 function trimOrUndefined(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
@@ -22,40 +23,78 @@ export function getDclawHomeDir(
   return resolve(resolveHomeDirectory(env), '.dclaw')
 }
 
-export function getSessionsDir(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return join(getDclawHomeDir(env), 'sessions')
+function resolveWorkspaceRoot(env: NodeJS.ProcessEnv): string {
+  return resolve(
+    trimOrUndefined(env.DCLAW_WORKSPACE_ROOT) ??
+      trimOrUndefined(env.PWD) ??
+      process.cwd(),
+  )
 }
 
-export function getPlanBoardsDir(
+export function getProjectSessionsDir(
+  workspaceRoot: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getDclawHomeDir(env), 'task-boards')
+  return join(
+    getProjectsDir(env),
+    sanitizeProjectKey(workspaceRoot),
+    'sessions',
+  )
 }
 
-export function getExecutionTaskBoardsDir(
+export function getProjectsDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getDclawHomeDir(env), 'execution-task-boards')
+  return join(getDclawHomeDir(env), 'projects')
 }
 
-export function getPlansDir(
+export function getProjectDir(
+  workspaceRoot: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getDclawHomeDir(env), 'plans')
+  return join(getProjectsDir(env), sanitizeProjectKey(workspaceRoot))
+}
+
+export function getProjectPlanBoardsDir(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getProjectDir(workspaceRoot, env), 'task-boards')
+}
+
+export function getProjectExecutionTaskBoardsDir(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getProjectDir(workspaceRoot, env), 'execution-task-boards')
+}
+
+export function getProjectQueryTracesDir(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getProjectDir(workspaceRoot, env), 'query-traces')
+}
+
+export function getProjectPlansDir(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getProjectDir(workspaceRoot, env), 'plans')
+}
+
+function getProjectSessionDir(
+  workspaceRoot: string,
+  sessionId: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  return join(getProjectSessionsDir(workspaceRoot, env), sessionId)
 }
 
 export function getDclawConfigPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return join(getDclawHomeDir(env), 'config.json')
-}
-
-export function getQueryTracesDir(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return join(getDclawHomeDir(env), 'query-traces')
 }
 
 export function getBackgroundTasksDir(
@@ -72,72 +111,128 @@ export function getToolResultsDir(
 
 export function getSessionDir(
   sessionId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionsDir(env), sessionId)
+  if (typeof workspaceRootOrEnv === 'string') {
+    return getProjectSessionDir(workspaceRootOrEnv, sessionId, maybeEnv)
+  }
+
+  const env = workspaceRootOrEnv
+  return getProjectSessionDir(resolveWorkspaceRoot(env), sessionId, env)
 }
 
 export function getSessionMetaPath(
   sessionId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionDir(sessionId, env), 'meta.json')
+  return join(getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv), 'meta.json')
 }
 
 export function getSessionMessagesPath(
   sessionId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionDir(sessionId, env), 'messages.jsonl')
+  return join(
+    getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv),
+    'messages.jsonl',
+  )
+}
+
+export function getSessionMemoryPath(
+  sessionId: string,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(
+    getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv),
+    'session-memory.md',
+  )
 }
 
 export function getSessionSubagentsDir(
   sessionId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionDir(sessionId, env), 'subagents')
+  return join(getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv), 'subagents')
 }
 
 export function getSessionAgentMetaPath(
   sessionId: string,
   agentId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionSubagentsDir(sessionId, env), `agent-${agentId}.meta.json`)
+  return join(
+    getSessionSubagentsDir(sessionId, workspaceRootOrEnv, maybeEnv),
+    `agent-${agentId}.meta.json`,
+  )
 }
 
 export function getSessionAgentMessagesPath(
   sessionId: string,
   agentId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionSubagentsDir(sessionId, env), `agent-${agentId}.jsonl`)
+  return join(
+    getSessionSubagentsDir(sessionId, workspaceRootOrEnv, maybeEnv),
+    `agent-${agentId}.jsonl`,
+  )
 }
 
 export function getSessionAgentLinksPath(
   sessionId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getSessionDir(sessionId, env), 'agents.json')
+  return join(getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv), 'agents.json')
 }
 
 export function getPlanBoardPath(
   boardId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getPlanBoardsDir(env), `${boardId}.json`)
+  if (typeof workspaceRootOrEnv === 'string') {
+    return join(getProjectPlanBoardsDir(workspaceRootOrEnv, maybeEnv), `${boardId}.json`)
+  }
+
+  const env = workspaceRootOrEnv
+  return join(getProjectPlanBoardsDir(resolveWorkspaceRoot(env), env), `${boardId}.json`)
 }
 
 export function getExecutionTaskBoardPath(
   boardId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getExecutionTaskBoardsDir(env), `${boardId}.json`)
+  if (typeof workspaceRootOrEnv === 'string') {
+    return join(
+      getProjectExecutionTaskBoardsDir(workspaceRootOrEnv, maybeEnv),
+      `${boardId}.json`,
+    )
+  }
+
+  const env = workspaceRootOrEnv
+  return join(
+    getProjectExecutionTaskBoardsDir(resolveWorkspaceRoot(env), env),
+    `${boardId}.json`,
+  )
 }
 
 export function getPlanFilePath(
   planFileId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getPlansDir(env), `${planFileId}.md`)
+  if (typeof workspaceRootOrEnv === 'string') {
+    return join(getProjectPlansDir(workspaceRootOrEnv, maybeEnv), `${planFileId}.md`)
+  }
+
+  const env = workspaceRootOrEnv
+  return join(getProjectPlansDir(resolveWorkspaceRoot(env), env), `${planFileId}.md`)
 }

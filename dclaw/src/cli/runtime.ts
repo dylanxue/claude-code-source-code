@@ -13,8 +13,14 @@ import {
   loadDclawMdEntries,
 } from '../prompt/dclawMd.js'
 import { loadPromptEnvironmentContext } from '../prompt/environment.js'
-import { loadPromptMemoryContext } from '../memory/prompt.js'
+import {
+  loadPromptMemoryContext,
+  MAX_SURFACED_MEMORY_SESSION_BYTES,
+} from '../memory/prompt.js'
 import { createAutomaticMemoryExtractor } from '../memory/extract.js'
+import { getMemoryDir } from '../memory/paths.js'
+import { createRelevantMemoryReminderMessage } from '../memory/reminder.js'
+import { createSessionMemoryUpdater } from '../sessionMemory/sessionMemory.js'
 import { assemblePromptContext } from '../prompt/contextAssembler.js'
 import { buildSystemPrompt } from '../prompt/systemPrompt.js'
 import type { PromptMode } from '../prompt/types.js'
@@ -31,10 +37,15 @@ import {
   createInvokedSkillState,
   restoreInvokedSkillsFromMessages,
 } from '../skills/state.js'
-import { loadPlanBoardForSession } from '../tasks/store.js'
+import { loadSessionMeta } from '../session/store.js'
 import { createDefaultToolRegistry } from '../tools/index.js'
 import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/tool.js'
+import type {
+  RelevantMemoryPrefetchHandle,
+  RelevantMemoryPrefetchResult,
+  RelevantMemoryRecentTool,
+} from '../core/relevantMemoryPrefetch.js'
 import { appendSessionMessages } from '../session/store.js'
 import { getDclawHomeDir } from '../session/paths.js'
 import { askUserQuestionsInteractively } from './askUserQuestions.js'
@@ -58,6 +69,7 @@ export type PreparedCliRuntime = {
   drainBackgroundWork: (timeoutMs?: number) => Promise<void>
   listSkillStatuses: () => Promise<SkillStatus[]>
   setSkillEnabled: (skillName: string, enabled: boolean) => Promise<SkillStatus[]>
+  env: NodeJS.ProcessEnv
 }
 
 export async function prepareCliRuntime(
@@ -90,6 +102,125 @@ export async function prepareCliRuntime(
   let skillRegistry = await buildSkillRegistry()
   const invokedSkills = createInvokedSkillState()
   restoreInvokedSkillsFromMessages(initialMessages, invokedSkills)
+  const surfacedMemoryPaths = new Set<string>()
+  let surfacedMemoryBytes = 0
+
+  const getReadMemoryPaths = () => {
+    const memoryDir = getMemoryDir(options.cwd, configured.env)
+    return new Set(
+      [...toolContext.readState.keys()].filter(path =>
+        path === memoryDir || path.startsWith(`${memoryDir}/`),
+      ),
+    )
+  }
+
+  const getExcludedMemoryPaths = () =>
+    new Set([
+      ...surfacedMemoryPaths,
+      ...getReadMemoryPaths(),
+    ])
+
+  const formatRecentMemoryTool = (tool: RelevantMemoryRecentTool): string =>
+    [
+      `${tool.name}: ${tool.ok ? 'ok' : 'failed'}`,
+      ...(tool.summary ? [`summary: ${tool.summary}`] : []),
+    ].join(' | ')
+
+  const startRelevantMemoryPrefetch = (state: {
+    userPrompt: string
+    recentTools: RelevantMemoryRecentTool[]
+    abortSignal?: AbortSignal
+    queryTraceSink?: QueryTraceSink
+  }): RelevantMemoryPrefetchHandle => {
+    const controller = new AbortController()
+    const relayAbort = () => controller.abort()
+    if (state.abortSignal?.aborted) {
+      controller.abort()
+    } else {
+      state.abortSignal?.addEventListener('abort', relayAbort, { once: true })
+    }
+
+    let settled: RelevantMemoryPrefetchResult | undefined
+    let aborted = false
+    state.queryTraceSink?.record({
+      event: 'memory.prefetch.start',
+      data: {
+        recentToolCount: state.recentTools.length,
+      },
+    })
+
+    void loadPromptMemoryContext(
+      options.cwd,
+      state.userPrompt,
+      configured.env,
+      {
+        client,
+        model: runtime.primary.model,
+        queryTraceSink: state.queryTraceSink,
+        excludedPaths: getExcludedMemoryPaths(),
+        remainingSessionBytes: Math.max(
+          0,
+          MAX_SURFACED_MEMORY_SESSION_BYTES - surfacedMemoryBytes,
+        ),
+        recentTools: state.recentTools.map(formatRecentMemoryTool),
+        signal: controller.signal,
+      },
+    )
+      .then(memory => {
+        if (aborted || controller.signal.aborted) {
+          return
+        }
+
+        const message = createRelevantMemoryReminderMessage(memory)
+        settled = {
+          messages: message ? [message] : [],
+          recalledPaths: memory.recalledEntries.flatMap(entry => [
+            entry.path,
+            entry.relativePath,
+          ]),
+          recalledBytes: memory.recalledBytes,
+          skippedAlreadySurfacedCount: memory.skippedAlreadySurfacedCount,
+          skippedBySessionByteLimitCount:
+            memory.skippedBySessionByteLimitCount,
+        }
+        state.queryTraceSink?.record({
+          event: 'memory.prefetch.settled',
+          data: {
+            recalledCount: memory.recalledEntries.length,
+            recalledPaths: memory.recalledEntries.map(entry => entry.path),
+            recalledBytes: memory.recalledBytes,
+            skippedAlreadySurfacedCount:
+              memory.skippedAlreadySurfacedCount,
+            skippedBySessionByteLimitCount:
+              memory.skippedBySessionByteLimitCount,
+          },
+        })
+      })
+      .finally(() => {
+        state.abortSignal?.removeEventListener('abort', relayAbort)
+      })
+
+    return {
+      getSettled: () => settled,
+      abort: () => {
+        aborted = true
+        controller.abort()
+        state.abortSignal?.removeEventListener('abort', relayAbort)
+        state.queryTraceSink?.record({
+          event: 'memory.prefetch.abort',
+        })
+      },
+    }
+  }
+
+  const consumeRelevantMemoryPrefetch = (
+    result: RelevantMemoryPrefetchResult,
+  ) => {
+    for (const memoryPath of result.recalledPaths) {
+      surfacedMemoryPaths.add(memoryPath)
+    }
+    surfacedMemoryBytes += result.recalledBytes
+  }
 
   const toolRegistry = createDefaultToolRegistry()
   const queryTraceEnabled = shouldEnableQueryTrace(configured.env)
@@ -119,28 +250,29 @@ export async function prepareCliRuntime(
     userPrompt: string
     queryTraceSink?: QueryTraceSink
   }): Promise<string> => {
-    const board =
+    const sessionMeta =
       state.sessionId
-        ? await loadPlanBoardForSession(state.sessionId, configured.env)
+        ? await loadSessionMeta(state.sessionId, configured.env)
         : null
+    const planMode = sessionMeta?.planMode
     const memory = await loadPromptMemoryContext(
       options.cwd,
       state.userPrompt,
       configured.env,
-      {
-        client,
-        model: state.model ?? runtime.primary.model,
-        queryTraceSink: state.queryTraceSink,
-      },
     )
     state.queryTraceSink?.record({
       event: 'memory.recall',
       data: {
-        selectionMode: 'side_query',
+        selectionMode: 'prefetch',
         memoryDir: memory.memoryDir,
         manifestCount: memory.manifestCount,
-        recalledCount: memory.recalledEntries.length,
-        recalledPaths: memory.recalledEntries.map(entry => entry.path),
+        recalledCount: 0,
+        recalledPaths: [],
+        recalledBytes: 0,
+        surfacedMemoryBytes,
+        skippedAlreadySurfacedCount: 0,
+        skippedBySessionByteLimitCount: 0,
+        readMemoryPathCount: getReadMemoryPaths().size,
       },
     })
     const promptContext = assemblePromptContext({
@@ -161,17 +293,10 @@ export async function prepareCliRuntime(
         isGitRepository: promptEnvironment.isGitRepository,
       },
       gitStatus: promptEnvironment.gitStatus,
-      plan: board
+      plan: planMode
         ? {
-            boardId: board.boardId,
-            status: board.mode,
-            planFilePath: board.planFilePath,
-            boardTitle: board.title,
-            boardPurpose: board.purpose,
-            boardBackground: board.background,
-            boardPlan: board.plan,
-            boardScope: board.scope,
-            boardVerification: board.verification,
+            status: planMode.status,
+            planFilePath: planMode.planFilePath,
           }
         : undefined,
       memory,
@@ -184,6 +309,11 @@ export async function prepareCliRuntime(
     client,
     model: runtime.primary.model,
     workspaceRoot: options.cwd,
+    env: configured.env,
+  })
+  const sessionMemoryUpdater = createSessionMemoryUpdater({
+    client,
+    model: runtime.primary.model,
     env: configured.env,
   })
   let engine!: QueryEngine
@@ -239,7 +369,7 @@ export async function prepareCliRuntime(
         }
 
         return createFileQueryTraceSink(
-          tracePath ?? createQueryTraceFilePath(configured.env, sessionId),
+          tracePath ?? createQueryTraceFilePath(configured.env, sessionId, options.cwd),
           sessionId,
         )
       },
@@ -254,7 +384,27 @@ export async function prepareCliRuntime(
     modelCatalogOverrides: llmConfig.modelCatalogOverrides,
     model: runtime.primary.model,
     systemPromptResolver: resolveSystemPromptForUserPrompt,
+    relevantMemoryPrefetcher: startRelevantMemoryPrefetch,
+    onRelevantMemoryPrefetchConsumed: consumeRelevantMemoryPrefetch,
+    beforeCompactHook: async state => {
+      await sessionMemoryUpdater.drainPendingUpdate()
+      state.queryTraceSink?.record({
+        event: 'session_memory.compact.ready',
+        data: {
+          sessionId: state.sessionId,
+          trigger: state.trigger,
+          notesPath: sessionMemoryUpdater.getSessionMemoryPath(state.sessionId),
+        },
+      })
+    },
     turnCompleteHook: async state => {
+      if (state.sessionId) {
+        sessionMemoryUpdater.scheduleUpdate({
+          sessionId: state.sessionId,
+          messages: state.messages,
+          queryTraceSink: state.queryTraceSink,
+        })
+      }
       memoryExtractor.scheduleExtractTurn({
         state: {
           userPrompt: state.userPrompt,
@@ -296,7 +446,7 @@ export async function prepareCliRuntime(
       }
 
       const queryTraceSink = await createFileQueryTraceSink(
-        createQueryTraceFilePath(configured.env, sessionId),
+        createQueryTraceFilePath(configured.env, sessionId, options.cwd),
         sessionId,
       )
       engine.setQueryTraceSink(queryTraceSink)
@@ -304,6 +454,7 @@ export async function prepareCliRuntime(
     },
     drainBackgroundWork: async (timeoutMs?: number) => {
       await memoryExtractor.drainPendingExtraction(timeoutMs)
+      await sessionMemoryUpdater.drainPendingUpdate(timeoutMs)
       await drainAgentRuns(timeoutMs)
     },
     listSkillStatuses: async () => {
@@ -322,6 +473,7 @@ export async function prepareCliRuntime(
         await loadDisabledSkillNames(configured.env),
       )
     },
+    env: configured.env,
   }
 }
 

@@ -3,8 +3,6 @@ import type { PermissionMode } from '../types/tool.js'
 
 export type CliMode = 'interactive' | 'exec' | 'doctor'
 
-export type InteractiveUiMode = 'auto' | 'tui' | 'legacy-repl'
-
 export type CommonCliOptions = {
   cwd: string
   runtime?: string
@@ -13,7 +11,6 @@ export type CommonCliOptions = {
   maxIterations?: number
   systemPrompt?: string
   stream: boolean
-  interactiveUi?: InteractiveUiMode
 }
 
 export type InteractiveCommand = {

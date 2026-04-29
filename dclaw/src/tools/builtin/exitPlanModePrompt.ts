@@ -1,7 +1,7 @@
 const ASK_USER_QUESTION_TOOL_NAME = 'AskUserQuestion'
 
 export const DESCRIPTION =
-  'Exit the no-implementation planning lock after the plan is ready, present the plan, and wait for the user to decide the next step.'
+  'Request the user-facing confirmation flow after the plan is ready, without directly leaving plan mode or starting implementation.'
 
 export const PROMPT = `Use this tool when you are in plan mode and your plan file is ready to show to the user.
 
@@ -9,8 +9,10 @@ export const PROMPT = `Use this tool when you are in plan mode and your plan fil
 
 - You should already have written the plan to the active plan file
 - This tool does not take the full plan content as input
-- It leaves the high-constraint planning lock and returns the plan content
-- It does not ask an interactive approval question
+- It returns the plan content and lets the host UI present a confirmation choice
+- It does not directly leave the high-constraint planning lock
+- It does not change permission mode
+- It does not ask you to choose; the user chooses in the host UI
 - It does not create tasks or start implementation
 - Task creation belongs to the execution phase and should happen only when you are ready to begin implementation immediately
 - It does not complete or retire any execution task board
@@ -30,8 +32,8 @@ export const PROMPT = `Use this tool when you are in plan mode and your plan fil
 Important:
 
 - Do NOT use ${ASK_USER_QUESTION_TOOL_NAME} to ask "Is this plan okay?" or "Should I proceed?"
-- ExitPlanMode is not an approval step
-- After using ExitPlanMode, show the plan to the user and say: "If this direction looks good, I can start implementation; if you want changes, tell me what you would like adjusted."
-- Then wait for the user's next instruction instead of calling more implementation tools in the same turn
+- ExitPlanMode is only a request for the host UI to show the plan confirmation choices
+- Only the user's confirmation choice may leave plan mode or start implementation
+- After using ExitPlanMode, do not call more tools in the same turn
 - Do not call TaskCreate or TaskUpdate in the same turn that you exit plan mode
 `

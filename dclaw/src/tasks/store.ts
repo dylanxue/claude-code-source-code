@@ -1,10 +1,47 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { getPlanBoardPath, getPlanBoardsDir } from '../session/paths.js'
+import { getPlanBoardPath, getProjectPlanBoardsDir } from '../session/paths.js'
 import { loadSessionMeta, updateSessionMeta } from '../session/store.js'
 import { ensurePlanFileForPlanBoard } from './planFiles.js'
-import type { PlanBoard } from './types.js'
+import type { PermissionMode } from '../types/tool.js'
+
+type PlanModeStatus =
+  | 'inactive'
+  | 'active'
+  | 'enter_requested'
+  | 'exit_requested'
+
+type PlanModeRequest = {
+  requestId: string
+  requestedBy: 'user' | 'model'
+  createdAt: string
+  note?: string
+}
+
+type PlanBoard = {
+  boardId: string
+  workspaceId: string
+  rootSessionId: string
+  latestSessionId: string
+  planFilePath?: string
+  title?: string
+  purpose?: string
+  background?: string
+  plan?: string
+  scope?: string
+  verification?: string
+  mode: PlanModeStatus
+  resumePermissionMode?: PermissionMode
+  createdAt: string
+  updatedAt: string
+  planModeReminderCount?: number
+  lastPlanModeReminderTurnCount?: number
+  hasExitedPlanModeInSession?: boolean
+  needsPlanModeExitReminder?: boolean
+  enterRequest?: PlanModeRequest
+  exitRequest?: PlanModeRequest
+}
 
 export type PlanBoardBriefPatch = {
   title?: string
@@ -125,20 +162,6 @@ function normalizePlanBoard(board: PlanBoard): PlanBoard {
   }
 }
 
-function isPlanBoardLike(board: unknown): board is PlanBoard {
-  if (!board || typeof board !== 'object' || Array.isArray(board)) {
-    return false
-  }
-
-  return (
-    Object.hasOwn(board, 'mode') ||
-    Object.hasOwn(board, 'planFilePath') ||
-    Object.hasOwn(board, 'resumePermissionMode') ||
-    Object.hasOwn(board, 'enterRequest') ||
-    Object.hasOwn(board, 'exitRequest')
-  )
-}
-
 function getVisibleLegacyPlanTasks(board: unknown): LegacyPlanTaskRecord[] {
   if (!board || typeof board !== 'object' || Array.isArray(board)) {
     return []
@@ -200,9 +223,9 @@ async function writePlanBoard(
   board: PlanBoard,
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  await ensureDirectory(getPlanBoardsDir(env))
+  await ensureDirectory(getProjectPlanBoardsDir(board.workspaceId, env))
   await writeFile(
-    getPlanBoardPath(board.boardId, env),
+    getPlanBoardPath(board.boardId, board.workspaceId, env),
     JSON.stringify(board, null, 2) + '\n',
     'utf8',
   )
@@ -212,6 +235,7 @@ export async function createPlanBoard(
   input: CreatePlanBoardInput,
 ): Promise<PlanBoard> {
   const env = input.env ?? process.env
+  env.DCLAW_WORKSPACE_ROOT = input.workspaceId
   const boardId = input.boardId ?? `board_${randomUUID()}`
   const existing = await loadPlanBoard(boardId, env)
   if (existing) {
@@ -289,30 +313,7 @@ async function resolvePlanBoardIdForSession(
     return undefined
   }
 
-  if (meta.planBoardId) {
-    return meta.planBoardId
-  }
-
-  if (!meta.taskBoardId) {
-    return undefined
-  }
-
-  const legacyBoard = await loadPlanBoard(meta.taskBoardId, env)
-  if (!legacyBoard || !isPlanBoardLike(legacyBoard)) {
-    return undefined
-  }
-
-  await updateSessionMeta(
-    sessionId,
-    current => ({
-      ...current,
-      planBoardId: current.planBoardId ?? legacyBoard.boardId,
-      updatedAt: nowIso(),
-    }),
-    env,
-  )
-
-  return legacyBoard.boardId
+  return `board_${meta.sessionId}`
 }
 
 export async function attachPlanBoardToSession(
@@ -320,15 +321,11 @@ export async function attachPlanBoardToSession(
   boardId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  await updateSessionMeta(
-    sessionId,
-    meta => ({
-      ...meta,
-      planBoardId: boardId,
-      updatedAt: nowIso(),
-    }),
-    env,
-  )
+  void boardId
+  const meta = await loadSessionMeta(sessionId, env)
+  if (!meta) {
+    return
+  }
 }
 
 async function detachRetiredPlanBoardFromSession(
@@ -340,8 +337,6 @@ async function detachRetiredPlanBoardFromSession(
     sessionId,
     meta => ({
       ...meta,
-      planBoardId:
-        meta.planBoardId === boardId ? undefined : meta.planBoardId,
       taskBoardId:
         meta.taskBoardId === boardId ? undefined : meta.taskBoardId,
       updatedAt: nowIso(),
@@ -409,6 +404,7 @@ export async function getOrCreatePlanBoardForSession(
     workspaceId,
     rootSessionId: sessionId,
     latestSessionId: sessionId,
+    boardId: `board_${sessionId}`,
     env,
   })
   await attachPlanBoardToSession(sessionId, board.boardId, env)

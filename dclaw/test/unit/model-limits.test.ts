@@ -51,8 +51,8 @@ test('built-in openai model limits support modern responses models', () => {
 
   assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek-v4-pro'), {
     contextWindow: 1_048_576,
-    maxOutputTokens: 384_000,
-    maxOutputTokensUpperLimit: 384_000,
+    maxOutputTokens: 100_000,
+    maxOutputTokensUpperLimit: 100_000,
   })
 
   assert.deepEqual(getBuiltInModelLimits('openai', 'glm-4.5-airx'), {
@@ -155,8 +155,8 @@ test('built-in model catalog supports official Claude IDs and dotted OpenRouter-
 
   assert.deepEqual(getBuiltInModelLimits('openai', 'deepseek/deepseek-v4-pro'), {
     contextWindow: 1_048_576,
-    maxOutputTokens: 384_000,
-    maxOutputTokensUpperLimit: 384_000,
+    maxOutputTokens: 100_000,
+    maxOutputTokensUpperLimit: 100_000,
   })
 })
 

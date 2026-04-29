@@ -1,20 +1,13 @@
 import type { PermissionMode } from '../types/tool.js'
-import type { PlanModeStatus } from '../tasks/types.js'
+import type { PlanModeStatus } from '../session/store.js'
 import type { PromptMemoryContext } from '../memory/prompt.js'
 import type { PromptEnvironmentContext } from './environment.js'
 
 export type PromptMode = 'interactive' | 'exec'
 
 export type PlanPromptContext = {
-  boardId?: string
   status?: PlanModeStatus
   planFilePath?: string
-  boardTitle?: string
-  boardPurpose?: string
-  boardBackground?: string
-  boardPlan?: string
-  boardScope?: string
-  boardVerification?: string
 }
 
 export type SkillsRuntimePromptContext = {

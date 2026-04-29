@@ -41,6 +41,23 @@ class FixedResponseClient implements LlmClient {
   }
 }
 
+class CapturingSelectorClient implements LlmClient {
+  readonly providerName = 'capture'
+  request?: CreateMessageRequest
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.request = request
+    return {
+      message: createTextMessage(
+        'assistant',
+        '{"selected_memories":["project/auth-freeze.md"]}',
+      ),
+    }
+  }
+}
+
 test('parseSelectedMemoryPaths accepts fenced JSON and filters unknown paths', () => {
   const selected = parseSelectedMemoryPaths(
     [
@@ -83,4 +100,30 @@ test('selectRelevantMemoryEntries stays empty on invalid JSON response', async (
   })
 
   assert.deepEqual(selected, [])
+})
+
+test('selectRelevantMemoryEntries includes recent tools in selector prompt', async () => {
+  const client = new CapturingSelectorClient()
+  const entries = [
+    createEntry('project/auth-freeze.md', 'Auth freeze begins on 2026-03-05.'),
+  ]
+
+  await selectRelevantMemoryEntries({
+    client,
+    query: 'auth freeze',
+    entries,
+    recentTools: ['Read: ok | summary: inspected release plan'],
+  })
+
+  const requestText =
+    client.request?.messages
+      .map(message =>
+        message.content
+          .map(block => (block.type === 'text' ? block.text : ''))
+          .join('\n'),
+      )
+      .join('\n') ?? ''
+  assert.match(requestText, /Recent tools:/)
+  assert.match(requestText, /Read: ok/)
+  assert.match(requestText, /inspected release plan/)
 })

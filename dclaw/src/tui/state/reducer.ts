@@ -18,9 +18,12 @@ function appendTranscriptItem(
     | Omit<Extract<TranscriptItem, { kind: 'user_prompt' }>, 'id'>
     | Omit<Extract<TranscriptItem, { kind: 'user_command' }>, 'id'>
     | Omit<Extract<TranscriptItem, { kind: 'assistant_note' }>, 'id'>
+    | Omit<Extract<TranscriptItem, { kind: 'assistant_stream_chunk' }>, 'id'>
     | Omit<Extract<TranscriptItem, { kind: 'assistant_draft' }>, 'id'>
     | Omit<Extract<TranscriptItem, { kind: 'activity_group' }>, 'id'>
     | Omit<Extract<TranscriptItem, { kind: 'structured_card' }>, 'id'>
+    | Omit<Extract<TranscriptItem, { kind: 'task_list_snapshot' }>, 'id'>
+    | Omit<Extract<TranscriptItem, { kind: 'plan_mode_snapshot' }>, 'id'>
     | Omit<Extract<TranscriptItem, { kind: 'time_separator' }>, 'id'>,
 ): UiState {
   const id = createTranscriptItemId(state)
@@ -104,10 +107,67 @@ function getCardEntriesForStructuredOutput(
   return nextEntries
 }
 
+function getTaskSnapshotSignature(
+  snapshot: Extract<TranscriptItem, { kind: 'task_list_snapshot' }>['snapshot'],
+): string {
+  return JSON.stringify({
+    boardId: snapshot.boardId,
+    executionState: snapshot.executionState,
+    currentTaskId: snapshot.currentTaskId,
+    completedCount: snapshot.completedCount,
+    totalCount: snapshot.totalCount,
+    tasks: snapshot.tasks.map(task => ({
+      id: task.id,
+      subject: task.subject,
+      status: task.status,
+      owner: task.owner,
+      blockedBy: task.blockedBy,
+      isCurrent: task.isCurrent,
+    })),
+  })
+}
+
+function getLastTaskSnapshotForBoard(
+  transcript: TranscriptItem[],
+  boardId: string,
+): Extract<TranscriptItem, { kind: 'task_list_snapshot' }> | undefined {
+  return [...transcript]
+    .reverse()
+    .find(
+      (item): item is Extract<TranscriptItem, { kind: 'task_list_snapshot' }> =>
+        item.kind === 'task_list_snapshot' && item.snapshot.boardId === boardId,
+    )
+}
+
+function getPlanSnapshotSignature(
+  snapshot: Extract<TranscriptItem, { kind: 'plan_mode_snapshot' }>['snapshot'],
+): string {
+  return JSON.stringify({
+    sessionId: snapshot.sessionId,
+    status: snapshot.status,
+    planFilePath: snapshot.planFilePath,
+    resumePermissionMode: snapshot.resumePermissionMode,
+  })
+}
+
+function getLastPlanSnapshotForSession(
+  transcript: TranscriptItem[],
+  sessionId: string,
+): Extract<TranscriptItem, { kind: 'plan_mode_snapshot' }> | undefined {
+  return [...transcript]
+    .reverse()
+    .find(
+      (item): item is Extract<TranscriptItem, { kind: 'plan_mode_snapshot' }> =>
+        item.kind === 'plan_mode_snapshot' &&
+        item.snapshot.sessionId === sessionId,
+    )
+}
+
 function getActivityEntriesForToolResult(
   entries: ActivityEntry[],
   toolUseId: string,
   text: string,
+  output?: unknown,
 ): ActivityEntry[] {
   let matched = false
   const nextEntries = entries.map(entry => {
@@ -120,6 +180,7 @@ function getActivityEntriesForToolResult(
       ...entry,
       status: 'completed' as const,
       text,
+      output,
     }
   })
 
@@ -133,6 +194,7 @@ function getActivityEntriesForToolResult(
       toolUseId,
       status: 'completed' as const,
       text,
+      output,
     },
   ]
 }
@@ -141,6 +203,14 @@ function finalizeAssistantDraft(state: UiState, outputText: string): UiState {
   const normalizedOutput = outputText.trimEnd()
   if (!state.activeTurn.assistantDraftId) {
     if (normalizedOutput.length === 0) {
+      return state
+    }
+
+    const streamedText = state.activeTurn.streamedAssistantText?.trimEnd()
+    if (
+      streamedText &&
+      normalizeInlineText(streamedText) === normalizeInlineText(normalizedOutput)
+    ) {
       return state
     }
 
@@ -309,6 +379,26 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
       }
     }
 
+    case 'assistant_stream_chunk': {
+      if (event.text.length === 0) {
+        return state
+      }
+
+      const nextState = appendTranscriptItem(state, {
+        kind: 'assistant_stream_chunk',
+        text: event.text,
+      })
+
+      return {
+        ...nextState,
+        activeTurn: {
+          ...nextState.activeTurn,
+          streamedAssistantText:
+            (nextState.activeTurn.streamedAssistantText ?? '') + event.text,
+        },
+      }
+    }
+
     case 'assistant_progress_message': {
       if (normalizeInlineText(event.text).length === 0) {
         return state
@@ -346,6 +436,8 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
                   toolUseId: event.toolUseId,
                   status: 'started',
                   text: event.text,
+                  toolName: event.toolName,
+                  input: event.input,
                 },
               ],
             }
@@ -373,6 +465,8 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
             toolUseId: event.toolUseId,
             status: 'started',
             text: event.text,
+            toolName: event.toolName,
+            input: event.input,
           },
         ],
       })
@@ -405,6 +499,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
               toolUseId: event.toolUseId,
               status: 'completed',
               text: event.text,
+              output: event.output,
             },
           ],
         })
@@ -428,6 +523,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
               item.entries,
               event.toolUseId,
               event.text,
+              event.output,
             ),
           }
         },
@@ -455,6 +551,53 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
         title: event.title,
         entries: getCardEntriesForStructuredOutput(event.entries),
       })
+
+    case 'task_board_updated': {
+      const stateBeforeSnapshot = sealAssistantDraftInPlace(state)
+      const lastSnapshot = getLastTaskSnapshotForBoard(
+        stateBeforeSnapshot.transcript,
+        event.snapshot.boardId,
+      )
+      if (
+        lastSnapshot &&
+        getTaskSnapshotSignature(lastSnapshot.snapshot) ===
+          getTaskSnapshotSignature(event.snapshot)
+      ) {
+        return stateBeforeSnapshot
+      }
+
+      return appendTranscriptItem(
+        {
+          ...stateBeforeSnapshot,
+          transcript: stateBeforeSnapshot.transcript,
+        },
+        {
+          kind: 'task_list_snapshot',
+          snapshot: event.snapshot,
+          collapsed: false,
+        },
+      )
+    }
+
+    case 'plan_mode_updated': {
+      const stateBeforeSnapshot = sealAssistantDraftInPlace(state)
+      const lastSnapshot = getLastPlanSnapshotForSession(
+        stateBeforeSnapshot.transcript,
+        event.snapshot.sessionId,
+      )
+      if (
+        lastSnapshot &&
+        getPlanSnapshotSignature(lastSnapshot.snapshot) ===
+          getPlanSnapshotSignature(event.snapshot)
+      ) {
+        return stateBeforeSnapshot
+      }
+
+      return appendTranscriptItem(stateBeforeSnapshot, {
+        kind: 'plan_mode_snapshot',
+        snapshot: event.snapshot,
+      })
+    }
 
     case 'turn_completed': {
       const nextState = finalizeAssistantDraft(state, event.outputText)

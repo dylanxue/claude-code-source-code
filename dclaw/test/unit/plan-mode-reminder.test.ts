@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { QueryEngine } from '../../src/core/queryEngine.js'
@@ -20,13 +20,12 @@ import type {
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
 import { buildTool } from '../../src/tools/types.js'
-import { createSession } from '../../src/session/store.js'
 import {
-  ensurePlanBoardPlanFile,
-  getOrCreatePlanBoardForSession,
-  loadPlanBoardForSession,
-  updatePlanBoard,
-} from '../../src/tasks/store.js'
+  createSession,
+  ensureSessionPlanFile,
+  getSessionPlanMode,
+  updateSessionPlanMode,
+} from '../../src/session/store.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
 class CapturingLlmClient implements LlmClient {
@@ -67,20 +66,13 @@ test('QueryEngine injects a plan_mode reminder as a temporary system-reminder me
       sessionId: 'session-plan-mode-reminder',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(
-        session.sessionId,
-        '/tmp/project',
-        env,
-      ),
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        mode: 'active',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
       }),
       env,
     )
@@ -97,7 +89,7 @@ test('QueryEngine injects a plan_mode reminder as a temporary system-reminder me
         cwd: '/tmp/project',
         sessionId: session.sessionId,
         permissionMode: 'plan',
-        planFilePath: board.planFilePath,
+        planFilePath: filePath,
         availableTools: registry.list().map(tool => tool.name),
       }),
     })
@@ -110,7 +102,11 @@ test('QueryEngine injects a plan_mode reminder as a temporary system-reminder me
     assert.match(getTextContent(reminders[0]!), /Do not start implementation yet/)
     assert.match(
       getTextContent(reminders[0]!),
-      new RegExp(board.planFilePath!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      /same language as the user's latest planning request/,
+    )
+    assert.match(
+      getTextContent(reminders[0]!),
+      new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     )
 
     assert.equal(
@@ -140,19 +136,13 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
       sessionId: 'session-plan-exit-reminder',
       env,
     })
-    const board = await getOrCreatePlanBoardForSession(
+    await updateSessionPlanMode(
       session.sessionId,
-      '/tmp/project',
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
       current => ({
-        ...current,
-        mode: 'inactive',
-        hasExitedPlanModeInSession: true,
-        needsPlanModeExitReminder: true,
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'inactive',
+        hasExitedInSession: true,
+        needsExitReminder: true,
       }),
       env,
     )
@@ -190,9 +180,9 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
       false,
     )
 
-    const boardAfterFirstTurn = await loadPlanBoardForSession(session.sessionId, env)
-    assert.ok(boardAfterFirstTurn)
-    assert.equal(boardAfterFirstTurn?.needsPlanModeExitReminder, false)
+    const planModeAfterFirstTurn = await getSessionPlanMode(session.sessionId, env)
+    assert.ok(planModeAfterFirstTurn)
+    assert.equal(planModeAfterFirstTurn?.needsExitReminder, false)
 
     await engine.submitUserPrompt('continue implementation')
     const secondReminders = findReminderMessages(client.requests[1])
@@ -218,20 +208,13 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
       sessionId: 'session-plan-exit-mid-turn',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(
-        session.sessionId,
-        '/tmp/project',
-        env,
-      ),
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        mode: 'active',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
       }),
       env,
     )
@@ -286,14 +269,13 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
         async call(_input, context) {
           context.setPermissionMode?.('default')
           context.setPlanFilePath?.(undefined)
-          await updatePlanBoard(
-            board.boardId,
+          await updateSessionPlanMode(
+            session.sessionId,
             current => ({
-              ...current,
-              mode: 'inactive',
-              hasExitedPlanModeInSession: true,
-              needsPlanModeExitReminder: true,
-              updatedAt: new Date().toISOString(),
+              ...(current ?? { status: 'active' as const }),
+              status: 'inactive',
+              hasExitedInSession: true,
+              needsExitReminder: true,
             }),
             env,
           )
@@ -316,7 +298,7 @@ test('QueryEngine refreshes planning prompt state after exiting plan mode mid-tu
         cwd: '/tmp/project',
         sessionId: session.sessionId,
         permissionMode: 'plan',
-        planFilePath: board.planFilePath,
+        planFilePath: filePath,
         availableTools: registry.list().map(tool => tool.name),
       }),
     })
@@ -359,18 +341,14 @@ test('QueryEngine injects a plan_mode_reentry reminder once when planning resume
       sessionId: 'session-plan-reentry-reminder',
       env,
     })
-    const board = await getOrCreatePlanBoardForSession(
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    await updateSessionPlanMode(
       session.sessionId,
-      '/tmp/project',
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
       current => ({
-        ...current,
-        mode: 'active',
-        hasExitedPlanModeInSession: true,
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
+        hasExitedInSession: true,
       }),
       env,
     )
@@ -387,7 +365,7 @@ test('QueryEngine injects a plan_mode_reentry reminder once when planning resume
         cwd: '/tmp/project',
         sessionId: session.sessionId,
         permissionMode: 'plan',
-        planFilePath: board.planFilePath,
+        planFilePath: filePath,
         availableTools: registry.list().map(tool => tool.name),
       }),
     })
@@ -410,9 +388,9 @@ test('QueryEngine injects a plan_mode_reentry reminder once when planning resume
       false,
     )
 
-    const boardAfterFirstTurn = await loadPlanBoardForSession(session.sessionId, env)
-    assert.ok(boardAfterFirstTurn)
-    assert.equal(boardAfterFirstTurn?.hasExitedPlanModeInSession, false)
+    const planModeAfterFirstTurn = await getSessionPlanMode(session.sessionId, env)
+    assert.ok(planModeAfterFirstTurn)
+    assert.equal(planModeAfterFirstTurn?.hasExitedInSession, false)
 
     await engine.submitUserPrompt('keep refining')
     const secondTurnReminders = findReminderMessages(client.requests[1])
@@ -450,19 +428,20 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
       summaryMessageId: compactSummary.id,
     }
     const compactBoundaryMessage = createCompactBoundaryMessage(compactSource)
-    const board = await getOrCreatePlanBoardForSession(
-      session.sessionId,
-      '/tmp/project',
-      env,
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
+    await writeFile(
+      filePath,
+      '# Plan\n\n- Keep the active plan after compact.\n',
+      'utf8',
     )
-    await updatePlanBoard(
-      board.boardId,
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        mode: 'active',
-        planModeReminderCount: 3,
-        lastPlanModeReminderTurnCount: 99,
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
+        reminderCount: 3,
+        lastReminderTurnCount: 99,
       }),
       env,
     )
@@ -479,7 +458,7 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
         cwd: '/tmp/project',
         sessionId: session.sessionId,
         permissionMode: 'plan',
-        planFilePath: board.planFilePath,
+        planFilePath: filePath,
         availableTools: registry.list().map(tool => tool.name),
       }),
       initialMessages: [compactBoundaryMessage, compactSummary],
@@ -488,12 +467,24 @@ test('QueryEngine forces a full plan_mode reminder on the first post-compact tur
     const result = await engine.submitUserPrompt('continue after compact')
 
     const reminders = findReminderMessages(client.requests[0])
-    assert.equal(reminders.length, 1)
     const reminderTexts = reminders.map(message => getTextContent(message))
+    assert.equal(
+      reminderTexts.filter(text => /## Plan Mode/.test(text)).length,
+      1,
+    )
     assert.ok(reminderTexts.some(text => /## Plan Mode/.test(text)))
     assert.ok(reminderTexts.some(text => /Do not start implementation yet/.test(text)))
     assert.ok(reminderTexts.every(text => !/# Post-Compact Task Board/.test(text)))
     assert.ok(reminderTexts.every(text => !/# Task Tool Reminder/.test(text)))
+    const requestText = client.requests[0]?.messages
+      .map(message =>
+        message.content
+          .map(block => (block.type === 'text' ? block.text : ''))
+          .join('\n'),
+      )
+      .join('\n') ?? ''
+    assert.match(requestText, /# Post-Compact Plan File/)
+    assert.match(requestText, /Keep the active plan after compact/)
     assert.equal(
       result.appendedMessages.some(message =>
         getTextContent(message).includes('## Plan Mode'),

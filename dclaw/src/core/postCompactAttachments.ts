@@ -8,7 +8,6 @@ import {
   buildSkillPrompt,
 } from '../skills/prompt.js'
 import type { InvokedSkill } from '../skills/state.js'
-import type { PlanBoard } from '../tasks/types.js'
 import { createMessage, createTextMessage, type Message } from '../types/message.js'
 import type { ReadStateEntry } from '../types/tool.js'
 
@@ -120,14 +119,10 @@ function buildPostCompactReadFileMessage(
 }
 
 async function createPostCompactPlanFileMessage(
-  board: PlanBoard,
+  planFilePath: string,
 ): Promise<Message | null> {
-  if (!board.planFilePath) {
-    return null
-  }
-
   try {
-    const content = await readFile(board.planFilePath, 'utf8')
+    const content = await readFile(planFilePath, 'utf8')
     const trimmed = content.trim()
     if (trimmed.length === 0) {
       return null
@@ -137,7 +132,7 @@ async function createPostCompactPlanFileMessage(
     return wrapSystemReminder(
       [
         '# Post-Compact Plan File',
-        `path: ${board.planFilePath}`,
+        `path: ${planFilePath}`,
         'This is the current plan file content restored after compaction.',
         '',
         text,
@@ -317,7 +312,7 @@ function createPostCompactImageMessages(messages: Message[]): Message[] {
 
 export async function createPostCompactAttachmentMessages(
   messages: Message[],
-  board: PlanBoard | null | undefined,
+  planFilePath: string | null | undefined,
   readState: PostCompactReadStateSnapshot | undefined,
   invokedSkills: InvokedSkill[],
   _availableTools: string[],
@@ -329,8 +324,8 @@ export async function createPostCompactAttachmentMessages(
   const attachmentMessages = createPostCompactReadFileMessages(readState)
   const invokedSkillMessage = createPostCompactInvokedSkillMessage(invokedSkills)
   const imageMessages = createPostCompactImageMessages(messages)
-  const planFileMessage = board
-    ? await createPostCompactPlanFileMessage(board)
+  const planFileMessage = planFilePath
+    ? await createPostCompactPlanFileMessage(planFilePath)
     : null
 
   return [

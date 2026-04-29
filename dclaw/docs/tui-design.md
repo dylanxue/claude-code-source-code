@@ -303,7 +303,7 @@ Tasks · 2/5 completed
 
 - `TaskCreate`
 - `TaskUpdate`
-- `TaskList` 导致当前视图更新
+- `TaskList` 只作为读取工具，不触发 transcript 快照
 - 计划内容重排或标题修改
 - 进入/退出 `plan mode` 导致当前任务板变化
 - `resume` 恢复后当前板状态与前次快照不同
@@ -596,7 +596,7 @@ QueryEngine events -> UI event reducer -> Transcript / Bottom Dock / Overlay
 - `onToolUse` -> 累积进当前 `activity_group`
 - `onToolResult` -> 累积或完成当前 `activity_group`
 - `/status /runtime /skills` -> `structured_card`
-- `TaskCreate / TaskUpdate / TaskList` -> `task_list_snapshot`
+- `TaskCreate / TaskUpdate` -> `task_list_snapshot`
 - 权限请求 -> `Blocking Dialog`
 - `AskUserQuestion` -> `Blocking Dialog`
 - 队列变化 -> Bottom Dock 队列提示
@@ -614,7 +614,7 @@ QueryEngine events -> UI event reducer -> Transcript / Bottom Dock / Overlay
   已有 streaming / progress / tool result 主路径
 - `src/core/queryLoop.ts`
   已有 `onTextDelta / onReasoningDelta / onToolUse / onToolResult` 等事件
-- `src/cli/replCommands.ts`
+- `src/cli/slashCommands.ts`
   已有 slash 命令体系
 - `src/permissions/evaluator.ts`
   已有权限判定逻辑
@@ -741,27 +741,26 @@ QueryEngine
 
 1. 先抽离事件与状态层，再做 Ink 渲染层。
 2. 先做可工作的主路径，再补结构化卡片、任务快照和阻塞 dialog。
-3. 迁移期间保留 legacy REPL 作为回退路径，直到 TUI 交互主线稳定。
+3. TUI 主线稳定后移除 legacy REPL 入口与回退 flag，interactive 只保留 Ink 路径。
 
 ### 13.1 阶段 0：入口与依赖骨架
 
 目标：
 
 - 为 `Ink + React` TUI 建立最小运行入口
-- 让新 TUI 与 legacy REPL 可并行存在
+- 让新 TUI 接管 interactive 主路径
 - 为后续 `src/tui/` 目录打下基础
 
 建议交付：
 
 - `interactive` 模式可进入新的 TUI 路径
-- 保留 legacy REPL 回退入口
 - `dclaw` 子项目显式声明 TUI 依赖
 
 任务清单：
 
 - [x] 在 `dclaw/package.json` 显式声明 `ink`、`react`、必要的类型依赖
 - [x] 为 `interactive` 模式增加运行时分流
-- [x] 迁移期同时保留 `--tui` 显式进入新壳与 `--legacy-repl` 强制回退
+- [x] 移除迁移期 `--tui` / `--legacy-repl` 交互 UI 分流参数
 - [x] 在 `src/cli/` 新增 TUI 入口适配层，命名为 `runInteractiveTui`
 - [x] 新建 `src/tui/` 目录骨架，至少包含：
   - `src/tui/App.tsx`
@@ -769,7 +768,7 @@ QueryEngine
   - `src/tui/presenters/`
   - `src/tui/components/`
   - `src/tui/views/`
-- [x] 约定：迁移完成前，`runInteractive` 负责在 TUI 与 legacy REPL 之间做一次选择
+- [x] 约定：`runInteractive` 直接进入 TUI 路径
 
 建议改动文件：
 
@@ -782,23 +781,20 @@ QueryEngine
 
 测试任务：
 
-- [x] CLI 参数解析新增 `--tui / --legacy-repl` 的单测
-- [x] interactive 入口能正确选择 TUI 或 legacy REPL 的单测
+- [x] CLI 参数解析拒绝已移除的 `--tui / --legacy-repl` 的单测
+- [x] interactive 入口默认进入 TUI 的单测
 - [x] 非 TTY 场景仍按现有逻辑处理的回归测试
 
 阶段验收：
 
 - `interactive` 入口已能稳定进入一个最小 Ink 应用
-- legacy REPL 仍可回退使用
 - 没有破坏 `print / resume / doctor / history` 主路径
 
 当前实现状态补充：
 
 - 当前阶段 0 已完成
-- 当前默认 interactive 路径仍为 legacy REPL
-- 用户可通过 `--tui` 显式进入新的 Ink 壳
-- `--legacy-repl` 已作为显式回退入口保留
-- 当前 Ink 壳仍是 phase 0 skeleton，只展示最小 Transcript 与 Bottom Dock，不承接真实 turn loop
+- 当前默认 interactive 路径已经切到 TUI
+- `--tui` 与 `--legacy-repl` 已移除；旧 readline REPL 主循环已不再保留
 
 ### 13.2 阶段 1：抽离 Turn Presenter 与 UI Reducer
 
@@ -947,10 +943,10 @@ QueryEngine
 
 建议改动文件：
 
-- `dclaw/src/cli/replCommands.ts`
+- `dclaw/src/cli/slashCommands.ts`
 - `dclaw/src/cli/outputFormatting.ts`
 - `dclaw/src/tui/views/items/*`
-- `dclaw/src/tui/presenters/replCommandPresenter.ts`
+- `dclaw/src/tui/presenters/slashCommandPresenter.ts`
 - `dclaw/src/tui/presenters/activityPresenter.ts`
 
 测试任务：
@@ -986,7 +982,7 @@ QueryEngine
 
 任务清单：
 
-- [x] 从 `replCommands` 生成 slash 候选源
+- [x] 从 `slashCommands` 生成 slash 候选源
 - [x] 为命令定义补充 UI 元数据：
   - `displayName`
   - `description`
@@ -1004,7 +1000,7 @@ QueryEngine
 
 建议改动文件：
 
-- `dclaw/src/cli/replCommands.ts`
+- `dclaw/src/cli/slashCommands.ts`
 - `dclaw/src/tui/views/SlashSuggestionMenu.tsx`
 - `dclaw/src/tui/views/BottomSheet.tsx`
 - `dclaw/src/tui/hooks/useSlashSuggestions.ts`
@@ -1024,7 +1020,7 @@ QueryEngine
 
 当前实现状态补充：
 
-- 当前阶段 4 主目标已完成：TUI 会从 `replCommands` catalog 生成 slash 建议，支持过滤、上下移动、Tab/Enter 选择并立即触发命令或后续菜单
+- 当前阶段 4 主目标已完成：TUI 会从 `slashCommands` catalog 生成 slash 建议，支持过滤、上下移动、Tab/Enter 选择并立即触发命令或后续菜单
 - 枚举型参数命令已支持底部 `Bottom Sheet`，首批覆盖 `/runtime` 与 `/permissions`
 - 命令补全 menu 位于输入框下方且保留输入框可见；其它 menu 会隐藏输入框与状态行
 - menu 选择区不使用边框，最多显示 8 行并随键盘选择滚动
@@ -1085,7 +1081,7 @@ QueryEngine
 - 当前阶段 5 主闭环已完成：TUI 会把 `AskUserQuestion` 渲染为底部阻塞式 Question Dialog，不再依赖 readline 直接发问
 - 权限确认复用同一条 `askUserQuestions` dialog host，因此 Bash/Edit/Write 等需要人工确认时会进入 TUI dialog
 - Question Dialog 已支持单选、多选、隐式 `Other` 自定义输入、preview notes、`submit_answers` / `respond_to_agent` / `finish_plan_interview`
-- TUI 路径通过 `QueryEngine.setAskUserQuestions()` 在每轮 prompt 前挂接 dialog host；legacy REPL 与非 TUI 路径仍走原有 `askUserQuestionsInteractively` fallback
+- TUI 路径通过 `QueryEngine.setAskUserQuestions()` 在每轮 prompt 前挂接 dialog host；非 TUI 路径仍走原有 `askUserQuestionsInteractively` fallback
 - 当前实现使用 bottom dock 内阻塞式 dialog；后续可继续细化视觉层级、diff preview 和更完整的权限专用文案
 
 ### 13.7 阶段 6：Task Snapshot 与计划态可视化
@@ -1103,33 +1099,44 @@ QueryEngine
 
 任务清单：
 
-- [ ] 定义 `task_list_snapshot` 的数据结构
-- [ ] 当任务表真实变化时，追加完整快照而不是只追加增量日志
-- [ ] 渲染每个任务的完成状态
-- [ ] 渲染当前任务 `(current)` 标记
-- [ ] 最新快照默认展开，旧快照可折叠为摘要
-- [ ] 将 `Task*`、plan mode 工具结果与 snapshot 对齐
-- [ ] 保证 `resume / compact` 后快照展示不重复、不丢失、不与旧状态冲突
+- [x] 定义 `task_list_snapshot` 的数据结构
+- [x] 当 `TaskCreate / TaskUpdate` 产生活跃任务表时，追加完整快照而不是只追加增量日志
+- [x] 渲染每个任务的完成状态
+- [x] 渲染当前任务 `(current)` 标记
+- [x] 最新快照默认展开，旧快照折叠为摘要
+- [x] 将 `TaskCreate / TaskUpdate` 工具结果与 snapshot 对齐；`TaskList` 不追加 snapshot，避免读取状态时重复刷任务卡片
+- [x] 保证 `resume / compact` 后快照展示不重复、不丢失、不与旧状态冲突
+- [x] 将 plan mode 工具结果与 snapshot / 结构化计划视图进一步对齐
 
 建议改动文件：
 
 - `dclaw/src/tasks/store.ts`
 - `dclaw/src/tasks/taskState.ts`
 - `dclaw/src/tasks/observability.ts`
-- `dclaw/src/cli/replCommands.ts`
+- `dclaw/src/cli/slashCommands.ts`
 - `dclaw/src/tui/presenters/taskSnapshotPresenter.ts`
 - `dclaw/src/tui/views/items/TaskListSnapshot.tsx`
 
 测试任务：
 
-- [ ] `TaskCreate` 后生成完整 snapshot 的单测
-- [ ] `TaskUpdate` 后重新渲染整表的单测
-- [ ] `resume` 恢复后 snapshot 不重复追加的单测
-- [ ] `compact` 后计划状态仍一致的单测
+- [x] `TaskCreate` 后生成完整 snapshot 的单测
+- [x] `TaskUpdate` 后重新渲染整表的单测
+- [x] `resume` 恢复后 snapshot 不重复追加的单测
+- [x] `compact` 后计划状态仍一致的单测
 
 阶段验收：
 
 - 任务列表变化时，用户能在 transcript 中一眼看到完整当前任务表
+
+当前实现状态补充：
+
+- 阶段 6 主链路已完成：`TaskCreate`、成功的 `TaskUpdate` 会在 TUI tool result 事件里附带当前 `TaskBoard`；`TaskList` 只进入 activity group，不再追加任务快照
+- TUI presenter 会把 `TaskBoard` 转为 `task_list_snapshot`，reducer 会在 transcript 中追加完整任务表快照
+- Transcript 已能渲染任务完成状态、当前任务 `(current)`、owner、blocked-by 与执行状态
+- 新任务快照会默认展开，旧任务快照会折叠为摘要；相同 board 的重复快照会被 reducer 跳过
+- TUI `/resume` 与 `/compact` 成功后会刷新当前 session 绑定的 execution task board，避免恢复后任务表丢失；重复快照仍由 reducer 去重
+- `EnterPlanMode / ExitPlanMode` 会刷新当前 plan board，并在 transcript 中追加结构化 plan snapshot；重复 plan snapshot 会被 reducer 跳过
+- compact 后计划状态一致性已有 `compactSession keeps the plan board attached to the current session` 回归测试覆盖
 
 ### 13.8 阶段 7：兼容收口、切默认与稳定性加固
 
@@ -1141,17 +1148,18 @@ QueryEngine
 建议交付：
 
 - TUI 作为默认 interactive UI
-- legacy REPL 作为回退开关
+- 移除 legacy REPL 回退开关
 - 主链路稳定的测试护栏
 
 任务清单：
 
-- [ ] 将新 TUI 设为默认 interactive 路径
-- [ ] 保留 `--legacy-repl` 直到若干版本后再评估移除
-- [ ] 收口 resize、scrollback、exit cleanup、background drain
-- [ ] 收口 `resume / compact / queue / interrupt / permissions / task snapshot` 一致性
-- [ ] 为文档补充截图、已知限制与操作说明
-- [ ] 根据实际实现同步更新 `docs/dev-tasks.md` 和 `project-status.md`
+- [x] 将新 TUI 设为默认 interactive 路径
+- [x] 移除 `--legacy-repl` 与 legacy readline REPL 主循环
+- [x] 收口 exit cleanup、background drain
+- [ ] 重新设计 resize、scrollback、autofollow，避免破坏 Ink 主布局
+- [x] 收口 `resume / compact / queue / interrupt / permissions / task snapshot` 一致性
+- [x] 为文档补充截图、已知限制与操作说明
+- [x] 根据实际实现同步更新 `docs/dev-tasks.md` 和 `project-status.md`
 
 建议改动文件：
 
@@ -1163,17 +1171,26 @@ QueryEngine
 
 测试任务：
 
-- [ ] startup smoke test
+- [x] startup smoke test
 - [ ] resize/scroll/autofollow 行为测试
-- [ ] queue/interruption 一致性测试
-- [ ] `resume / compact / permissions / task updates` 回归测试
-- [ ] legacy fallback 仍可工作的回归测试
+- [x] queue/interruption 一致性测试
+- [x] `resume / compact / permissions / task updates` 回归测试
+- [x] 已移除 legacy fallback，改由参数解析拒绝旧 flag 的回归测试覆盖
 
 阶段验收：
 
 - 默认 interactive 主路径已切到 TUI
-- legacy fallback 可作为兜底
+- legacy fallback 已移除
 - 当前文档中的 MVP 能力全部可用
+
+实现记录：
+
+- interactive 入口已固定走 `runInteractiveTui`，不再保留 `--tui / --legacy-repl` UI 分流
+- 旧 `src/cli/repl.ts` 主循环与对应单测已移除；`runResume` 不再回落到 readline REPL
+- 已撤回首版 transcript viewport 接入：该实现会破坏 Ink 主布局并挤掉 Bottom Dock；后续需以不影响 Bottom Dock 的方式重新设计 scrollback
+- TUI 退出时会清理 Ink instance，并以固定 timeout drain memory extraction / background agent work
+- queue 合并、interrupt 清理 active turn、busy 状态下 mutating slash command 阻断、`/resume / /compact / /permissions` 与 task snapshot 都已有回归护栏
+- 当前已知限制：尚未加入截图型 golden test；scrollback/autofollow 暂不启用，避免再次破坏主交互可用性
 
 ### 13.9 推荐 PR 切分
 
@@ -1213,7 +1230,7 @@ QueryEngine
 
 ## 16. 总结
 
-这套设计的核心不是“把 REPL 做复杂”，而是把当前 `dclaw` 已有的 agent 能力重新组织成更稳定的交互语法：
+这套设计的核心不是“把交互循环做复杂”，而是把当前 `dclaw` 已有的 agent 能力重新组织成更稳定的交互语法：
 
 - Transcript 是工作文档
 - Bottom Dock 是输入与轻量选择中心

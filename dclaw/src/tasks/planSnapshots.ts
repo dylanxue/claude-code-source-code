@@ -1,17 +1,19 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
-import { appendSessionMessages } from '../session/store.js'
+import { resolve } from 'node:path'
+import {
+  appendSessionMessages,
+  ensureSessionPlanFile,
+  loadSessionMeta,
+  updateSessionPlanMode,
+} from '../session/store.js'
 import {
   createTranscriptOnlyTextMessage,
   type Message,
 } from '../types/message.js'
-import type { PlanBoard } from './types.js'
 import {
-  ensurePlanFileForPlanBoard,
-  getDefaultPlanFilePath,
+  getSessionPlanFilePath,
   readPlanFile,
+  writePlanFile,
 } from './planFiles.js'
-import { updatePlanBoard } from './store.js'
 
 const PLAN_SNAPSHOT_OPEN = '<plan-file-snapshot>'
 const PLAN_SNAPSHOT_CLOSE = '</plan-file-snapshot>'
@@ -111,7 +113,9 @@ export function describePlanSnapshotText(text: string): string | undefined {
   return `[plan snapshot] ${snapshot.filePath}${suffix}`
 }
 
-function readPlanSnapshotFromMessages(messages: Message[]): PlanSnapshotRecord | null {
+export function readPlanSnapshotFromMessages(
+  messages: Message[],
+): PlanSnapshotRecord | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (!message) {
@@ -133,32 +137,14 @@ function readPlanSnapshotFromMessages(messages: Message[]): PlanSnapshotRecord |
   return null
 }
 
-function isPlanFilePath(
-  filePath: string,
-  board: PlanBoard,
-  env: NodeJS.ProcessEnv,
-): boolean {
-  const resolvedPath = resolve(filePath)
-  const preferredPath = board.planFilePath
-    ? resolve(board.planFilePath)
-    : undefined
-
-  if (preferredPath) {
-    return resolvedPath === preferredPath
-  }
-
-  const defaultPath = resolve(getDefaultPlanFilePath(board.boardId, env))
-  return resolvedPath === defaultPath
-}
-
-function readPlanContentFromToolResults(
+function readSessionPlanContentFromToolResults(
   messages: Message[],
-  board: PlanBoard,
-  env: NodeJS.ProcessEnv,
+  planFilePath: string,
 ): {
   filePath: string
   content: string
 } | null {
+  const resolvedPlanPath = resolve(planFilePath)
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (!message || message.role !== 'user') {
@@ -184,7 +170,7 @@ function readPlanContentFromToolResults(
         continue
       }
 
-      if (!isPlanFilePath(toolOutput.filePath, board, env)) {
+      if (resolve(toolOutput.filePath) !== resolvedPlanPath) {
         continue
       }
 
@@ -200,14 +186,6 @@ function readPlanContentFromToolResults(
   }
 
   return null
-}
-
-async function writeRecoveredPlanFile(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true })
-  await writeFile(filePath, content, 'utf8')
 }
 
 export async function appendPlanSnapshotForFile(
@@ -232,69 +210,55 @@ export async function appendPlanSnapshotForFile(
   )
 }
 
-export async function recoverPlanBoardPlanFile(
-  board: PlanBoard,
+export async function recoverSessionPlanFile(
+  sessionId: string,
   messages: Message[],
   env: NodeJS.ProcessEnv = process.env,
-): Promise<PlanBoard> {
-  const currentContent =
-    board.planFilePath ? await readPlanFile(board.planFilePath) : null
+): Promise<string | undefined> {
+  const meta = await loadSessionMeta(sessionId, env)
+  if (!meta) {
+    return undefined
+  }
+
+  const preferredPath =
+    meta.planMode?.planFilePath ?? getSessionPlanFilePath(sessionId, env)
+  const currentContent = await readPlanFile(preferredPath)
   if (currentContent && currentContent.trim().length > 0) {
-    return board
+    await updateSessionPlanMode(
+      sessionId,
+      planMode => ({
+        ...(planMode ?? { status: 'inactive' as const }),
+        planFilePath: preferredPath,
+      }),
+      env,
+    )
+    return preferredPath
   }
 
   const planSnapshot = readPlanSnapshotFromMessages(messages)
-  const planToolResult = readPlanContentFromToolResults(messages, board, env)
+  const planToolResult = readSessionPlanContentFromToolResults(
+    messages,
+    preferredPath,
+  )
   const recovered = planSnapshot ?? planToolResult
 
   if (recovered) {
-    const targetPath =
-      board.planFilePath ??
-      recovered.filePath ??
-      getDefaultPlanFilePath(board.boardId, env)
-    await writeRecoveredPlanFile(targetPath, recovered.content)
-
-    if (board.planFilePath === targetPath) {
-      return board
-    }
-
-    return (
-      (await updatePlanBoard(
-        board.boardId,
-        current => ({
-          ...current,
-          planFilePath: targetPath,
-          updatedAt: new Date().toISOString(),
-        }),
-        env,
-      )) ?? {
-        ...board,
-        planFilePath: targetPath,
-      }
-    )
-  }
-
-  if (board.mode !== 'active' && !board.planFilePath) {
-    return board
-  }
-
-  const ensured = await ensurePlanFileForPlanBoard(board, env)
-  if (board.planFilePath === ensured.filePath) {
-    return board
-  }
-
-  return (
-    (await updatePlanBoard(
-      board.boardId,
-      current => ({
-        ...current,
-        planFilePath: ensured.filePath,
-        updatedAt: new Date().toISOString(),
+    await writePlanFile(preferredPath, recovered.content)
+    await updateSessionPlanMode(
+      sessionId,
+      planMode => ({
+        ...(planMode ?? { status: 'inactive' as const }),
+        planFilePath: preferredPath,
       }),
       env,
-    )) ?? {
-      ...board,
-      planFilePath: ensured.filePath,
-    }
-  )
+    )
+    return preferredPath
+  }
+
+  if (meta.planMode?.status === 'active' || meta.planMode?.planFilePath) {
+    const ensured = await ensureSessionPlanFile(sessionId, env)
+    return ensured.filePath
+  }
+
+  return undefined
 }

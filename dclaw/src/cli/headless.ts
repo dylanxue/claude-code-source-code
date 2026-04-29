@@ -19,6 +19,7 @@ export async function runHeadless(command: ExecCommand): Promise<void> {
     engine,
     rotateQueryTrace,
     drainBackgroundWork,
+    env,
   } = await prepareCliRuntime(
     command.options,
     'exec',
@@ -29,6 +30,7 @@ export async function runHeadless(command: ExecCommand): Promise<void> {
     runtimeName: runtime.runtimeName,
     provider: runtime.provider,
     model: runtime.model,
+    env,
   })
   engine.setSessionId(session.sessionId)
   await rotateQueryTrace(session.sessionId)
@@ -86,6 +88,7 @@ export async function runHeadless(command: ExecCommand): Promise<void> {
   await appendSessionMessages(
     activeSessionId,
     result.appendedMessages,
+    env,
   )
 
   if (!command.options.stream || streamedText.length === 0) {

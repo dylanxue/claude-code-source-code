@@ -4,6 +4,9 @@ export type ActivityEntry = {
   toolUseId: string
   text: string
   status: ActivityEntryStatus
+  toolName?: string
+  input?: Record<string, unknown>
+  output?: unknown
 }
 
 export type StructuredCardEntry =
@@ -19,6 +22,34 @@ export type StructuredCardEntry =
   | {
       kind: 'separator'
     }
+
+export type TaskListSnapshotTask = {
+  id: string
+  subject: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  owner?: string
+  blockedBy: string[]
+  isCurrent: boolean
+}
+
+export type TaskListSnapshot = {
+  boardId: string
+  title?: string
+  executionState: 'idle' | 'active' | 'completed' | 'cancelled'
+  updatedAt: string
+  completedCount: number
+  totalCount: number
+  currentTaskId?: string
+  tasks: TaskListSnapshotTask[]
+}
+
+export type PlanModeSnapshot = {
+  sessionId: string
+  status: 'inactive' | 'active'
+  updatedAt: string
+  planFilePath?: string
+  resumePermissionMode?: string
+}
 
 export type TranscriptItem =
   | {
@@ -43,6 +74,11 @@ export type TranscriptItem =
     }
   | {
       id: string
+      kind: 'assistant_stream_chunk'
+      text: string
+    }
+  | {
+      id: string
       kind: 'assistant_draft'
       text: string
     }
@@ -57,6 +93,17 @@ export type TranscriptItem =
       kind: 'structured_card'
       title: string
       entries: StructuredCardEntry[]
+    }
+  | {
+      id: string
+      kind: 'task_list_snapshot'
+      snapshot: TaskListSnapshot
+      collapsed: boolean
+    }
+  | {
+      id: string
+      kind: 'plan_mode_snapshot'
+      snapshot: PlanModeSnapshot
     }
   | {
       id: string
@@ -102,6 +149,7 @@ export type UiState = {
     prompt?: string
     promptKind?: 'prompt' | 'slash'
     assistantDraftId?: string
+    streamedAssistantText?: string
     activityToolGroupIds?: Record<string, string>
   }
 }
@@ -121,6 +169,10 @@ export type UiEvent =
       text: string
     }
   | {
+      type: 'assistant_stream_chunk'
+      text: string
+    }
+  | {
       type: 'assistant_progress_message'
       text: string
     }
@@ -129,11 +181,14 @@ export type UiEvent =
       toolUseId: string
       text: string
       title?: string
+      toolName?: string
+      input?: Record<string, unknown>
     }
   | {
       type: 'tool_result_received'
       toolUseId: string
       text: string
+      output?: unknown
     }
   | {
       type: 'system_notice'
@@ -143,6 +198,14 @@ export type UiEvent =
       type: 'structured_card_added'
       title: string
       entries: StructuredCardEntry[]
+    }
+  | {
+      type: 'task_board_updated'
+      snapshot: TaskListSnapshot
+    }
+  | {
+      type: 'plan_mode_updated'
+      snapshot: PlanModeSnapshot
     }
   | {
       type: 'turn_completed'

@@ -14,11 +14,10 @@ import { getTextContent, type Message } from '../types/message.js'
 import {
   describePlanModeToolUse,
   describeSystemReminderText,
-  getPlanBoardObservationLines,
+  getPlanModeObservationLines,
   isSystemReminderText,
 } from '../tasks/observability.js'
-import { loadPlanBoardForSession } from '../tasks/store.js'
-import { getSessionsDir } from './paths.js'
+import { getProjectSessionsDir } from './paths.js'
 import {
   loadSessionMessages,
   loadSessionMeta,
@@ -250,15 +249,38 @@ function compareUpdatedAtDesc(left: SessionMeta, right: SessionMeta): number {
   return right.updatedAt.localeCompare(left.updatedAt)
 }
 
+function resolveWorkspaceHistoryArgs(
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv,
+  env: NodeJS.ProcessEnv,
+): {
+  workspaceRoot: string
+  env: NodeJS.ProcessEnv
+} {
+  if (typeof workspaceRootOrEnv === 'string') {
+    return { workspaceRoot: workspaceRootOrEnv, env }
+  }
+
+  return { workspaceRoot: process.cwd(), env: workspaceRootOrEnv }
+}
+
 export async function listSessionMetas(
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SessionMeta[]> {
+  const resolved = resolveWorkspaceHistoryArgs(workspaceRootOrEnv, env)
+  const scopedEnv = {
+    ...resolved.env,
+    DCLAW_WORKSPACE_ROOT: resolved.workspaceRoot,
+  }
   try {
-    const entries = await readdir(getSessionsDir(env), { withFileTypes: true })
+    const entries = await readdir(
+      getProjectSessionsDir(resolved.workspaceRoot, scopedEnv),
+      { withFileTypes: true },
+    )
     const metas = await Promise.all(
       entries
         .filter(entry => entry.isDirectory())
-        .map(entry => loadSessionMeta(entry.name, env)),
+        .map(entry => loadSessionMeta(entry.name, scopedEnv)),
     )
 
     return metas
@@ -270,13 +292,19 @@ export async function listSessionMetas(
 }
 
 export async function listSessionHistory(
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SessionHistoryEntry[]> {
-  const metas = await listSessionMetas(env)
+  const resolved = resolveWorkspaceHistoryArgs(workspaceRootOrEnv, env)
+  const scopedEnv = {
+    ...resolved.env,
+    DCLAW_WORKSPACE_ROOT: resolved.workspaceRoot,
+  }
+  const metas = await listSessionMetas(resolved.workspaceRoot, scopedEnv)
 
   const sessions: Array<SessionHistoryEntry | null> = await Promise.all(
     metas.map(async (meta): Promise<SessionHistoryEntry | null> => {
-      const messages = await loadSessionMessages(meta.sessionId, env)
+      const messages = await loadSessionMessages(meta.sessionId, scopedEnv)
       if (messages.length === 0) {
         return null
       }
@@ -286,8 +314,10 @@ export async function listSessionHistory(
       const persistedToolResultInfo =
         getPersistedToolResultInfoFromMeta(meta.persistedToolResults) ??
         getPersistedToolResultInfo(messages)
-      const board = await loadPlanBoardForSession(meta.sessionId, env)
-      const subagents = await loadSessionSubagentSummary(meta.sessionId, env)
+      const subagents = await loadSessionSubagentSummary(
+        meta.sessionId,
+        scopedEnv,
+      )
       const lastUserMessage = [...messages]
         .reverse()
         .find(
@@ -326,7 +356,7 @@ export async function listSessionHistory(
           : {}),
         compactBoundaryCount: compactBoundaries.length,
         ...(lastCompactBoundaryLabel ? { lastCompactBoundaryLabel } : {}),
-        planningSummary: board ? getPlanBoardObservationLines(board) : [],
+        planningSummary: getPlanModeObservationLines(meta.planMode),
         subagents,
       }
     }),

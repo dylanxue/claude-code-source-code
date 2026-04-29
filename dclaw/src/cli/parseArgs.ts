@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import type { PermissionMode } from '../types/tool.js'
-import type { InteractiveUiMode, ParsedCliCommand } from './types.js'
+import type { ParsedCliCommand } from './types.js'
 
 export class CliArgumentError extends Error {
   constructor(message: string) {
@@ -43,22 +43,6 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
     maxIterations: undefined as number | undefined,
     stream: true,
     systemPrompt: undefined as string | undefined,
-    interactiveUi: 'auto' as InteractiveUiMode,
-  }
-
-  const setInteractiveUiMode = (
-    nextMode: 'tui' | 'legacy-repl',
-    flag: '--tui' | '--legacy-repl',
-  ): void => {
-    if (options.interactiveUi !== 'auto' && options.interactiveUi !== nextMode) {
-      throw new CliArgumentError(
-        `${flag} cannot be combined with ${
-          options.interactiveUi === 'tui' ? '--tui' : '--legacy-repl'
-        }`,
-      )
-    }
-
-    options.interactiveUi = nextMode
   }
 
   let mode: ParsedCliCommand['mode'] = 'interactive'
@@ -85,12 +69,10 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedCliCom
       case '--no-stream':
         options.stream = false
         break
-      case '--tui':
-        setInteractiveUiMode('tui', '--tui')
-        break
       case '--legacy-repl':
-        setInteractiveUiMode('legacy-repl', '--legacy-repl')
-        break
+        throw new CliArgumentError('Unknown option: --legacy-repl')
+      case '--tui':
+        throw new CliArgumentError('Unknown option: --tui')
       case '--runtime': {
         const result = takeValue(args, i, arg)
         options.runtime = result.value
@@ -179,8 +161,6 @@ export function formatHelp(): string {
     '  dclaw doctor',
     '',
     'Options:',
-    '  --tui                     Start the experimental Ink + React TUI',
-    '  --legacy-repl             Force the legacy readline REPL',
     '  --runtime <name>          Select runtime profile',
     '  --stream                  Stream assistant output as it arrives (default)',
     '  --no-stream               Disable streaming and wait for the final response',

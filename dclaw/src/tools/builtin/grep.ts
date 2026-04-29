@@ -495,7 +495,19 @@ export const grepTool: Tool<GrepToolInput, GrepToolOutput> = buildTool({
         }
       }
 
-      await stat(toAbsoluteToolPath(input.path))
+      const absolutePath = toAbsoluteToolPath(input.path)
+      try {
+        await stat(absolutePath)
+      } catch (error) {
+        const fileError = error as NodeJS.ErrnoException
+        if (fileError.code === 'ENOENT') {
+          return {
+            ok: false,
+            error: `Grep path does not exist: ${absolutePath}`,
+          }
+        }
+        throw error
+      }
     }
 
     if (

@@ -10,11 +10,24 @@ const GROUP_TITLES_BY_TOOL_NAME: Record<string, string> = {
   WebFetch: 'Checked',
   GitDiff: 'Checked',
   Agent: 'Delegated',
+  AskUserQuestion: 'Questions',
   EnterPlanMode: 'Planned',
   ExitPlanMode: 'Planned',
 }
 
-export function getActivityGroupTitle(toolName: string): string {
+function isExplorationBashCommand(input: Record<string, unknown>): boolean {
+  const command = typeof input.command === 'string' ? input.command.trim() : ''
+  return /^(ls|tree|find|rg|grep|git\s+(status|diff|log|show|ls-files)\b)/u.test(command)
+}
+
+export function getActivityGroupTitle(
+  toolName: string,
+  input: Record<string, unknown> = {},
+): string {
+  if (toolName === 'Bash' && isExplorationBashCommand(input)) {
+    return 'Explored'
+  }
+
   if (toolName in GROUP_TITLES_BY_TOOL_NAME) {
     return GROUP_TITLES_BY_TOOL_NAME[toolName] ?? 'Activity'
   }

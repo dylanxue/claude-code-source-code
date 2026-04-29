@@ -125,6 +125,25 @@ test('query trace file paths and events can be scoped to a session id', async ()
   }
 })
 
+test('query trace file paths can be scoped to a workspace project', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-workspace-'))
+  const workspaceRoot = '/tmp/workspaces/query trace'
+  const sessionId = 'session-workspace-trace'
+  const env = {
+    ...process.env,
+    DCLAW_HOME: join(dir, '.dclaw-home'),
+  }
+  const tracePath = createQueryTraceFilePath(env, sessionId, workspaceRoot)
+
+  try {
+    assert.match(tracePath, /\/projects\//)
+    assert.match(tracePath, /\/query-traces\//)
+    assert.match(tracePath, new RegExp(`${sessionId}-`))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('query trace summarizes reasoning and thinking blocks', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dclaw-query-trace-'))
   const tracePath = createQueryTraceFilePath({

@@ -6,6 +6,8 @@
 2. 当前代码已经落地到什么程度
 3. 仍然保留的兼容策略与非目标
 
+> 下一轮 Plan Mode 重构决策已经单独记录在 [plan-mode-session-meta-refactor.md](./plan-mode-session-meta-refactor.md)。本文档继续作为当前已落地实现的状态记录；新文档描述下一步目标态。
+
 ## 1. 最新结论
 
 ### 1.1 总体方向

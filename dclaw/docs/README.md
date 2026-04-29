@@ -49,6 +49,7 @@
 
 - [plan-centered-design.md](./plan-centered-design.md)
 - [plan-task-runtime-split-design.md](./plan-task-runtime-split-design.md)
+- [plan-mode-session-meta-refactor.md](./plan-mode-session-meta-refactor.md)
 - [architecture.md](./architecture.md)
 - [phases.md](./phases.md)
 - [mvp-tech-design.md](./mvp-tech-design.md)

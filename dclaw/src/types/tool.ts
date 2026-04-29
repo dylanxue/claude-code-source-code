@@ -61,6 +61,7 @@ export type AskUserQuestion = {
   id?: string
   question: string
   header: string
+  preview?: string
   options: AskUserQuestionOption[]
   multiSelect?: boolean
 }

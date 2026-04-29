@@ -131,6 +131,39 @@ test('plan mode allows mutating only the plan file', async () => {
   }
 })
 
+test('plan mode blocks Bash redirection even when targeting the plan file', async () => {
+  const dir = await createTempDir('dclaw-plan-bash-write-')
+  const planFilePath = join(dir, 'plan.md')
+  const registry = createDefaultToolRegistry()
+
+  try {
+    const command = `cat > ${planFilePath} <<'EOF'\n# Plan\nEOF`
+    const result = await executeSingleTurn({
+      client: new StubLlmClient(),
+      messages: [
+        createTextMessage(
+          'user',
+          `tool:Bash command=${command.replace(/\s/g, '\\ ')}`,
+        ),
+      ],
+      toolRegistry: registry,
+      toolContext: createToolContext({
+        availableTools: registry.list().map(tool => tool.name),
+        permissionMode: 'plan',
+        planFilePath,
+      }),
+    })
+
+    assert.match(
+      result.outputText,
+      /Permission mode plan does not allow mutating tool calls/,
+    )
+    await assert.rejects(readFile(planFilePath, 'utf8'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('accept-edits mode still blocks Bash without interactive approval', async () => {
   const registry = createDefaultToolRegistry()
 

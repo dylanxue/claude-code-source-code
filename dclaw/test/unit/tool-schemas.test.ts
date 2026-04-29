@@ -307,6 +307,7 @@ test('query loop forwards dedicated long prompts for implemented core tools', as
 
   const exitPlanMode = tools.find(tool => tool.name === 'ExitPlanMode')
   assert.match(exitPlanMode?.description ?? '', /does not take the full plan content as input/i)
+  assert.match(exitPlanMode?.description ?? '', /does not directly leave/i)
   assert.match(exitPlanMode?.description ?? '', /Do NOT use AskUserQuestion to ask "Is this plan okay\?"/i)
 })
 
@@ -315,7 +316,6 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   const registry = createDefaultToolRegistry()
   const toolContext = createToolContext({
     availableTools: [
-      'EnterPlanMode',
       'TaskCreate',
       'TaskList',
       'TaskGet',
@@ -359,11 +359,6 @@ test('query loop forwards Claude Code style task tool prompts to the llm client'
   assert.match(taskUpdate?.description ?? '', /Only one task may be `in_progress` at a time/i)
   assert.match(taskUpdate?.description ?? '', /cancelled/i)
   assert.match(taskUpdate?.description ?? '', /## Examples/i)
-
-  const enterPlanMode = tools.find(tool => tool.name === 'EnterPlanMode')
-  assert.match(enterPlanMode?.description ?? '', /no-implementation planning lock/i)
-  assert.match(enterPlanMode?.description ?? '', /Do not enter plan mode merely because a task is non-trivial/i)
-  assert.match(enterPlanMode?.description ?? '', /Plan mode is for plan creation only/i)
 })
 
 test('query loop stores model-facing tool results separately from raw tool results', async () => {

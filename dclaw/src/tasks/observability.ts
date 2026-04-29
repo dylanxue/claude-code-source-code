@@ -1,9 +1,8 @@
-import type { PlanBoard } from './types.js'
+import type { PlanModeState } from '../session/store.js'
 
 type PlanModeToolOutput = {
   status?: string
   planFilePath?: unknown
-  resumedPermissionMode?: unknown
 }
 
 type PlanModeToolRawOutput = {
@@ -63,8 +62,8 @@ export function describePlanModeToolUse(
 
   if (toolName === 'ExitPlanMode') {
     return note
-      ? `[plan mode] exit: ${note}`
-      : '[plan mode] exit'
+      ? `[plan mode] exit confirmation: ${note}`
+      : '[plan mode] exit confirmation'
   }
 
   return undefined
@@ -84,10 +83,6 @@ export function describePlanModeToolResult(
       ? getString((output as PlanModeToolOutput).status)
       : undefined
   const planFilePath = getPlanFilePath(output)
-  const resumedPermissionMode =
-    typeof output === 'object' && output !== null
-      ? getString((output as PlanModeToolOutput).resumedPermissionMode)
-      : undefined
   const summary =
     typeof rawOutput === 'object' && rawOutput !== null
       ? getString((rawOutput as PlanModeToolRawOutput).summary)
@@ -107,10 +102,19 @@ export function describePlanModeToolResult(
   }
 
   if (toolName === 'ExitPlanMode') {
-    if (status === 'exited') {
-      return resumedPermissionMode
-        ? `[planning lock] exited: ${resumedPermissionMode}`
-        : '[planning lock] exited'
+    if (status === 'confirmation_requested') {
+      return planFilePath
+        ? `[planning lock] exit confirmation requested: ${planFilePath}`
+        : '[planning lock] exit confirmation requested'
+    }
+    if (status === 'accepted_implement') {
+      return '[planning lock] plan approved'
+    }
+    if (status === 'accepted_clear_context') {
+      return '[planning lock] plan approved for fresh context'
+    }
+    if (status === 'kept_planning') {
+      return '[planning lock] kept planning'
     }
     if (status === 'already_inactive') {
       return '[planning lock] already inactive'
@@ -120,24 +124,18 @@ export function describePlanModeToolResult(
   return summary
 }
 
-export function getPlanBoardBriefObservationLines(board: PlanBoard): string[] {
-  return [
-    ...(board.title ? [`board title: ${board.title}`] : []),
-    ...(board.purpose ? [`board purpose: ${board.purpose}`] : []),
-    ...(board.background ? [`board background: ${board.background}`] : []),
-    ...(board.plan ? [`board plan: ${board.plan}`] : []),
-    ...(board.scope ? [`board scope: ${board.scope}`] : []),
-    ...(board.verification
-      ? [`board verification: ${board.verification}`]
-      : []),
-  ]
-}
+export function getPlanModeObservationLines(
+  planMode: PlanModeState | undefined,
+): string[] {
+  if (!planMode) {
+    return []
+  }
 
-export function getPlanBoardObservationLines(board: PlanBoard): string[] {
   return [
-    `plan board: ${board.boardId}`,
-    ...getPlanBoardBriefObservationLines(board),
-    `plan mode state: ${board.mode}`,
-    ...(board.planFilePath ? [`plan file: ${board.planFilePath}`] : []),
+    `plan mode: ${planMode.status}`,
+    ...(planMode.planFilePath ? [`plan file: ${planMode.planFilePath}`] : []),
+    ...(planMode.resumePermissionMode
+      ? [`resume permissions: ${planMode.resumePermissionMode}`]
+      : []),
   ]
 }

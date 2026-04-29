@@ -17,30 +17,19 @@ import { listSessionHistory } from '../session/history.js'
 import { loadSessionForResume } from '../session/resume.js'
 import {
   createSession,
+  ensureSessionPlanFile,
   loadSessionMeta,
   updateSessionMeta,
+  updateSessionPlanMode,
+  type PlanModeState,
 } from '../session/store.js'
 import {
-  ensurePlanFileForPlanBoard,
   readPlanFile,
 } from '../tasks/planFiles.js'
 import {
   appendPlanSnapshotForFile,
-  recoverPlanBoardPlanFile,
+  recoverSessionPlanFile,
 } from '../tasks/planSnapshots.js'
-import {
-  getPlanBoardBriefObservationLines,
-  getPlanBoardObservationLines,
-} from '../tasks/observability.js'
-import {
-  attachPlanBoardToSession,
-  createPlanBoard,
-  loadPlanBoard,
-  loadPlanBoardForSession,
-  updatePlanBoard,
-  updatePlanBoardLatestSession,
-} from '../tasks/store.js'
-import type { PlanBoard } from '../tasks/types.js'
 import { formatTranscript } from '../session/transcript.js'
 import type { PermissionMode } from '../types/tool.js'
 import type { SkillStatus } from '../skills/enablement.js'
@@ -70,7 +59,7 @@ function formatProviderModelLabel(provider: string, model?: string): string {
   return `${provider}${model ? ` / ${model}` : ''}`
 }
 
-export type ReplSessionState = {
+export type InteractiveSessionState = {
   sessionId: string
   mode: 'interactive' | 'resume'
   runtimeName?: string
@@ -82,11 +71,12 @@ export type ReplSessionState = {
   permissionModeSource: string
 }
 
-export type ReplCommandContext = {
+export type SlashCommandContext = {
   engine: QueryEngine
   options: CommonCliOptions
-  session: ReplSessionState
+  session: InteractiveSessionState
   rotateQueryTrace?: (sessionId?: string) => Promise<string | undefined>
+  env?: NodeJS.ProcessEnv
   switchRuntime?: (
     runtimeName: string,
   ) => Promise<{
@@ -100,46 +90,46 @@ export type ReplCommandContext = {
   ) => Promise<SkillStatus[]>
 }
 
-export type ReplCommandPresentationKind =
+export type SlashCommandPresentationKind =
   | 'assistant_note'
   | 'structured_card'
 
-export type ReplCommandArgKind =
+export type SlashCommandArgKind =
   | 'none'
   | 'freeform'
   | 'enum'
 
-type ReplCommandDefinition = {
+type SlashCommandDefinition = {
   name: string
   aliases?: string[]
   displayName?: string
   description: string
   argumentHint?: string
-  argKind?: ReplCommandArgKind
+  argKind?: SlashCommandArgKind
   canRunWhileBusy?: boolean
-  presentationKind?: ReplCommandPresentationKind
+  presentationKind?: SlashCommandPresentationKind
   presentationTitle?: string
   handle: (
     args: string[],
-    context: ReplCommandContext,
+    context: SlashCommandContext,
   ) => Promise<void> | void
 }
 
-export type ReplCommandCatalogItem = {
+export type SlashCommandCatalogItem = {
   name: string
   aliases?: string[]
   displayName: string
   description: string
   argumentHint?: string
-  argKind: ReplCommandArgKind
+  argKind: SlashCommandArgKind
   canRunWhileBusy?: boolean
-  presentationKind: ReplCommandPresentationKind
+  presentationKind: SlashCommandPresentationKind
   presentationTitle?: string
 }
 
 let activeOutputWriter: ((text: string) => void) | undefined
 
-function writeReplOutput(text: string): void {
+function writeSlashCommandOutput(text: string): void {
   if (activeOutputWriter) {
     activeOutputWriter(text)
     return
@@ -149,62 +139,40 @@ function writeReplOutput(text: string): void {
 }
 
 function printLines(lines: string[]): void {
-  writeReplOutput(lines.join('\n') + '\n')
-}
-
-async function ensureBoardPlanFile(board: PlanBoard): Promise<PlanBoard> {
-  const { filePath } = await ensurePlanFileForPlanBoard(board)
-  if (board.planFilePath === filePath) {
-    return board
-  }
-
-  return (
-    (await updatePlanBoard(
-      board.boardId,
-      current => ({
-        ...current,
-        planFilePath: filePath,
-        updatedAt: new Date().toISOString(),
-      }),
-    )) ?? {
-      ...board,
-      planFilePath: filePath,
-    }
-  )
+  writeSlashCommandOutput(lines.join('\n') + '\n')
 }
 
 async function syncPlanModeRuntime(
-  context: ReplCommandContext,
-): Promise<PlanBoard | null> {
-  const loadedBoard = await loadPlanBoardForSession(context.session.sessionId)
-  const board = loadedBoard
-    ? await recoverPlanBoardPlanFile(
-        loadedBoard,
-        context.engine.getMessages(),
-      )
-    : null
-  const activePlanFilePath = board?.mode === 'active' ? board.planFilePath : undefined
+  context: SlashCommandContext,
+): Promise<PlanModeState | undefined> {
+  const recoveredPlanFilePath = await recoverSessionPlanFile(
+    context.session.sessionId,
+    context.engine.getMessages(),
+  )
+  const meta = await loadSessionMeta(context.session.sessionId)
+  const planMode = meta?.planMode
+  const activePlanFilePath =
+    planMode?.status === 'active'
+      ? planMode.planFilePath ?? recoveredPlanFilePath
+      : undefined
 
   context.engine.setPlanFilePath(activePlanFilePath)
-  if (board?.mode === 'active') {
+  if (planMode?.status === 'active') {
     context.engine.setPermissionMode('plan')
     context.session.permissionMode = 'plan'
-    context.session.permissionModeSource = 'plan_board'
+    context.session.permissionModeSource = 'plan_mode'
   } else if (context.session.permissionMode === 'plan') {
-    const nextPermissionMode = board?.resumePermissionMode ?? 'default'
+    const nextPermissionMode = planMode?.resumePermissionMode ?? 'default'
     context.engine.setPermissionMode(nextPermissionMode)
     context.session.permissionMode = nextPermissionMode
-    context.session.permissionModeSource = 'plan_board'
+    context.session.permissionModeSource = 'plan_mode'
   }
 
-  return board
+  return planMode
 }
 
-async function printSessionInfo(context: ReplCommandContext): Promise<void> {
+async function printSessionInfo(context: SlashCommandContext): Promise<void> {
   const meta = await loadSessionMeta(context.session.sessionId)
-  const planBoard = meta?.planBoardId
-    ? await loadPlanBoard(meta.planBoardId)
-    : null
   const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
   const llmConfig = await loadResolvedLlmConfig(context.options.cwd, configured.env)
   const runtime = resolveLlmRuntimeConfig(
@@ -243,9 +211,10 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
     ...(context.engine.getQueryTracePath()
       ? [`query trace: ${context.engine.getQueryTracePath()}`]
       : []),
-    ...(meta?.planBoardId ? [`plan board: ${meta.planBoardId}`] : []),
-    ...(planBoard ? [`plan mode state: ${planBoard.mode}`] : []),
-    ...(planBoard?.planFilePath ? [`plan file: ${planBoard.planFilePath}`] : []),
+    ...(meta?.planMode ? [`plan mode state: ${meta.planMode.status}`] : []),
+    ...(meta?.planMode?.planFilePath
+      ? [`plan file: ${meta.planMode.planFilePath}`]
+      : []),
     ...formatCompactRecommendationLines(compactRecommendation),
     ...(compactBoundaries.length > 0
       ? [`compact boundaries: ${compactBoundaries.length}`]
@@ -269,7 +238,7 @@ async function printSessionInfo(context: ReplCommandContext): Promise<void> {
 }
 
 async function printTranscript(
-  context: ReplCommandContext,
+  context: SlashCommandContext,
   maxMessages?: number,
 ): Promise<void> {
   const transcriptLines = formatTranscript(context.engine.getMessages(), {
@@ -291,11 +260,11 @@ async function printTranscript(
   ])
 }
 
-async function clearConversation(context: ReplCommandContext): Promise<void> {
-  const board = await loadPlanBoardForSession(context.session.sessionId)
+async function clearConversation(context: SlashCommandContext): Promise<void> {
+  const meta = await loadSessionMeta(context.session.sessionId)
   const nextPermissionMode =
     context.session.permissionMode === 'plan'
-      ? board?.resumePermissionMode ?? 'default'
+      ? meta?.planMode?.resumePermissionMode ?? 'default'
       : (context.session.permissionMode as PermissionMode)
   const nextSession = await createSession({
     cwd: context.options.cwd,
@@ -314,7 +283,7 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   context.session.permissionMode = nextPermissionMode
   const queryTracePath = await context.rotateQueryTrace?.(nextSession.sessionId)
   if (nextPermissionMode === 'plan') {
-    context.session.permissionModeSource = 'plan_board'
+    context.session.permissionModeSource = 'plan_mode'
   }
 
   printLines([
@@ -325,64 +294,33 @@ async function clearConversation(context: ReplCommandContext): Promise<void> {
   ])
 }
 
-function formatPlanBoardSummary(board: PlanBoard): string[] {
+function formatPlanModeSummary(planMode: PlanModeState | undefined): string[] {
   return [
-    `plan board: ${board.boardId}`,
-    ...getPlanBoardBriefObservationLines(board),
-    `plan mode: ${board.mode}`,
-    `workspace: ${board.workspaceId}`,
-    `root session: ${board.rootSessionId}`,
-    `latest session: ${board.latestSessionId}`,
-    `plan file: ${board.planFilePath ?? '<none>'}`,
+    `plan mode: ${planMode?.status ?? 'inactive'}`,
+    `plan file: ${planMode?.planFilePath ?? '<none>'}`,
   ]
 }
 
-async function getOrCreateCurrentPlanBoard(
-  context: ReplCommandContext,
-): Promise<PlanBoard> {
-  const existing = await loadPlanBoardForSession(context.session.sessionId)
-  if (existing) {
-    const updated =
-      existing.latestSessionId !== context.session.sessionId
-        ? await updatePlanBoardLatestSession(
-            existing.boardId,
-            context.session.sessionId,
-          )
-        : existing
-    return updated ?? existing
-  }
-
-  const board = await createPlanBoard({
-    workspaceId: context.options.cwd,
-    rootSessionId: context.session.sessionId,
-  })
-  await attachPlanBoardToSession(context.session.sessionId, board.boardId)
-  return board
-}
-
-async function showPlanState(context: ReplCommandContext): Promise<void> {
-  const board = await syncPlanModeRuntime(context)
-  if (!board) {
+async function showPlanState(context: SlashCommandContext): Promise<void> {
+  const planMode = await syncPlanModeRuntime(context)
+  if (!planMode?.planFilePath) {
     printLines([
-      'No plan board is attached to this session yet.',
+      'No session plan file is attached yet.',
       'Use /plan to enter plan mode and create one.',
       '',
     ])
     return
   }
 
-  const planContent =
-    board.planFilePath
-      ? await readPlanFile(board.planFilePath)
-      : null
+  const planContent = await readPlanFile(planMode.planFilePath)
   const planPreview = planContent
     ?.split('\n')
     .map(line => line.trim())
     .find(line => line.length > 0 && !line.startsWith('#'))
 
   printLines([
-    ...formatPlanBoardSummary(board),
-    ...(board.planFilePath && existsSync(board.planFilePath)
+    ...(planMode ? formatPlanModeSummary(planMode) : []),
+    ...(existsSync(planMode.planFilePath)
       ? ['plan file status: ready']
       : ['plan file status: missing']),
     ...(planPreview ? [`plan preview: ${planPreview}`] : []),
@@ -390,90 +328,81 @@ async function showPlanState(context: ReplCommandContext): Promise<void> {
   ])
 }
 
-async function enterPlanMode(context: ReplCommandContext): Promise<void> {
-  const board = await ensureBoardPlanFile(await getOrCreateCurrentPlanBoard(context))
-  const updated =
-    board.mode === 'active' && context.session.permissionMode === 'plan'
-      ? board
-      : await updatePlanBoard(
-          board.boardId,
-          current => ({
-            ...current,
-            planFilePath: board.planFilePath,
-            mode: 'active',
-            latestSessionId: context.session.sessionId,
-            needsPlanModeExitReminder: false,
-            resumePermissionMode:
-              context.session.permissionMode === 'plan'
-                ? current.resumePermissionMode ?? 'default'
-                : (context.session.permissionMode as PermissionMode),
-            updatedAt: new Date().toISOString(),
-          }),
-        )
+async function enterPlanMode(context: SlashCommandContext): Promise<void> {
+  const { filePath } = await ensureSessionPlanFile(context.session.sessionId)
+  const updated = await updateSessionPlanMode(
+    context.session.sessionId,
+    current => ({
+      ...(current ?? { status: 'inactive' as const }),
+      status: 'active',
+      planFilePath: filePath,
+      needsExitReminder: false,
+      resumePermissionMode:
+        context.session.permissionMode === 'plan'
+          ? current?.resumePermissionMode ?? 'default'
+          : (context.session.permissionMode as PermissionMode),
+    }),
+  )
 
   context.engine.setPermissionMode('plan')
-  context.engine.setPlanFilePath(updated?.planFilePath ?? board.planFilePath)
+  context.engine.setPlanFilePath(updated?.planFilePath ?? filePath)
   context.session.permissionMode = 'plan'
-  context.session.permissionModeSource = 'repl_command'
+  context.session.permissionModeSource = 'slash_command'
   await appendPlanSnapshotForFile(
     context.session.sessionId,
-    updated?.planFilePath ?? board.planFilePath,
-    'repl-enter-plan-mode',
+    updated?.planFilePath ?? filePath,
+    'slash-enter-plan-mode',
   )
 
   printLines([
-    'Entered plan mode for this REPL session.',
-    ...(updated ? formatPlanBoardSummary(updated) : []),
+    'Entered plan mode for this interactive session.',
+    ...formatPlanModeSummary(updated),
     '',
   ])
 }
 
-async function exitPlanMode(context: ReplCommandContext): Promise<void> {
-  const board = await loadPlanBoardForSession(context.session.sessionId)
-  if (!board) {
+async function exitPlanMode(context: SlashCommandContext): Promise<void> {
+  const meta = await loadSessionMeta(context.session.sessionId)
+  const planMode = meta?.planMode
+  if (!planMode || planMode.status !== 'active') {
     printLines([
-      'No plan board is attached to this session yet.',
+      'Plan mode is already inactive.',
       '',
     ])
     return
   }
 
-  const nextPermissionMode = board.resumePermissionMode ?? 'default'
-  const updated = await updatePlanBoard(
-    board.boardId,
+  const nextPermissionMode = planMode.resumePermissionMode ?? 'default'
+  const updated = await updateSessionPlanMode(
+    context.session.sessionId,
     current => ({
-      ...current,
-      mode: 'inactive',
-      hasExitedPlanModeInSession: true,
-      needsPlanModeExitReminder: true,
-      planModeReminderCount: undefined,
-      lastPlanModeReminderTurnCount: undefined,
+      ...(current ?? planMode),
+      status: 'inactive',
       resumePermissionMode: undefined,
-      latestSessionId: context.session.sessionId,
-      updatedAt: new Date().toISOString(),
+      needsExitReminder: false,
     }),
   )
 
   context.engine.setPermissionMode(nextPermissionMode)
   context.engine.setPlanFilePath(undefined)
   context.session.permissionMode = nextPermissionMode
-  context.session.permissionModeSource = 'repl_command'
+  context.session.permissionModeSource = 'slash_command'
   await appendPlanSnapshotForFile(
     context.session.sessionId,
-    updated?.planFilePath ?? board.planFilePath,
-    'repl-exit-plan-mode',
+    updated?.planFilePath ?? planMode.planFilePath,
+    'slash-exit-plan-mode',
   )
 
   printLines([
     `Exited plan mode. Restored permission mode: ${nextPermissionMode}`,
-    ...(updated ? formatPlanBoardSummary(updated) : []),
+    ...formatPlanModeSummary(updated),
     '',
   ])
 }
 
 async function handlePlanCommand(
   args: string[],
-  context: ReplCommandContext,
+  context: SlashCommandContext,
 ): Promise<void> {
   const subcommand = args[0]?.toLowerCase()
 
@@ -482,9 +411,19 @@ async function handlePlanCommand(
     return
   }
 
-  const board = await loadPlanBoardForSession(context.session.sessionId)
-  if (board?.mode === 'active' || context.session.permissionMode === 'plan') {
+  if (subcommand === 'show' || subcommand === 'view' || subcommand === 'status') {
     await showPlanState(context)
+    return
+  }
+
+  if (subcommand === 'enter') {
+    await enterPlanMode(context)
+    return
+  }
+
+  const meta = await loadSessionMeta(context.session.sessionId)
+  if (meta?.planMode?.status === 'active' || context.session.permissionMode === 'plan') {
+    await exitPlanMode(context)
     return
   }
 
@@ -493,7 +432,7 @@ async function handlePlanCommand(
 
 async function compactConversation(
   args: string[],
-  context: ReplCommandContext,
+  context: SlashCommandContext,
 ): Promise<void> {
   const allMessages = context.engine.getMessages()
   const messages = getMessagesAfterCompactBoundary(
@@ -510,7 +449,7 @@ async function compactConversation(
   const instructionText = args.join(' ').trim()
   const contextStats = context.engine.getContextStats()
   const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
-  const { boundary, boundaryMessage, summaryMessage } = await compactSession({
+  const { boundary, boundaryMessage, summaryMessage, messagesToKeep } = await compactSession({
     sourceSessionId: context.session.sessionId,
     messages,
     cwd: context.options.cwd,
@@ -523,6 +462,7 @@ async function compactConversation(
     instructionText,
     contextStats,
     client: context.engine.getClient(),
+    queryTraceSink: context.engine.getQueryTraceSink(),
     env: configured.env,
   })
 
@@ -531,6 +471,7 @@ async function compactConversation(
     ...allMessages,
     boundaryMessage,
     summaryMessage,
+    ...messagesToKeep,
   ])
 
   printLines([
@@ -589,7 +530,7 @@ function formatAvailableRuntimeLines(
 }
 
 async function printCurrentRuntime(
-  context: ReplCommandContext,
+  context: SlashCommandContext,
   mode: 'current' | 'list' = 'current',
 ): Promise<void> {
   const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
@@ -621,7 +562,7 @@ async function printCurrentRuntime(
 
 async function setCurrentRuntime(
   args: string[],
-  context: ReplCommandContext,
+  context: SlashCommandContext,
 ): Promise<void> {
   if (args.length === 0) {
     await printCurrentRuntime(context)
@@ -641,7 +582,7 @@ async function setCurrentRuntime(
 
   if (!context.switchRuntime) {
     printLines([
-      'Runtime switching is not available in this REPL context.',
+      'Runtime switching is not available in this interactive context.',
       '',
     ])
     return
@@ -658,17 +599,17 @@ async function setCurrentRuntime(
   }))
 
   printLines([
-    `Runtime updated for this REPL session: ${runtime.runtimeName ?? nextRuntime}`,
+    `Runtime updated for this interactive session: ${runtime.runtimeName ?? nextRuntime}`,
     ...formatRuntimeSummaryLines(runtime, queryTracePath),
     '',
   ])
 }
 
-function printCurrentPermissionMode(context: ReplCommandContext): void {
+function printCurrentPermissionMode(context: SlashCommandContext): void {
   printLines([
     `Current permission mode: ${context.session.permissionMode}`,
     `Available modes: ${ALL_PERMISSION_MODES.join(', ')}`,
-    'Use /permissions <mode> to switch permission modes for this REPL session.',
+    'Use /permissions <mode> to switch permission modes for this interactive session.',
     '',
   ])
 }
@@ -694,7 +635,7 @@ function formatSkillStatusLines(skills: SkillStatus[]): string[] {
 
 async function handleSkillsCommand(
   args: string[],
-  context: ReplCommandContext,
+  context: SlashCommandContext,
 ): Promise<void> {
   if (args.length > 0) {
     printLines([
@@ -706,7 +647,7 @@ async function handleSkillsCommand(
 
   if (!context.listSkillStatuses) {
     printLines([
-      'Skills are not available in this REPL context.',
+      'Skills are not available in this interactive context.',
       '',
     ])
     return
@@ -721,7 +662,7 @@ async function handleSkillsCommand(
 
 function setCurrentPermissionMode(
   args: string[],
-  context: ReplCommandContext,
+  context: SlashCommandContext,
 ): void {
   if (args.length === 0) {
     printCurrentPermissionMode(context)
@@ -740,16 +681,16 @@ function setCurrentPermissionMode(
 
   context.engine.setPermissionMode(nextPermissionMode as PermissionMode)
   context.session.permissionMode = nextPermissionMode
-  context.session.permissionModeSource = 'repl_command'
+  context.session.permissionModeSource = 'slash_command'
 
   printLines([
-    `Permission mode updated for this REPL session: ${nextPermissionMode}`,
+    `Permission mode updated for this interactive session: ${nextPermissionMode}`,
     '',
   ])
 }
 
-async function printResumeSuggestions(): Promise<void> {
-  const sessions = await listSessionHistory()
+async function printResumeSuggestions(context: SlashCommandContext): Promise<void> {
+  const sessions = await listSessionHistory(context.options.cwd)
   const lines = ['Usage: /resume <session-id>', '']
 
   if (sessions.length === 0) {
@@ -778,21 +719,22 @@ async function printResumeSuggestions(): Promise<void> {
       lines.push('')
     }
   })
-  lines.push('', 'Use /resume <session-id> to switch this REPL to one of them.', '')
+  lines.push('', 'Use /resume <session-id> to switch this interactive session to one of them.', '')
   printLines(lines)
 }
 
 async function resumeConversation(
   args: string[],
-  context: ReplCommandContext,
+  context: SlashCommandContext,
 ): Promise<void> {
   const sessionId = args[0]?.trim()
   if (!sessionId) {
-    await printResumeSuggestions()
+    await printResumeSuggestions(context)
     return
   }
 
-  const resumed = await loadSessionForResume(sessionId)
+  const env = context.env ?? process.env
+  const resumed = await loadSessionForResume(sessionId, env)
   if (!resumed) {
     printLines([
       `Session not found: ${sessionId}`,
@@ -828,14 +770,18 @@ async function resumeConversation(
 
   context.engine.resetMessages(resumed.messages)
   context.engine.setSessionId(resumed.meta.sessionId)
-  const planBoard = await syncPlanModeRuntime(context)
-  await updateSessionMeta(context.session.sessionId, meta => ({
-    ...meta,
-    runtimeName: context.session.runtimeName,
-    provider: context.session.provider,
-    model: context.session.model,
-    updatedAt: new Date().toISOString(),
-  }))
+  const planMode = await syncPlanModeRuntime(context)
+  await updateSessionMeta(
+    context.session.sessionId,
+    meta => ({
+      ...meta,
+      runtimeName: context.session.runtimeName,
+      provider: context.session.provider,
+      model: context.session.model,
+      updatedAt: new Date().toISOString(),
+    }),
+    env,
+  )
   const transcriptLines = formatTranscript(resumed.messages, {
     includeThinking: false,
     maxMessages: 10,
@@ -856,7 +802,7 @@ async function resumeConversation(
     ...(lastCompactBoundary
       ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
       : []),
-    ...(planBoard ? getPlanBoardObservationLines(planBoard) : []),
+    ...(planMode ? formatPlanModeSummary(planMode) : []),
     ...(resumed.subagents.count > 0
       ? [
           `subagents: ${resumed.subagents.count}`,
@@ -878,7 +824,7 @@ async function resumeConversation(
   ])
 }
 
-const REPL_COMMANDS: ReplCommandDefinition[] = [
+const SLASH_COMMANDS: SlashCommandDefinition[] = [
   {
     name: '/status',
     displayName: 'Status',
@@ -909,11 +855,23 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[mode]',
     argKind: 'enum',
     description:
-      'Show or change the active permission mode for this REPL session.',
+      'Show or change the active permission mode for this interactive session.',
     presentationKind: 'structured_card',
     presentationTitle: 'Permissions',
     handle(args, context) {
       setCurrentPermissionMode(args, context)
+    },
+  },
+  {
+    name: '/plan',
+    displayName: 'Plan',
+    argumentHint: '[enter|exit|show]',
+    argKind: 'enum',
+    description: 'Toggle plan mode for this session, or show the current plan file.',
+    presentationKind: 'structured_card',
+    presentationTitle: 'Plan Mode',
+    async handle(args, context) {
+      await handlePlanCommand(args, context)
     },
   },
   {
@@ -935,7 +893,7 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     argumentHint: '[session-id]',
     argKind: 'freeform',
     description:
-      'Resume a saved session inside the current REPL, or list recent sessions when no id is provided.',
+      'Resume a saved session inside the current interactive session, or list recent sessions when no id is provided.',
     presentationKind: 'assistant_note',
     async handle(args, context) {
       await resumeConversation(args, context)
@@ -969,25 +927,25 @@ const REPL_COMMANDS: ReplCommandDefinition[] = [
     name: '/exit',
     aliases: ['/quit'],
     displayName: 'Exit',
-    description: 'Exit the REPL.',
+    description: 'Exit dclaw.',
     argKind: 'none',
     handle() {
-      // The REPL loop intercepts /exit before command dispatch.
+      // The TUI handles /exit before slash command dispatch.
     },
   },
 ]
 
-function findReplCommand(name: string): ReplCommandDefinition | undefined {
+function findSlashCommand(name: string): SlashCommandDefinition | undefined {
   const normalized = name.toLowerCase()
-  return REPL_COMMANDS.find(
+  return SLASH_COMMANDS.find(
     command =>
       command.name.toLowerCase() === normalized ||
       command.aliases?.some(alias => alias.toLowerCase() === normalized),
   )
 }
 
-export function listReplCommands(): ReplCommandCatalogItem[] {
-  return REPL_COMMANDS.map(command => ({
+export function listSlashCommands(): SlashCommandCatalogItem[] {
+  return SLASH_COMMANDS.map(command => ({
     name: command.name,
     ...(command.aliases ? { aliases: [...command.aliases] } : {}),
     displayName: command.displayName ?? command.name.replace(/^\//u, ''),
@@ -1002,9 +960,9 @@ export function listReplCommands(): ReplCommandCatalogItem[] {
   }))
 }
 
-export async function maybeHandleReplCommand(
+export async function maybeHandleSlashCommand(
   prompt: string,
-  context: ReplCommandContext,
+  context: SlashCommandContext,
   options: {
     allowDuringActivePrompt?: boolean
     writeOutput?: (text: string) => void
@@ -1015,12 +973,12 @@ export async function maybeHandleReplCommand(
   try {
     const trimmedPrompt = prompt.trim()
     const [commandName, ...args] = trimmedPrompt.split(/\s+/)
-    const command = findReplCommand(commandName)
+    const command = findSlashCommand(commandName)
 
     if (!command) {
       if (commandName.startsWith('/')) {
         printLines([
-          `Unknown REPL command: ${commandName}`,
+          `Unknown slash command: ${commandName}`,
           'Type / to browse available commands.',
           '',
         ])

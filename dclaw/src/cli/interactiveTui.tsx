@@ -2,18 +2,22 @@ import React from 'react'
 import { render } from 'ink'
 import { TuiApp } from '../tui/App.js'
 import type { UiEvent } from '../tui/state/index.js'
-import { presentReplCommandResult } from '../tui/presenters/replCommandPresenter.js'
+import { presentSlashCommandResult } from '../tui/presenters/slashCommandPresenter.js'
 import { getCliErrorInfo } from './errorFormatting.js'
 import { createInteractiveContext, getInteractiveRuntimeLabel } from './interactiveContext.js'
 import { canStartInteractiveTui } from './interactiveUi.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
-import { maybeHandleReplCommand } from './replCommands.js'
+import { maybeHandleSlashCommand } from './slashCommands.js'
 import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { InteractiveCommand } from './types.js'
 import { createWelcomeCardData } from './welcome.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import { loadResolvedLlmConfig } from '../llm/config.js'
 import { listSessionHistory } from '../session/history.js'
+import { loadExecutionTaskBoardForSession } from '../taskboard/store.js'
+import { presentTaskBoardSnapshot } from '../tui/presenters/taskSnapshotPresenter.js'
+
+const TUI_BACKGROUND_DRAIN_TIMEOUT_MS = 5_000
 
 type CapturedCommandResult = {
   handled: boolean
@@ -64,7 +68,7 @@ function emitLocalCommandResult(
     return false
   }
 
-  const presentation = presentReplCommandResult(prompt, result.outputText)
+  const presentation = presentSlashCommandResult(prompt, result.outputText)
   presentation.events.forEach(onUiEvent)
   if (result.error !== undefined) {
     onUiEvent({
@@ -74,6 +78,11 @@ function emitLocalCommandResult(
   }
 
   return true
+}
+
+function shouldRefreshTaskSnapshotAfterLocalCommand(prompt: string): boolean {
+  const [commandName] = prompt.trim().split(/\s+/u)
+  return commandName === '/resume' || commandName === '/compact'
 }
 
 export async function runInteractiveTui(
@@ -86,10 +95,10 @@ export async function runInteractiveTui(
 
   const interactiveContext = await createInteractiveContext(command)
   const configured = await buildConfigAwareEnvWithSources(
-    interactiveContext.replOptions.cwd,
+    interactiveContext.interactiveOptions.cwd,
   )
   const llmConfig = await loadResolvedLlmConfig(
-    interactiveContext.replOptions.cwd,
+    interactiveContext.interactiveOptions.cwd,
     configured.env,
   )
   const welcomeCard = createWelcomeCardData({
@@ -98,14 +107,14 @@ export async function runInteractiveTui(
       interactiveContext.runtime.runtimeName ??
       interactiveContext.runtime.model ??
       interactiveContext.runtime.provider,
-    cwd: interactiveContext.replOptions.cwd,
+    cwd: interactiveContext.interactiveOptions.cwd,
   })
 
   const app = render(
     <TuiApp
       getBottomDockMeta={() => ({
-        cwd: interactiveContext.replOptions.cwd,
-        permissionLabel: interactiveContext.replSession.permissionMode,
+        cwd: interactiveContext.interactiveOptions.cwd,
+        permissionLabel: interactiveContext.interactiveSession.permissionMode,
         runtimeLabel: getInteractiveRuntimeLabel(interactiveContext),
       })}
       getBottomSheetOptions={() => {
@@ -118,7 +127,7 @@ export async function runInteractiveTui(
             value: mode,
             label: mode,
             description:
-              mode === interactiveContext.replSession.permissionMode
+              mode === interactiveContext.interactiveSession.permissionMode
                 ? 'Current mode'
                 : undefined,
           })),
@@ -127,7 +136,7 @@ export async function runInteractiveTui(
               value: name,
               label: name,
               description:
-                name === interactiveContext.replOptions.runtime
+                name === interactiveContext.interactiveOptions.runtime
                   ? 'Current runtime'
                   : undefined,
             })),
@@ -137,57 +146,88 @@ export async function runInteractiveTui(
               description: 'Show available runtimes without switching.',
             },
           ],
+          '/plan': [
+            {
+              value: 'enter',
+              label: 'enter',
+              description: 'Enter plan mode.',
+            },
+            {
+              value: 'exit',
+              label: 'exit',
+              description: 'Exit plan mode without approval flow.',
+            },
+            {
+              value: 'show',
+              label: 'show',
+              description: 'Show the current plan file status.',
+            },
+          ],
         }
       }}
       initialPrompt={command.prompt}
       welcomeCard={welcomeCard}
-      onListResumeSessions={() => listSessionHistory()}
+      onListResumeSessions={() => listSessionHistory(command.options.cwd)}
       onListSkillStatuses={() => {
-        if (!interactiveContext.replContext.listSkillStatuses) {
-          throw new Error('Skills are not available in this REPL context.')
+        if (!interactiveContext.slashCommandContext.listSkillStatuses) {
+          throw new Error('Skills are not available in this interactive context.')
         }
 
-        return interactiveContext.replContext.listSkillStatuses()
+        return interactiveContext.slashCommandContext.listSkillStatuses()
       }}
       onLocalCommand={async (prompt, options) => {
         const result = await captureCommandResult(async writeOutput =>
-          maybeHandleReplCommand(prompt, interactiveContext.replContext, {
+          maybeHandleSlashCommand(prompt, interactiveContext.slashCommandContext, {
             allowDuringActivePrompt: options.allowDuringActivePrompt,
             writeOutput,
           }),
         )
-        return emitLocalCommandResult(prompt, result, options.onUiEvent)
+        const handled = emitLocalCommandResult(prompt, result, options.onUiEvent)
+        if (handled && shouldRefreshTaskSnapshotAfterLocalCommand(prompt)) {
+          const board = await loadExecutionTaskBoardForSession(
+            interactiveContext.interactiveSession.sessionId,
+          )
+          if (board) {
+            options.onUiEvent({
+              type: 'task_board_updated',
+              snapshot: presentTaskBoardSnapshot(board),
+            })
+          }
+        }
+
+        return handled
       }}
       onPrompt={async (prompt, options) => {
-        interactiveContext.replContext.engine.setAskUserQuestions(
+        interactiveContext.slashCommandContext.engine.setAskUserQuestions(
           options.askUserQuestions,
         )
         const result = await runInteractiveSessionPrompt({
-          engine: interactiveContext.replContext.engine,
-          sessionId: interactiveContext.replSession.sessionId,
+          engine: interactiveContext.slashCommandContext.engine,
+          sessionId: interactiveContext.interactiveSession.sessionId,
           prompt,
-          stream: interactiveContext.replOptions.stream,
+          stream: interactiveContext.interactiveOptions.stream,
           signal: options.signal,
+          env: interactiveContext.env,
           writeOutput() {},
           flushOutput() {},
           onUiEvent: options.onUiEvent,
         })
-        interactiveContext.replSession.sessionId = result.sessionId
+        interactiveContext.interactiveSession.sessionId = result.sessionId
         const runtimePermissionMode =
-          interactiveContext.replContext.engine.getPermissionMode()
-        if (runtimePermissionMode !== interactiveContext.replSession.permissionMode) {
-          interactiveContext.replSession.permissionMode = runtimePermissionMode
-          interactiveContext.replSession.permissionModeSource = 'tool_runtime'
+          interactiveContext.slashCommandContext.engine.getPermissionMode()
+        if (runtimePermissionMode !== interactiveContext.interactiveSession.permissionMode) {
+          interactiveContext.interactiveSession.permissionMode = runtimePermissionMode
+          interactiveContext.interactiveSession.permissionModeSource = 'tool_runtime'
         }
       }}
       onSetSkillEnabled={(skillName, enabled) => {
-        if (!interactiveContext.replContext.setSkillEnabled) {
+        if (!interactiveContext.slashCommandContext.setSkillEnabled) {
           throw new Error(
-            'Skill enablement changes are not available in this REPL context.',
+            'Skill enablement changes are not available in this interactive context.',
           )
         }
 
-        return interactiveContext.replContext.setSkillEnabled(skillName, enabled)
+        return interactiveContext.slashCommandContext.setSkillEnabled(skillName, enabled)
       }}
     />,
     {
@@ -198,6 +238,7 @@ export async function runInteractiveTui(
   try {
     await app.waitUntilExit()
   } finally {
-    await interactiveContext.drainBackgroundWork()
+    app.cleanup()
+    await interactiveContext.drainBackgroundWork(TUI_BACKGROUND_DRAIN_TIMEOUT_MS)
   }
 }

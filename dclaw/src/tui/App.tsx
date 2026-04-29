@@ -7,6 +7,7 @@ import {
   createInitialUiState,
   DEFAULT_COMPOSER_PLACEHOLDER,
   reduceUiEvent,
+  type TranscriptItem,
   type UiEvent,
 } from './state/index.js'
 import {
@@ -199,8 +200,34 @@ function isForwardDeleteRawInput(input: string): boolean {
   return /^\x1b\[[0-9;]*3[~^$u]$/u.test(input)
 }
 
-function formatQueuedPromptsForSubmission(prompts: string[]): string {
+export function isShiftTabRawInput(input: string): boolean {
+  return input === '\x1b[Z'
+}
+
+export function formatQueuedPromptsForSubmission(prompts: string[]): string {
   return prompts.join('\n\n')
+}
+
+function isStaticTranscriptItemReady(item: TranscriptItem): boolean {
+  if (item.kind === 'assistant_draft') {
+    return false
+  }
+
+  if (item.kind === 'activity_group') {
+    return item.entries.every(entry => entry.status === 'completed')
+  }
+
+  return true
+}
+
+export function getStaticTranscriptPrefixLength(
+  transcript: TranscriptItem[],
+): number {
+  const firstMutableIndex = transcript.findIndex(
+    item => !isStaticTranscriptItemReady(item),
+  )
+
+  return firstMutableIndex === -1 ? transcript.length : firstMutableIndex
 }
 
 function clampMenuIndex(index: number, itemCount: number): number {
@@ -309,6 +336,7 @@ export function TuiApp({
   >(undefined)
   const [activeTurnElapsedMs, setActiveTurnElapsedMs] = useState(0)
   const [queuedPrompts, setQueuedPrompts] = useState<string[]>([])
+  const [staticTranscriptLength, setStaticTranscriptLength] = useState(0)
   const isWaitingForQuestionDialog = questionDialog !== undefined
   const activeControllerRef = useRef<AbortController | undefined>(undefined)
   const activePromptRef = useRef<string | undefined>(undefined)
@@ -319,9 +347,6 @@ export function TuiApp({
     undefined,
   )
   const pendingAssistantDeltaRef = useRef('')
-  const pendingAssistantDeltaTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  )
   const initialPromptHandledRef = useRef(false)
   const mountedRef = useRef(true)
 
@@ -338,9 +363,6 @@ export function TuiApp({
       activeControllerRef.current?.abort()
       pendingQuestionDialogRef.current?.resolve({})
       pendingQuestionDialogRef.current = undefined
-      if (pendingAssistantDeltaTimerRef.current) {
-        clearTimeout(pendingAssistantDeltaTimerRef.current)
-      }
     }
   }, [])
 
@@ -368,23 +390,33 @@ export function TuiApp({
     }
   }, [activeTurnStartedAt, isWaitingForQuestionDialog])
 
-  const flushPendingAssistantDelta = (): void => {
-    if (pendingAssistantDeltaTimerRef.current) {
-      clearTimeout(pendingAssistantDeltaTimerRef.current)
-      pendingAssistantDeltaTimerRef.current = undefined
-    }
-
-    const text = pendingAssistantDeltaRef.current
+  const dispatchAssistantStreamChunk = (text: string): void => {
     if (text.length === 0 || !mountedRef.current) {
-      pendingAssistantDeltaRef.current = ''
       return
     }
 
-    pendingAssistantDeltaRef.current = ''
     dispatch({
-      type: 'assistant_text_delta',
+      type: 'assistant_stream_chunk',
       text,
     })
+  }
+
+  const flushPendingAssistantDelta = (): void => {
+    const text = pendingAssistantDeltaRef.current
+    pendingAssistantDeltaRef.current = ''
+    dispatchAssistantStreamChunk(text)
+  }
+
+  const flushCompletedAssistantLines = (): void => {
+    const text = pendingAssistantDeltaRef.current
+    const lastLineBreakIndex = text.lastIndexOf('\n')
+    if (lastLineBreakIndex === -1) {
+      return
+    }
+
+    const stableText = text.slice(0, lastLineBreakIndex + 1)
+    pendingAssistantDeltaRef.current = text.slice(lastLineBreakIndex + 1)
+    dispatchAssistantStreamChunk(stableText)
   }
 
   const dispatchUiEvent = (event: UiEvent): void => {
@@ -397,12 +429,7 @@ export function TuiApp({
 
     if (event.type === 'assistant_text_delta') {
       pendingAssistantDeltaRef.current += event.text
-      if (!pendingAssistantDeltaTimerRef.current) {
-        pendingAssistantDeltaTimerRef.current = setTimeout(() => {
-          flushPendingAssistantDelta()
-        }, 32)
-        pendingAssistantDeltaTimerRef.current.unref?.()
-      }
+      flushCompletedAssistantLines()
       return
     }
 
@@ -413,7 +440,12 @@ export function TuiApp({
       return
     }
 
-    flushPendingAssistantDelta()
+    if (event.type === 'turn_completed') {
+      flushPendingAssistantDelta()
+    } else if (event.type === 'turn_interrupted') {
+      flushPendingAssistantDelta()
+    }
+
     if (mountedRef.current) {
       dispatch(event)
     }
@@ -1178,6 +1210,17 @@ export function TuiApp({
     void submitPrompt(initialPrompt)
   }, [initialPrompt])
 
+  useEffect(() => {
+    const nextStaticLength = getStaticTranscriptPrefixLength(uiState.transcript)
+    setStaticTranscriptLength(currentLength => {
+      if (uiState.transcript.length < currentLength) {
+        return nextStaticLength
+      }
+
+      return Math.max(currentLength, nextStaticLength)
+    })
+  }, [uiState.transcript])
+
   useInput((input, key) => {
     const normalizedInput = input.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n')
     const rawInput = lastRawInputRef.current
@@ -1189,6 +1232,19 @@ export function TuiApp({
     if (key.ctrl && input === 'c') {
       activeControllerRef.current?.abort()
       exit()
+      return
+    }
+
+    if (
+      isShiftTabRawInput(rawInput) &&
+      !resumeOverlay &&
+      !questionDialog &&
+      !skillsMenu &&
+      !bottomSheet
+    ) {
+      setComposerInput({ value: '', cursorIndex: 0 })
+      setActiveSuggestionIndex(0)
+      void submitPrompt('/plan')
       return
     }
 
@@ -1479,7 +1535,8 @@ export function TuiApp({
             ? undefined
             : formatActiveTurnStatusText(activeTurnElapsedMs)
         }
-        entries={uiState.transcript}
+        entries={uiState.transcript.slice(staticTranscriptLength)}
+        staticEntries={uiState.transcript.slice(0, staticTranscriptLength)}
         welcomeCard={welcomeCard}
       />
       <BottomDock

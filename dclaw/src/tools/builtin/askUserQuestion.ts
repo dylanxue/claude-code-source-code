@@ -172,6 +172,10 @@ export const askUserQuestionTool: Tool<
               type: 'string',
               description: 'Short header label shown alongside the question.',
             },
+            preview: {
+              type: 'string',
+              description: 'Optional question-level preview content shown once before the answer options.',
+            },
             options: {
               type: 'array',
               minItems: 2,
@@ -239,6 +243,7 @@ export const askUserQuestionTool: Tool<
             id: { type: 'string' },
             question: { type: 'string' },
             header: { type: 'string' },
+            preview: { type: 'string' },
             options: {
               type: 'array',
               items: {

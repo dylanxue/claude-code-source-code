@@ -21,14 +21,14 @@ import {
 import {
   deriveToolResultBudgetFromModelLimits,
 } from './toolResultBudget.js'
-import { type SessionMode } from '../session/store.js'
+import { loadSessionMeta, type SessionMode } from '../session/store.js'
 import type { PermissionMode, ToolContext } from '../types/tool.js'
 import {
   createTextMessage,
   getModelVisibleMessages,
+  repairDanglingToolUseMessages,
   type Message,
 } from '../types/message.js'
-import { loadPlanBoardForSession } from '../tasks/store.js'
 import { loadExecutionTaskBoardForSession } from '../taskboard/store.js'
 import { cleanupExecutionTaskBoardForTurnEnd } from '../taskboard/turnCleanup.js'
 import type { ToolRegistry } from '../tools/registry.js'
@@ -40,6 +40,12 @@ import {
 } from './queryLoop.js'
 import { QueryLoopAbortError, QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
+import type {
+  RelevantMemoryPrefetchHandle,
+  RelevantMemoryPrefetchResult,
+  RelevantMemoryPrefetcher,
+  RelevantMemoryRecentTool,
+} from './relevantMemoryPrefetch.js'
 import {
   createPlanModeReminderMessages,
   createPostCompactPlanModeReminderMessage,
@@ -96,6 +102,15 @@ export type QueryEngineOptions = {
   initialMessages?: Message[]
   queryTraceSink?: QueryTraceSink
   dclawMdEntries?: DclawMdEntry[]
+  relevantMemoryPrefetcher?: RelevantMemoryPrefetcher
+  onRelevantMemoryPrefetchConsumed?: (
+    result: RelevantMemoryPrefetchResult,
+  ) => void
+  beforeCompactHook?: (state: {
+    sessionId: string
+    trigger: 'auto'
+    queryTraceSink?: QueryTraceSink
+  }) => Promise<void> | void
 }
 
 export type QueryResult = {
@@ -135,6 +150,12 @@ export class QueryEngine {
   private readonly messages: Message[]
   private queryTraceSink?: QueryTraceSink
   private readonly dclawMdEntries: DclawMdEntry[]
+  private readonly relevantMemoryPrefetcher?: RelevantMemoryPrefetcher
+  private readonly onRelevantMemoryPrefetchConsumed?: (
+    result: RelevantMemoryPrefetchResult,
+  ) => void
+  private readonly beforeCompactHook?: QueryEngineOptions['beforeCompactHook']
+  private relevantMemoryPrefetch?: RelevantMemoryPrefetchHandle
   private postCompactReadState?: {
     boundaryId: string
     entries: PostCompactReadStateSnapshot
@@ -173,7 +194,9 @@ export class QueryEngine {
       this.toolContext.planFilePath = planFilePath
     }
     this.maxIterations = options.maxIterations ?? DEFAULT_QUERY_MAX_ITERATIONS
-    this.messages = [...(options.initialMessages ?? [])]
+    this.messages = repairDanglingToolUseMessages([
+      ...(options.initialMessages ?? []),
+    ])
     this.toolContext.invokedSkills ??= createInvokedSkillState()
     if (this.messages.length > 0) {
       restoreInvokedSkillsFromMessages(
@@ -185,6 +208,10 @@ export class QueryEngine {
     this.queryTraceSink = options.queryTraceSink
     this.toolContext.queryTraceSink = this.queryTraceSink
     this.dclawMdEntries = [...(options.dclawMdEntries ?? [])]
+    this.relevantMemoryPrefetcher = options.relevantMemoryPrefetcher
+    this.onRelevantMemoryPrefetchConsumed =
+      options.onRelevantMemoryPrefetchConsumed
+    this.beforeCompactHook = options.beforeCompactHook
   }
 
   getMessages(): Message[] {
@@ -276,6 +303,10 @@ export class QueryEngine {
 
   getQueryTracePath(): string | undefined {
     return this.queryTraceSink?.filePath
+  }
+
+  getQueryTraceSink(): QueryTraceSink | undefined {
+    return this.queryTraceSink
   }
 
   getPermissionMode(): PermissionMode {
@@ -394,6 +425,39 @@ export class QueryEngine {
     })
   }
 
+  private startRelevantMemoryPrefetch(
+    userPrompt: string,
+    recentTools: RelevantMemoryRecentTool[],
+    abortSignal: AbortSignal | undefined,
+  ): void {
+    if (!this.relevantMemoryPrefetcher || this.relevantMemoryPrefetch) {
+      return
+    }
+
+    this.relevantMemoryPrefetch = this.relevantMemoryPrefetcher({
+      userPrompt,
+      recentTools,
+      abortSignal,
+      queryTraceSink: this.queryTraceSink,
+    })
+  }
+
+  private consumeSettledRelevantMemoryPrefetch(): Message[] {
+    const result = this.relevantMemoryPrefetch?.getSettled()
+    if (!result) {
+      return []
+    }
+
+    this.relevantMemoryPrefetch = undefined
+    this.onRelevantMemoryPrefetchConsumed?.(result)
+    return result.messages
+  }
+
+  private abortRelevantMemoryPrefetch(): void {
+    this.relevantMemoryPrefetch?.abort()
+    this.relevantMemoryPrefetch = undefined
+  }
+
   private async getTransientContextMessages(
     prompt: string,
     baseMessages: Message[] = this.getMessages(),
@@ -405,6 +469,7 @@ export class QueryEngine {
     const transientMessages: Message[] = createToolResultAttachmentMessages(
       visibleMessages,
     )
+    transientMessages.push(...this.consumeSettledRelevantMemoryPrefetch())
     const dclawMdReminder = createDclawMdReminderMessage(this.dclawMdEntries)
     if (dclawMdReminder) {
       transientMessages.push(dclawMdReminder)
@@ -417,17 +482,19 @@ export class QueryEngine {
       }
     }
 
-    const board = await loadPlanBoardForSession(
+    const sessionMeta = await loadSessionMeta(
       this.toolContext.sessionId,
       this.modelLimitsEnv,
     )
+    const planMode = sessionMeta?.planMode
+    const planFilePath = planMode?.planFilePath ?? this.toolContext.planFilePath
     const allMessages = baseMessages
     const messages = visibleMessages
     const recoveryReadState = this.postCompactReadState?.entries
     const invokedSkills = listInvokedSkills(this.toolContext.invokedSkills)
     const postCompactAttachments = await createPostCompactAttachmentMessages(
       allMessages,
-      board,
+      planFilePath,
       recoveryReadState,
       invokedSkills,
       this.toolContext.availableTools,
@@ -436,7 +503,7 @@ export class QueryEngine {
 
     const postCompactPlanModeReminder = createPostCompactPlanModeReminderMessage(
       allMessages,
-      board,
+      planMode,
       this.toolContext.permissionMode,
     )
     if (postCompactPlanModeReminder) {
@@ -444,8 +511,9 @@ export class QueryEngine {
     } else {
       const planModeReminderMessages = await createPlanModeReminderMessages(
         messages,
-        board,
+        planMode,
         this.toolContext.permissionMode,
+        this.toolContext.sessionId,
         this.modelLimitsEnv,
       )
       transientMessages.push(...planModeReminderMessages)
@@ -578,7 +646,17 @@ export class QueryEngine {
     })
 
     try {
-      const { boundary, boundaryMessage, summaryMessage } = await compactSession({
+      await this.beforeCompactHook?.({
+        sessionId: sourceSessionId,
+        trigger: 'auto',
+        queryTraceSink: this.queryTraceSink,
+      })
+      const {
+        boundary,
+        boundaryMessage,
+        summaryMessage,
+        messagesToKeep,
+      } = await compactSession({
         sourceSessionId,
         messages: getMessagesAfterCompactBoundary(
           getModelVisibleMessages(this.getMessages()),
@@ -590,11 +668,12 @@ export class QueryEngine {
         reason,
         contextStats,
         client: this.client,
+        queryTraceSink: this.queryTraceSink,
         env: this.modelLimitsEnv,
       })
 
       this.preparePostCompactRecovery(boundary.boundaryId)
-      this.messages.push(boundaryMessage, summaryMessage)
+      this.messages.push(boundaryMessage, summaryMessage, ...messagesToKeep)
 
       const event = {
         sessionId: sourceSessionId,
@@ -650,6 +729,8 @@ export class QueryEngine {
     const modelLimits = this.getResolvedModelLimits()
     const toolResultBudgetOptions = this.getResolvedToolResultBudgetOptions()
     this.resetTurnScopedTaskState()
+    this.abortRelevantMemoryPrefetch()
+    this.startRelevantMemoryPrefetch(prompt, [], options.signal)
 
     let response
     try {
@@ -683,6 +764,13 @@ export class QueryEngine {
         streamHandlers,
         abortSignal: options.signal,
         queryTraceSink: this.queryTraceSink,
+        onToolResultsComplete: state => {
+          this.startRelevantMemoryPrefetch(
+            prompt,
+            state.tools,
+            options.signal,
+          )
+        },
       })
     } catch (error) {
       if (
@@ -690,7 +778,9 @@ export class QueryEngine {
         error instanceof QueryLoopAbortError
       ) {
         if (error.addedMessages.length > 0) {
-          this.messages.push(...error.addedMessages)
+          this.messages.push(
+            ...repairDanglingToolUseMessages(error.addedMessages),
+          )
         }
         if (error.usedPostCompactAttachments) {
           this.postCompactReadState = undefined
@@ -699,6 +789,7 @@ export class QueryEngine {
       if (error instanceof QueryLoopLlmError) {
         await this.cleanupExecutionTaskBoard('llm_error')
       } else if (error instanceof QueryLoopAbortError) {
+        this.abortRelevantMemoryPrefetch()
         await this.cleanupExecutionTaskBoard('abort')
       }
       throw error
@@ -732,6 +823,7 @@ export class QueryEngine {
     }
 
     await this.cleanupExecutionTaskBoard(response.turnEndReason)
+    this.abortRelevantMemoryPrefetch()
 
     return {
       userMessage,

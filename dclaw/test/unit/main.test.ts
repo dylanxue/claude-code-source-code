@@ -165,6 +165,22 @@ test('bin wrapper launches dclaw from outside the repo', async () => {
   }
 })
 
+test('main help starts without legacy interactive flags', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-help-'))
+
+  try {
+    const result = await runCli(['--help'], dir)
+
+    assert.equal(result.exitCode, 0)
+    assert.equal(result.stderr, '')
+    assert.match(result.stdout, /^dclaw\n\nUsage:/)
+    assert.doesNotMatch(result.stdout, /--tui/)
+    assert.doesNotMatch(result.stdout, /--legacy-repl/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('main dispatches the doctor subcommand', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dclaw-main-doctor-'))
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import {
   getExecutionTaskBoardPath,
-  getExecutionTaskBoardsDir,
+  getProjectExecutionTaskBoardsDir,
 } from '../session/paths.js'
 import { loadSessionMeta, updateSessionMeta } from '../session/store.js'
 import {
@@ -140,9 +140,9 @@ async function writeTaskBoard(
   board: TaskBoard,
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  await ensureDirectory(getExecutionTaskBoardsDir(env))
+  await ensureDirectory(getProjectExecutionTaskBoardsDir(board.workspaceId, env))
   await writeFile(
-    getExecutionTaskBoardPath(board.boardId, env),
+    getExecutionTaskBoardPath(board.boardId, board.workspaceId, env),
     JSON.stringify(board, null, 2) + '\n',
     'utf8',
   )
@@ -284,6 +284,7 @@ export async function createExecutionTaskBoardForSession(
   board: TaskBoard
   tasks: TaskRecord[]
 }> {
+  env.DCLAW_WORKSPACE_ROOT = workspaceId
   const existing = await loadExecutionTaskBoardForSession(sessionId, env)
   if (existing) {
     throw new Error(

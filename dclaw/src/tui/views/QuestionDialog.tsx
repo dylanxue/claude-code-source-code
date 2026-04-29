@@ -27,7 +27,8 @@ const OTHER_OPTION: AskUserQuestionOption = {
 }
 
 function isPreviewQuestion(question: AskUserQuestion): boolean {
-  return question.options.some(option => option.preview?.trim())
+  return Boolean(question.preview?.trim()) ||
+    question.options.some(option => option.preview?.trim())
 }
 
 export function getQuestionAnswerKey(question: AskUserQuestion): string {
@@ -93,6 +94,15 @@ export function QuestionDialog({ dialog }: Props) {
     <Box flexDirection="column" marginTop={1} paddingX={1}>
       <Text bold>{question.header}</Text>
       <Text>{question.question}</Text>
+      {question.preview?.trim() ? (
+        <Box flexDirection="column" marginTop={1} borderStyle="single" borderColor="gray" paddingX={1}>
+          {question.preview.trim().split('\n').map((line, index) => (
+            <Text key={`question-preview-${index}`} dimColor>
+              {line}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
       <Box height={1} />
       {dialog.mode === 'custom' ? (
         <>

@@ -1,10 +1,10 @@
 import {
-  listReplCommands,
-  type ReplCommandCatalogItem,
-} from '../../cli/replCommands.js'
+  listSlashCommands,
+  type SlashCommandCatalogItem,
+} from '../../cli/slashCommands.js'
 import type { StructuredCardEntry, UiEvent } from '../state/types.js'
 
-type ReplCommandPresentation = {
+type SlashCommandPresentation = {
   events: UiEvent[]
 }
 
@@ -12,11 +12,11 @@ function normalizeCommandName(value: string): string {
   return value.trim().split(/\s+/u)[0]?.toLowerCase() ?? ''
 }
 
-function findReplCommandMetadata(
+function findSlashCommandMetadata(
   prompt: string,
-): ReplCommandCatalogItem | undefined {
+): SlashCommandCatalogItem | undefined {
   const commandName = normalizeCommandName(prompt)
-  return listReplCommands().find(
+  return listSlashCommands().find(
     command =>
       command.name.toLowerCase() === commandName ||
       command.aliases?.some(alias => alias.toLowerCase() === commandName),
@@ -95,11 +95,11 @@ function buildStructuredCardEntries(
   return entries
 }
 
-export function presentReplCommandResult(
+export function presentSlashCommandResult(
   prompt: string,
   outputText: string,
-): ReplCommandPresentation {
-  const metadata = findReplCommandMetadata(prompt)
+): SlashCommandPresentation {
+  const metadata = findSlashCommandMetadata(prompt)
   const events: UiEvent[] = [
     {
       type: 'command_logged',

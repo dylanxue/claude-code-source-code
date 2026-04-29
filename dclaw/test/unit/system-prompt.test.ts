@@ -12,25 +12,25 @@ test('buildSystemPrompt includes plan mode instructions and plan file context', 
       mode: 'interactive',
       permissionMode: 'plan',
       plan: {
-        boardId: 'board_123',
         status: 'active',
-        planFilePath: '/tmp/.dclaw/plans/plan_board_123.md',
-        boardTitle: 'Planning state work',
-        boardPurpose: 'Refine the short-lived implementation batch.',
-        boardPlan: 'Inspect current code, write a plan file, then wait.',
+        planFilePath: '/tmp/.dclaw/plans/plan_session_123.md',
       },
     }),
   )
 
   assert.match(prompt, /# Planning State/)
   assert.match(prompt, /plan mode: active/)
-  assert.match(prompt, /plan board: board_123/)
-  assert.match(prompt, /board title: Planning state work/)
-  assert.match(prompt, /board purpose: Refine the short-lived implementation batch/)
-  assert.match(prompt, /board plan: Inspect current code/)
-  assert.match(prompt, /plan file: \/tmp\/.dclaw\/plans\/plan_board_123\.md/)
+  assert.match(prompt, /plan file: \/tmp\/.dclaw\/plans\/plan_session_123\.md/)
+  assert.doesNotMatch(prompt, /plan board:/)
+  assert.doesNotMatch(prompt, /board title:/)
+  assert.doesNotMatch(prompt, /board purpose:/)
+  assert.doesNotMatch(prompt, /board plan:/)
   assert.match(prompt, /only file you may edit during planning/)
-  assert.match(prompt, /call ExitPlanMode to present it and wait for the user/)
+  assert.match(prompt, /Edit\/Write are allowed for that file/)
+  assert.match(prompt, /do not use Bash, cat, heredocs, or shell redirection/)
+  assert.match(prompt, /write the plan file in the same language as the user's latest planning request/)
+  assert.match(prompt, /call ExitPlanMode to request the user confirmation flow/)
+  assert.match(prompt, /only a user confirmation choice may leave plan mode/)
   assert.doesNotMatch(prompt, /current task:/)
   assert.doesNotMatch(prompt, /current step:/)
   assert.doesNotMatch(prompt, /pending work summary:/)
@@ -54,7 +54,9 @@ test('buildSystemPrompt nudges complex work toward task tracking without globall
   assert.match(prompt, /Plan and plan mode are for producing a plan only/i)
   assert.match(prompt, /Creating a task board means execution is starting now/i)
   assert.match(prompt, /Do not create or update tasks while planning/i)
-  assert.match(prompt, /EnterPlanMode is only for high-constraint planning/i)
+  assert.match(prompt, /Plan Mode can only be entered or left by the user/i)
+  assert.match(prompt, /there is no model tool for entering Plan Mode/i)
+  assert.match(prompt, /ExitPlanMode only requests the user-facing confirmation flow/i)
   assert.doesNotMatch(prompt, /Prefer direct execution for simple requests/)
   assert.doesNotMatch(prompt, /# DCLAW\.md Instructions/)
 })
@@ -72,6 +74,9 @@ test('buildSystemPrompt asks the model to follow the user language for reasoning
 
   assert.match(prompt, /# Language/)
   assert.match(prompt, /Use the same language as the user's latest message/)
+  assert.match(prompt, /plan files/)
+  assert.match(prompt, /plan summaries/)
+  assert.match(prompt, /clarification questions/)
   assert.match(prompt, /reasoning\/thinking summaries/)
   assert.match(prompt, /pre-tool progress updates/)
 })
@@ -145,7 +150,23 @@ test('buildSystemPrompt includes recalled memory content with observable source 
             content: 'Avoid mock-only validation for migrations.',
             wasTruncated: false,
           },
+          {
+            name: 'Old Deployment Note',
+            description: 'Old deployment reference.',
+            type: 'reference',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+            path: '/tmp/.dclaw/projects/tmp-project/memory/reference/old-deploy.md',
+            relativePath: 'reference/old-deploy.md',
+            mtimeMs: 1,
+            content: 'Old deployment note.',
+            wasTruncated: false,
+          },
         ],
+        recalledBytes:
+          'Avoid mock-only validation for migrations.'.length +
+          'Old deployment note.'.length,
+        skippedAlreadySurfacedCount: 0,
+        skippedBySessionByteLimitCount: 0,
       },
     }),
   )
@@ -155,9 +176,13 @@ test('buildSystemPrompt includes recalled memory content with observable source 
   assert.match(prompt, /## MEMORY\.md/)
   assert.match(prompt, /path: \/tmp\/.dclaw\/projects\/tmp-project\/memory\/MEMORY\.md/)
   assert.match(prompt, /\[Migration Policy\]\(project\/migration-policy\.md\)/)
-  assert.match(prompt, /recalled memories for this query: 1\/3/)
+  assert.match(prompt, /recalled memories for this query: 2\/3/)
   assert.match(prompt, /path: \/tmp\/.dclaw\/projects\/tmp-project\/memory\/project\/migration-policy\.md/)
+  assert.match(prompt, /freshness: recent/)
   assert.match(prompt, /Avoid mock-only validation for migrations\./)
+  assert.match(prompt, /path: \/tmp\/.dclaw\/projects\/tmp-project\/memory\/reference\/old-deploy\.md/)
+  assert.match(prompt, /freshness: stale/)
+  assert.match(prompt, /verify this memory against current project state before relying on it/)
 })
 
 test('buildSystemPrompt keeps MEMORY.md loaded even when no specific memories were recalled', () => {
@@ -176,6 +201,9 @@ test('buildSystemPrompt keeps MEMORY.md loaded even when no specific memories we
         entrypointWasTruncated: false,
         manifestCount: 1,
         recalledEntries: [],
+        recalledBytes: 0,
+        skippedAlreadySurfacedCount: 0,
+        skippedBySessionByteLimitCount: 0,
       },
     }),
   )

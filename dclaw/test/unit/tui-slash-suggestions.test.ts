@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { listReplCommands } from '../../src/cli/replCommands.js'
+import { listSlashCommands } from '../../src/cli/slashCommands.js'
 import {
   completeSlashSuggestion,
   createSlashSuggestionState,
@@ -9,13 +9,13 @@ import {
 } from '../../src/tui/hooks/useSlashSuggestions.js'
 
 test('createSlashSuggestionState filters slash commands by command and alias', () => {
-  const commandMatches = createSlashSuggestionState('/per', listReplCommands())
+  const commandMatches = createSlashSuggestionState('/per', listSlashCommands())
   assert.deepEqual(
     commandMatches.suggestions.map(suggestion => suggestion.name),
     ['/permissions'],
   )
 
-  const aliasMatches = createSlashSuggestionState('/cont', listReplCommands())
+  const aliasMatches = createSlashSuggestionState('/cont', listSlashCommands())
   assert.deepEqual(
     aliasMatches.suggestions.map(suggestion => [
       suggestion.name,
@@ -26,7 +26,7 @@ test('createSlashSuggestionState filters slash commands by command and alias', (
 })
 
 test('slash suggestion selection wraps around', () => {
-  const state = createSlashSuggestionState('/', listReplCommands())
+  const state = createSlashSuggestionState('/', listSlashCommands())
   const movedUp = moveSlashSuggestionSelection(state, -1)
   assert.equal(movedUp.activeIndex, state.suggestions.length - 1)
 
@@ -35,7 +35,7 @@ test('slash suggestion selection wraps around', () => {
 })
 
 test('completeSlashSuggestion inserts the canonical command and argument space', () => {
-  const state = createSlashSuggestionState('/per', listReplCommands())
+  const state = createSlashSuggestionState('/per', listSlashCommands())
   const suggestion = getActiveSlashSuggestion(state)
   assert.ok(suggestion)
 
@@ -43,6 +43,6 @@ test('completeSlashSuggestion inserts the canonical command and argument space',
 })
 
 test('slash suggestions close once freeform arguments are being typed', () => {
-  const state = createSlashSuggestionState('/compact summarize this', listReplCommands())
+  const state = createSlashSuggestionState('/compact summarize this', listSlashCommands())
   assert.deepEqual(state.suggestions, [])
 })

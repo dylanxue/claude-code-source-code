@@ -28,8 +28,10 @@ export function getPlanCenteredWorkflowSection(): string {
     '- Do not create a fresh task board with only one or two generic umbrella tasks; either decompose it further or skip task tracking for now.',
     '- If the work breaks into fewer than 3 concrete tasks, skip task tracking for now.',
     '- Creating a task board means execution is starting now. If you are not ready to begin implementation immediately, do not create or expand the task board yet.',
-    '- EnterPlanMode is only for high-constraint planning where the user wants planning before implementation.',
-    '- After ExitPlanMode, present the plan and wait for the user. Do not create tasks until implementation is actually starting.',
+    '- Plan Mode can only be entered or left by the user through manual controls such as /plan or Shift+Tab.',
+    '- Do not claim you can enter Plan Mode yourself; there is no model tool for entering Plan Mode.',
+    '- ExitPlanMode only requests the user-facing confirmation flow. It does not approve the plan, leave Plan Mode, or start implementation.',
+    '- After ExitPlanMode, wait for the user confirmation choice. Do not create tasks until implementation is actually starting.',
   ].join('\n')
 }
 
@@ -37,7 +39,7 @@ export function getLanguageSection(): string {
   return [
     '# Language',
     "- Use the same language as the user's latest message unless they explicitly ask for another language.",
-    '- Apply this to visible assistant responses, brief pre-tool progress updates, and any reasoning/thinking summaries when those are exposed.',
+    '- Apply this to visible assistant responses, plan files, plan summaries, clarification questions, brief pre-tool progress updates, and any reasoning/thinking summaries when those are exposed.',
   ].join('\n')
 }
 
@@ -101,27 +103,6 @@ export function getPlanModeSection(context: PromptContext): string | null {
   const lines = ['# Planning State']
   lines.push(`- plan mode: ${plan?.status ?? 'inactive'}`)
 
-  if (plan?.boardId) {
-    lines.push(`- plan board: ${plan.boardId}`)
-  }
-  if (plan?.boardTitle) {
-    lines.push(`- board title: ${plan.boardTitle}`)
-  }
-  if (plan?.boardPurpose) {
-    lines.push(`- board purpose: ${plan.boardPurpose}`)
-  }
-  if (plan?.boardBackground) {
-    lines.push(`- board background: ${plan.boardBackground}`)
-  }
-  if (plan?.boardPlan) {
-    lines.push(`- board plan: ${plan.boardPlan}`)
-  }
-  if (plan?.boardScope) {
-    lines.push(`- board scope: ${plan.boardScope}`)
-  }
-  if (plan?.boardVerification) {
-    lines.push(`- board verification: ${plan.boardVerification}`)
-  }
   if (plan?.planFilePath) {
     lines.push(`- plan file: ${plan.planFilePath}`)
   }
@@ -129,17 +110,45 @@ export function getPlanModeSection(context: PromptContext): string | null {
   if (context.permissionMode === 'plan') {
     lines.push('- planning mode is active: do not start implementation yet')
     lines.push('- while planning, only read-only tools and plan-file edits are allowed')
+    lines.push('- write the plan file with Edit or Write; do not use Bash, cat, heredocs, or shell redirection to modify it')
     lines.push(
       '- do not create or update tasks while planning; task tracking begins only when execution starts',
     )
     if (plan?.planFilePath) {
-      lines.push('- the plan file is the only file you may edit during planning')
+      lines.push('- the plan file is the only file you may edit during planning, and Edit/Write are allowed for that file')
     }
+    lines.push("- write the plan file in the same language as the user's latest planning request unless the user asks for another language")
     lines.push('- focus on exploring the codebase, refining the plan, and clarifying ambiguities')
-    lines.push('- when the plan is ready, call ExitPlanMode to present it and wait for the user')
+    lines.push(
+      '- when the plan is ready, call ExitPlanMode to request the user confirmation flow',
+    )
+    lines.push('- only a user confirmation choice may leave plan mode or start implementation')
   }
 
   return lines.join('\n')
+}
+
+function getMemoryFreshnessLines(updatedAt: string, nowMs: number = Date.now()): string[] {
+  const updatedMs = Date.parse(updatedAt)
+  if (Number.isNaN(updatedMs)) {
+    return [
+      'freshness: unknown',
+      'freshness note: verify this memory against current project state before relying on it',
+    ]
+  }
+
+  const ageDays = Math.max(0, Math.floor((nowMs - updatedMs) / 86_400_000))
+  if (ageDays <= 30) {
+    return [`freshness: recent (${ageDays} days old)`]
+  }
+  if (ageDays <= 180) {
+    return [`freshness: aging (${ageDays} days old)`]
+  }
+
+  return [
+    `freshness: stale (${ageDays} days old)`,
+    'freshness note: verify this memory against current project state before relying on it',
+  ]
 }
 
 export function getMemorySection(context: PromptContext): string | null {
@@ -175,6 +184,7 @@ export function getMemorySection(context: PromptContext): string | null {
       `## [${entry.type}] ${entry.name}`,
       `path: ${entry.path}`,
       `updated_at: ${entry.updatedAt}`,
+      ...getMemoryFreshnessLines(entry.updatedAt),
       `description: ${entry.description}`,
       '',
       entry.content,

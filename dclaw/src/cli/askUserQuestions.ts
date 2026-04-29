@@ -20,7 +20,8 @@ type ParsedAnswer = {
 type AskFn = (hint: string) => Promise<string>
 
 function isPreviewQuestion(question: AskUserQuestion): boolean {
-  return question.options.some(option => option.preview?.trim())
+  return Boolean(question.preview?.trim()) ||
+    question.options.some(option => option.preview?.trim())
 }
 
 function formatOption(index: number, option: AskUserQuestionOption): string {
@@ -37,6 +38,19 @@ function formatOptionPreview(option: AskUserQuestionOption): string[] {
     '   ---',
     ...preview.split('\n').map(line => `   ${line}`),
     '   ---',
+  ]
+}
+
+function formatQuestionPreview(question: AskUserQuestion): string[] {
+  const preview = question.preview?.trim()
+  if (!preview) {
+    return []
+  }
+
+  return [
+    '---',
+    ...preview.split('\n'),
+    '---',
   ]
 }
 
@@ -220,6 +234,9 @@ export async function askUserQuestionsInteractively(
   try {
     for (const question of questions) {
       process.stdout.write(`\n[${question.header}] ${question.question}\n`)
+      for (const line of formatQuestionPreview(question)) {
+        process.stdout.write(`${line}\n`)
+      }
       const renderedOptions = getOptionsWithOther(question)
 
       for (let index = 0; index < renderedOptions.length; index += 1) {

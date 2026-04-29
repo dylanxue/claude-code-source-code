@@ -6,6 +6,8 @@
 记住我们的原则：无限靠拢Claude Code源码的实现，不额外加戏。
 
 最近核对结论：
+- TUI 阶段 7 已进入收口：interactive 默认路径已固定为 Ink TUI，`--tui / --legacy-repl` 迁移期 flag 已移除并由参数解析拒绝；旧 readline REPL 主循环不再保留
+- TUI 已补退出后的 Ink cleanup 与后台任务限时 drain；queue / interrupt / permissions / resume compact / task snapshot 的一致性护栏已收口。首版 transcript viewport 已撤回，因为它会破坏 Ink 主布局并挤掉 Bottom Dock；resize / scrollback / autofollow 需后续重新设计。
 - `compact` 主路径实现与当前文档描述基本一致；manual compact、消息级 boundary/runtime slicing、共享 `contextStats`、dry-run recommendation、最小 autocompact，以及首版 post-compact attachment 恢复均已真实落地
 - 阶段 8-10 已按当前产品范围收口；`v0.3` 不再继续摊大范围，只做 `subagent` 与 `skills` 的最小主路径
 - 阶段 11 在 `v0.3` 只做 `subagent`，`worktree / coordinator / 多 worker 调度` 统一后置到 `v0.4`
@@ -320,7 +322,7 @@
 
 - [x] `P0 / 阶段 8-2`：把当前 `/compact` 从占位命令升级成真正的 boundary 流程
 
-- [x] 将 `src/cli/replCommands.ts` 中的 `/compact` 改为调用统一的 compact service，而不是直接拼 transcript 文本
+- [x] 将 `src/cli/slashCommands.ts` 中的 `/compact` 改为调用统一的 compact service，而不是直接拼 transcript 文本
 
 - [x] 在 compact 前生成受控 summary 输入，只消费有限 transcript 视图与必要元信息，避免把全量历史再次塞回新上下文
 

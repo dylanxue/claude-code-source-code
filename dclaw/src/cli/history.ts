@@ -36,7 +36,7 @@ export async function runHistory(
     ((text: string) => {
       process.stdout.write(text)
     })
-  const sessions = await listSessionHistory()
+  const sessions = await listSessionHistory(command.options.cwd)
   const lines = ['dclaw history', '']
 
   if (sessions.length === 0) {

@@ -1,13 +1,28 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { getPlanFilePath } from '../session/paths.js'
-import type { PlanBoard } from './types.js'
+import { dirname, join } from 'node:path'
+import { getPlanFilePath, getSessionDir } from '../session/paths.js'
+
+type LegacyPlanBoardPlanFileInput = {
+  boardId: string
+  workspaceId: string
+  rootSessionId: string
+  planFilePath?: string
+  title?: string
+  purpose?: string
+  background?: string
+  plan?: string
+  scope?: string
+}
 
 function getDefaultPlanFileIdForBoard(boardId: string): string {
   return `plan_${boardId}`
 }
 
-function buildPlanScaffold(board: PlanBoard): string {
+function getDefaultPlanFileIdForSession(sessionId: string): string {
+  return `plan_${sessionId}`
+}
+
+function buildPlanScaffold(board: LegacyPlanBoardPlanFileInput): string {
   return [
     `# ${board.title ?? 'Plan Board Plan'}`,
     '',
@@ -37,9 +52,17 @@ function buildPlanScaffold(board: PlanBoard): string {
 
 export function getDefaultPlanFilePath(
   boardId: string,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return getPlanFilePath(getDefaultPlanFileIdForBoard(boardId), env)
+  return getPlanFilePath(getDefaultPlanFileIdForBoard(boardId), workspaceRootOrEnv, env)
+}
+
+export function getSessionPlanFilePath(
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getSessionDir(sessionId, env), 'plan.md')
 }
 
 export async function readPlanFile(
@@ -61,7 +84,7 @@ export async function writePlanFile(
 }
 
 export async function ensurePlanFileForPlanBoard(
-  board: PlanBoard,
+  board: LegacyPlanBoardPlanFileInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{
   created: boolean
@@ -69,7 +92,7 @@ export async function ensurePlanFileForPlanBoard(
 }> {
   const filePath =
     board.planFilePath ??
-    getPlanFilePath(getDefaultPlanFileIdForBoard(board.boardId), env)
+    getPlanFilePath(getDefaultPlanFileIdForBoard(board.boardId), board.workspaceId, env)
   const existing = await readPlanFile(filePath)
   if (existing !== null) {
     return {

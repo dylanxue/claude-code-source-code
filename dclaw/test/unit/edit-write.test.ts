@@ -261,6 +261,33 @@ test('Write validation rejects partial reads for existing files', async () => {
   }
 })
 
+test('Write accepts a limited read when it reached EOF from the first line', async () => {
+  const dir = await createTempDir('dclaw-write-full-range-')
+  const filePath = join(dir, 'plan.md')
+  const context = createToolContext()
+
+  try {
+    await writeFile(filePath, '# Plan\n\n- old\n', 'utf8')
+    await readFileTool.call(
+      { file_path: filePath, offset: 1, limit: 1000 },
+      context,
+    )
+    const result = await writeTool.call(
+      {
+        file_path: filePath,
+        content: '# Plan\n\n- updated\n',
+      },
+      context,
+    )
+
+    assert.equal(result.ok, true)
+    assert.equal(result.output.didWrite, true)
+    assert.equal(await readFile(filePath, 'utf8'), '# Plan\n\n- updated\n')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('Write call rejects when the file was not fully read first', async () => {
   const dir = await createTempDir('dclaw-write-call-no-read-')
   const filePath = join(dir, 'sample.txt')

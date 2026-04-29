@@ -115,7 +115,21 @@ export const globTool: Tool<GlobToolInput, GlobToolOutput> = buildTool({
         }
       }
 
-      const pathStat = await stat(toAbsoluteToolPath(input.path))
+      let pathStat
+      const absolutePath = toAbsoluteToolPath(input.path)
+      try {
+        pathStat = await stat(absolutePath)
+      } catch (error) {
+        const fileError = error as NodeJS.ErrnoException
+        if (fileError.code === 'ENOENT') {
+          return {
+            ok: false,
+            error: `Glob path does not exist: ${absolutePath}`,
+          }
+        }
+        throw error
+      }
+
       if (!pathStat.isDirectory()) {
         return {
           ok: false,

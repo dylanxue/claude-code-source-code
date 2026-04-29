@@ -18,13 +18,10 @@ import {
   createSession,
   loadSessionMeta,
   loadSessionMessages,
+  ensureSessionPlanFile,
+  updateSessionPlanMode,
 } from '../../src/session/store.js'
-import { getSessionsDir } from '../../src/session/paths.js'
-import {
-  ensurePlanBoardPlanFile,
-  getOrCreatePlanBoardForSession,
-  updatePlanBoard,
-} from '../../src/tasks/store.js'
+import { getProjectSessionsDir } from '../../src/session/paths.js'
 import { createExecutionTaskBoardForSession } from '../../src/taskboard/store.js'
 import { createSkillRegistry } from '../../src/skills/registry.js'
 import { recordInvokedSkill } from '../../src/skills/state.js'
@@ -186,6 +183,70 @@ test('QueryEngine starts from initialMessages when resuming', async () => {
   assert.match(result.outputText, /follow up prompt/)
 })
 
+test('loadSessionMessages repairs interrupted assistant tool calls', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-repair-'))
+  const env = { ...process.env, HOME: homeDir }
+  const session = await createSession({
+    sessionId: 'session-interrupted-tool-call',
+    cwd: '/tmp/project',
+    mode: 'interactive',
+    provider: 'stub',
+    env,
+  })
+  const assistantWithToolUse = createMessage('assistant', [
+    {
+      type: 'tool_use',
+      id: 'call_interrupted',
+      name: 'Edit',
+      input: { file_path: '/tmp/project/app.js' },
+    },
+  ])
+  await appendSessionMessages(
+    session.sessionId,
+    [assistantWithToolUse, createTextMessage('user', 'what were we doing?')],
+    env,
+  )
+
+  const messages = await loadSessionMessages(session.sessionId, env)
+
+  assert.equal(messages.length, 3)
+  const repaired = messages[1]?.content[0]
+  assert.equal(repaired?.type, 'tool_result')
+  if (repaired?.type === 'tool_result') {
+    assert.equal(repaired.toolUseId, 'call_interrupted')
+    assert.match(JSON.stringify(repaired.output), /interrupted/i)
+  }
+  assert.equal(messages[2]?.role, 'user')
+})
+
+test('QueryEngine repairs interrupted tool calls in resumed initial messages', async () => {
+  const client = new CapturingLlmClient()
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    initialMessages: [
+      createMessage('assistant', [
+        {
+          type: 'tool_use',
+          id: 'call_interrupted',
+          name: 'Edit',
+          input: { file_path: '/tmp/project/app.js' },
+        },
+      ]),
+      createTextMessage('user', 'what were we doing?'),
+    ],
+  })
+
+  await engine.submitUserPrompt('continue')
+
+  const repaired = client.requests[0]?.messages[1]?.content[0]
+  assert.equal(repaired?.type, 'tool_result')
+  if (repaired?.type === 'tool_result') {
+    assert.equal(repaired.toolUseId, 'call_interrupted')
+  }
+})
+
 test('QueryEngine aborts an in-flight prompt through AbortSignal', async () => {
   const controller = new AbortController()
   const engine = new QueryEngine({
@@ -255,6 +316,203 @@ test('QueryEngine appends messages returned by the turnCompleteHook', async () =
   assert.equal(lastMessage?.role, 'system')
   assert.match(getTextContent(lastMessage!), /memory hook ran/)
   assert.equal(result.appendedMessages.at(-1)?.role, 'system')
+})
+
+test('QueryEngine does not wait for unresolved relevant memory prefetch', async () => {
+  let aborted = false
+  const engine = new QueryEngine({
+    client: new StubLlmClient(),
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    relevantMemoryPrefetcher: () => ({
+      getSettled: () => undefined,
+      abort: () => {
+        aborted = true
+      },
+    }),
+  })
+
+  const result = await engine.submitUserPrompt('finish without waiting')
+
+  assert.match(result.outputText, /finish without waiting/)
+  assert.equal(aborted, true)
+})
+
+test('QueryEngine consumes settled relevant memory prefetch as transient reminder', async () => {
+  const client = new ToolThenAnswerClient('EchoTool')
+  const registry = new ToolRegistry()
+  registry.register(buildTool({
+    name: 'EchoTool',
+    description: 'Return a stable tool result.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        ok: { type: 'boolean' },
+      },
+      required: ['ok'],
+      additionalProperties: false,
+    },
+    isReadOnly() {
+      return true
+    },
+    async call() {
+      return {
+        ok: true,
+        output: { ok: true },
+      }
+    },
+  }))
+
+  let settled = false
+  let consumed = false
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: ['EchoTool'],
+    }),
+    relevantMemoryPrefetcher: () => ({
+      getSettled: () => {
+        if (!settled) {
+          return undefined
+        }
+        return {
+          messages: [
+            createTextMessage(
+              'user',
+              '<system-reminder>\nRelevant memory: use staging database.\n</system-reminder>',
+            ),
+          ],
+          recalledPaths: ['/tmp/memory/project/staging.md'],
+          recalledBytes: 37,
+          skippedAlreadySurfacedCount: 0,
+          skippedBySessionByteLimitCount: 0,
+        }
+      },
+      abort: () => undefined,
+    }),
+    onRelevantMemoryPrefetchConsumed: () => {
+      consumed = true
+    },
+  })
+
+  const originalCall = registry.get('EchoTool')!
+  registry.register(buildTool({
+    ...originalCall,
+    async call(input, context) {
+      settled = true
+      return originalCall.call(input, context)
+    },
+  }))
+
+  const result = await engine.submitUserPrompt('use memory after tool')
+
+  assert.equal(result.outputText, 'done')
+  assert.equal(consumed, true)
+  assert.equal(client.requests.length, 2)
+  assert.match(getRequestText(client.requests[1]), /Relevant memory: use staging database/)
+})
+
+test('QueryEngine passes recent tool results to relevant memory prefetch', async () => {
+  const client = new ToolThenAnswerClient('EchoTool')
+  const registry = new ToolRegistry()
+  registry.register(buildTool({
+    name: 'EchoTool',
+    description: 'Return a stable tool result.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        ok: { type: 'boolean' },
+      },
+      required: ['ok'],
+      additionalProperties: false,
+    },
+    isReadOnly() {
+      return true
+    },
+    async call() {
+      return {
+        ok: true,
+        output: { ok: true },
+        summary: 'echo completed',
+      }
+    },
+  }))
+
+  const recentToolBatches: unknown[][] = []
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: registry,
+    toolContext: createToolContext({
+      availableTools: ['EchoTool'],
+    }),
+    relevantMemoryPrefetcher: state => {
+      recentToolBatches.push(state.recentTools)
+      return {
+        getSettled: () => ({
+          messages: [],
+          recalledPaths: [],
+          recalledBytes: 0,
+          skippedAlreadySurfacedCount: 0,
+          skippedBySessionByteLimitCount: 0,
+        }),
+        abort: () => undefined,
+      }
+    },
+  })
+
+  await engine.submitUserPrompt('capture recent tools')
+
+  assert.equal(recentToolBatches.length, 2)
+  assert.deepEqual(recentToolBatches[0], [])
+  assert.deepEqual(recentToolBatches[1], [
+    {
+      name: 'EchoTool',
+      ok: true,
+      summary: 'echo completed',
+    },
+  ])
+})
+
+test('QueryEngine aborts relevant memory prefetch when the query aborts', async () => {
+  const controller = new AbortController()
+  let prefetchAborted = false
+  const engine = new QueryEngine({
+    client: new HangingAbortAwareLlmClient(),
+    model: 'stub-model',
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext({
+      cwd: '/tmp/project',
+      sessionId: 'session-abort-prefetch',
+    }),
+    relevantMemoryPrefetcher: () => ({
+      getSettled: () => undefined,
+      abort: () => {
+        prefetchAborted = true
+      },
+    }),
+  })
+
+  const pending = engine.submitUserPrompt('abort me', {
+    signal: controller.signal,
+  })
+  controller.abort()
+
+  await assert.rejects(pending, error => {
+    assert.ok(error instanceof QueryLoopAbortError)
+    return true
+  })
+  assert.equal(prefetchAborted, true)
 })
 
 test('QueryEngine preserves completed turn messages when a later iteration fails', async () => {
@@ -913,7 +1171,7 @@ test('compactSession appends a compact boundary and summary inside the current s
     const sourceMeta = await loadSessionMeta(source.sessionId, env)
     const sessionMessages = await loadSessionMessages(source.sessionId, env)
     const visibleMessages = getMessagesAfterCompactBoundary(sessionMessages)
-    const sessionDirs = await readdir(getSessionsDir(env))
+    const sessionDirs = await readdir(getProjectSessionsDir('/tmp/project', env))
 
     assert.ok(sourceMeta)
     assert.equal(result.session.sessionId, source.sessionId)
@@ -960,16 +1218,13 @@ test('compactSession summarize prompt stays focused on transcript even when plan
       model: 'stub-model',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(source.sessionId, '/tmp/project', env),
-      env,
-    )
-    await updatePlanBoard(
-      board.boardId,
+    const { filePath } = await ensureSessionPlanFile(source.sessionId, env)
+    await updateSessionPlanMode(
+      source.sessionId,
       current => ({
-        ...current,
-        mode: 'active',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'active',
+        planFilePath: filePath,
       }),
       env,
     )
@@ -1045,7 +1300,7 @@ test('compactSession leaves the original session untouched when summarization fa
 
     const sourceMeta = await loadSessionMeta(source.sessionId, env)
     const sourceMessagesAfterFailure = await loadSessionMessages(source.sessionId, env)
-    const sessionDirs = await readdir(getSessionsDir(env))
+    const sessionDirs = await readdir(getProjectSessionsDir('/tmp/project', env))
 
     assert.ok(sourceMeta)
     assert.equal(sourceMessagesAfterFailure.length, sourceMessages.length)
@@ -1070,26 +1325,18 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
       sessionId: 'session-post-compact-attachments',
       env,
     })
-    const board = await ensurePlanBoardPlanFile(
-      await getOrCreatePlanBoardForSession(session.sessionId, '/tmp/project', env),
-      env,
-    )
+    const { filePath } = await ensureSessionPlanFile(session.sessionId, env)
     await writeFile(
-      board.planFilePath!,
+      filePath,
       '# Plan\n\n- Preserve the current migration sequence.\n',
       'utf8',
     )
-    await updatePlanBoard(
-      board.boardId,
+    await updateSessionPlanMode(
+      session.sessionId,
       current => ({
-        ...current,
-        title: 'Auth migration hardening',
-        purpose: 'Keep the post-compact work batch recoverable.',
-        background: 'The session was compacted while a migration was in flight.',
-        plan: 'Restore the board brief before continuing implementation.',
-        scope: 'Compact recovery only.',
-        verification: 'Inspect the first post-compact LLM request.',
-        updatedAt: new Date().toISOString(),
+        ...(current ?? { status: 'inactive' as const }),
+        status: 'inactive',
+        planFilePath: filePath,
       }),
       env,
     )
@@ -1154,8 +1401,10 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
     assert.match(firstRequestText, /export const restored = true/)
     assert.match(firstRequestText, /# Post-Compact Plan File/)
     assert.match(firstRequestText, /Preserve the current migration sequence/)
+    assert.doesNotMatch(firstRequestText, /## Plan Mode/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Read File/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Plan File/)
+    assert.doesNotMatch(secondRequestText, /## Plan Mode/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Task Board/)
   } finally {
     process.env = originalEnv

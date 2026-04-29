@@ -201,6 +201,67 @@ export function getToolUseBlocks(message: Message): ToolUseContentBlock[] {
   )
 }
 
+export function getToolResultBlocks(message: Message): ToolResultContentBlock[] {
+  return message.content.filter(
+    (block): block is ToolResultContentBlock => block.type === 'tool_result',
+  )
+}
+
+function isToolResultOnlyMessage(message: Message): boolean {
+  return (
+    message.role === 'user' &&
+    message.content.length > 0 &&
+    message.content.every(block => block.type === 'tool_result')
+  )
+}
+
+export function repairDanglingToolUseMessages(messages: Message[]): Message[] {
+  const repaired: Message[] = []
+  let changed = false
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!
+    repaired.push(message)
+
+    if (message.role !== 'assistant') {
+      continue
+    }
+
+    const toolUseIds = getToolUseBlocks(message).map(block => block.id)
+    if (toolUseIds.length === 0) {
+      continue
+    }
+
+    const observedResultIds = new Set<string>()
+    for (
+      let lookahead = index + 1;
+      lookahead < messages.length &&
+      isToolResultOnlyMessage(messages[lookahead]!);
+      lookahead += 1
+    ) {
+      for (const block of getToolResultBlocks(messages[lookahead]!)) {
+        observedResultIds.add(block.toolUseId)
+      }
+    }
+
+    for (const toolUseId of toolUseIds) {
+      if (observedResultIds.has(toolUseId)) {
+        continue
+      }
+
+      changed = true
+      repaired.push(
+        createToolResultMessage('user', toolUseId, {
+          error:
+            'Tool execution was interrupted before dclaw recorded a result.',
+        }),
+      )
+    }
+  }
+
+  return changed ? repaired : messages
+}
+
 export function getImageContentBlocks(message: Message): ImageContentBlock[] {
   return message.content.filter(
     (block): block is ImageContentBlock => block.type === 'image',
