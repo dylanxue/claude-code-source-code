@@ -83,6 +83,13 @@ export function getProjectPlansDir(
   return join(getProjectDir(workspaceRoot, env), 'plans')
 }
 
+export function getProjectToolResultsDir(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getProjectDir(workspaceRoot, env), 'tool-results')
+}
+
 function getProjectSessionDir(
   workspaceRoot: string,
   sessionId: string,
@@ -104,9 +111,15 @@ export function getBackgroundTasksDir(
 }
 
 export function getToolResultsDir(
-  env: NodeJS.ProcessEnv = process.env,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(getDclawHomeDir(env), 'tool-results')
+  if (typeof workspaceRootOrEnv === 'string') {
+    return getProjectToolResultsDir(workspaceRootOrEnv, maybeEnv)
+  }
+
+  const env = workspaceRootOrEnv
+  return getProjectToolResultsDir(resolveWorkspaceRoot(env), env)
 }
 
 export function getSessionDir(

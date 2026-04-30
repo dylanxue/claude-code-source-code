@@ -16,8 +16,13 @@ import {
 import { listSessionHistory } from '../session/history.js'
 import {
   loadMemoryManifest,
+  type MemoryManifestEntry,
 } from '../memory/manifest.js'
-import { ensureMemoryScaffold } from '../memory/store.js'
+import {
+  deleteMemoryFile,
+  ensureMemoryScaffold,
+  readMemoryFile,
+} from '../memory/store.js'
 import { loadSessionForResume } from '../session/resume.js'
 import {
   createSession,
@@ -668,25 +673,138 @@ async function handleMemoryCommand(
   args: string[],
   context: SlashCommandContext,
 ): Promise<void> {
-  if (args.length > 0) {
+  const env = context.env ?? process.env
+  const scaffold = await ensureMemoryScaffold(context.options.cwd, env)
+  const manifest = await loadMemoryManifest(context.options.cwd, env)
+  const subcommand = args[0]?.toLowerCase()
+
+  if (!subcommand || subcommand === 'list' || subcommand === 'ls') {
     printLines([
-      'Usage: /memory',
+      'Memory:',
+      `directory: ${scaffold.memoryDir}`,
+      `entrypoint: ${scaffold.entrypointPath}`,
+      `memory files: ${manifest.length}`,
+      ...(manifest.length > 0
+        ? [
+            '',
+            ...manifest.map(entry =>
+              `- [${entry.type}] ${entry.relativePath}  ${entry.name} - ${entry.description}`,
+            ),
+          ]
+        : []),
       '',
     ])
     return
   }
 
-  const env = context.env ?? process.env
-  const scaffold = await ensureMemoryScaffold(context.options.cwd, env)
-  const manifest = await loadMemoryManifest(context.options.cwd, env)
+  if (subcommand === 'view' || subcommand === 'show') {
+    const resolved = resolveMemoryEntry(args.slice(1).join(' '), manifest)
+    if ('error' in resolved) {
+      printLines(resolved.error)
+      return
+    }
+
+    const file = await readMemoryFile(resolved.entry.path, scaffold.memoryDir)
+    printLines([
+      `Memory: ${resolved.entry.name}`,
+      `path: ${resolved.entry.relativePath}`,
+      `type: ${resolved.entry.type}`,
+      `updated: ${resolved.entry.updatedAt}`,
+      `description: ${resolved.entry.description}`,
+      '',
+      file?.body.trim() || '<empty>',
+      '',
+    ])
+    return
+  }
+
+  if (subcommand === 'delete' || subcommand === 'rm') {
+    const resolved = resolveMemoryEntry(args.slice(1).join(' '), manifest)
+    if ('error' in resolved) {
+      printLines(resolved.error)
+      return
+    }
+
+    const result = await deleteMemoryFile({
+      workspaceRoot: context.options.cwd,
+      relativePath: resolved.entry.relativePath,
+      env,
+    })
+    printLines([
+      result.didDelete
+        ? `Deleted memory: ${resolved.entry.relativePath}`
+        : `Memory was already missing: ${resolved.entry.relativePath}`,
+      '',
+    ])
+    return
+  }
 
   printLines([
-    'Memory:',
-    `directory: ${scaffold.memoryDir}`,
-    `entrypoint: ${scaffold.entrypointPath}`,
-    `memory files: ${manifest.length}`,
+    'Usage: /memory [list|view <memory>|delete <memory>]',
     '',
   ])
+}
+
+function resolveMemoryEntry(
+  selector: string,
+  entries: MemoryManifestEntry[],
+): { entry: MemoryManifestEntry } | { error: string[] } {
+  const normalizedSelector = selector.trim().toLowerCase()
+  if (!normalizedSelector) {
+    return {
+      error: [
+        'Usage: /memory view <memory>',
+        '       /memory delete <memory>',
+        '',
+      ],
+    }
+  }
+
+  const exact = entries.find(entry =>
+    [
+      entry.relativePath,
+      entry.path,
+      entry.name,
+    ].some(value => value.toLowerCase() === normalizedSelector),
+  )
+  if (exact) {
+    return { entry: exact }
+  }
+
+  const partial = entries.filter(entry =>
+    [
+      entry.relativePath,
+      entry.name,
+      entry.description,
+      entry.type,
+    ].some(value => value.toLowerCase().includes(normalizedSelector)),
+  )
+
+  if (partial.length === 1 && partial[0]) {
+    return { entry: partial[0] }
+  }
+
+  if (partial.length > 1) {
+    return {
+      error: [
+        `Multiple memories match: ${selector}`,
+        ...partial
+          .slice(0, 8)
+          .map(entry => `- ${entry.relativePath}  ${entry.name}`),
+        '',
+      ],
+    }
+  }
+
+  return {
+    error: [
+      `Memory not found: ${selector}`,
+      entries.length === 0
+        ? 'No memory files exist for this workspace yet.'
+        : 'Use /memory list to see available memory files.',
+      '',
+    ],
+  }
 }
 
 function setCurrentPermissionMode(
@@ -919,7 +1037,7 @@ const SLASH_COMMANDS: SlashCommandDefinition[] = [
     name: '/memory',
     displayName: 'Memory',
     argKind: 'none',
-    description: 'Create and show the current workspace memory entrypoint.',
+    description: 'Open workspace memory, or list, view, and delete memory files.',
     canRunWhileBusy: true,
     presentationKind: 'structured_card',
     presentationTitle: 'Memory',

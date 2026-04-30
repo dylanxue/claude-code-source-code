@@ -1420,7 +1420,12 @@ export async function executeSingleTurn(
       const budgetedToolResults = await applyToolResultBudget(
         toolResultMessages,
         toolResultMetadata,
-        request.toolResultBudgetOptions,
+        {
+          ...(request.toolResultBudgetOptions ?? {}),
+          workspaceRoot:
+            request.toolResultBudgetOptions?.workspaceRoot ??
+            request.toolContext.cwd,
+        },
       )
       const recentTools = toolUseBlocks.map(block => {
         const resultMessage = toolResultMessages.find(message => {

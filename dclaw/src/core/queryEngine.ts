@@ -737,7 +737,11 @@ export class QueryEngine {
   private getResolvedToolResultBudgetOptions() {
     const modelLimits = this.getResolvedModelLimits()
     return modelLimits
-      ? deriveToolResultBudgetFromModelLimits(modelLimits)
+      ? {
+          ...deriveToolResultBudgetFromModelLimits(modelLimits),
+          workspaceRoot: this.toolContext.cwd,
+          env: this.modelLimitsEnv ?? process.env,
+        }
       : undefined
   }
 

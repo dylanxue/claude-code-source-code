@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   formatMemoryDocument,
   parseMemoryDocument,
@@ -26,6 +26,18 @@ export type WriteMemoryInput = {
   body: string
   relativePath?: string
   env?: NodeJS.ProcessEnv
+}
+
+export type DeleteMemoryInput = {
+  workspaceRoot: string
+  relativePath: string
+  env?: NodeJS.ProcessEnv
+}
+
+export type DeleteMemoryResult = {
+  path: string
+  relativePath: string
+  didDelete: boolean
 }
 
 const MEMORY_ENTRYPOINT_CONTENT = [
@@ -72,6 +84,75 @@ async function collectMarkdownFiles(directory: string): Promise<string[]> {
 
 async function ensureDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true })
+}
+
+function isWithinDirectory(targetPath: string, directoryPath: string): boolean {
+  const rel = relative(resolve(directoryPath), resolve(targetPath))
+  return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function resolveMemoryRelativePath(
+  workspaceRoot: string,
+  relativePath: string,
+  env: NodeJS.ProcessEnv,
+): {
+  memoryDir: string
+  path: string
+  relativePath: string
+} {
+  const memoryDir = getMemoryDir(workspaceRoot, env)
+  const normalizedRelativePath = relativePath.trim()
+  if (!normalizedRelativePath) {
+    throw new Error('Memory path is required.')
+  }
+
+  const path = resolve(memoryDir, normalizedRelativePath)
+  if (!isWithinDirectory(path, memoryDir)) {
+    throw new Error(`Memory path must stay inside ${memoryDir}`)
+  }
+  if (basename(path) === 'MEMORY.md') {
+    throw new Error('MEMORY.md is the memory index and cannot be deleted.')
+  }
+  if (!path.endsWith('.md')) {
+    throw new Error('Only memory markdown files can be deleted.')
+  }
+
+  return {
+    memoryDir,
+    path,
+    relativePath: relative(memoryDir, path),
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function removeMemoryEntrypointLink(
+  workspaceRoot: string,
+  relativePath: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const entrypointPath = getMemoryEntrypointPath(workspaceRoot, env)
+  let content
+  try {
+    content = await readFile(entrypointPath, 'utf8')
+  } catch {
+    return
+  }
+
+  const rawPath = escapeRegExp(relativePath)
+  const encodedPath = escapeRegExp(
+    relativePath.split('/').map(encodeURIComponent).join('/'),
+  )
+  const linkPattern = new RegExp(`\\]\\((?:\\./)?(?:${rawPath}|${encodedPath})(?:#[^)]+)?\\)`, 'u')
+  const nextLines = content
+    .split('\n')
+    .filter(line => !linkPattern.test(line))
+  const nextContent = nextLines.join('\n')
+  if (nextContent !== content) {
+    await writeFile(entrypointPath, nextContent, 'utf8')
+  }
 }
 
 export async function ensureMemoryScaffold(
@@ -157,4 +238,45 @@ export async function listMemoryFiles(
   return files
     .filter((file): file is StoredMemoryFile => file !== null)
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+export async function deleteMemoryFile(
+  input: DeleteMemoryInput,
+): Promise<DeleteMemoryResult> {
+  const env = input.env ?? process.env
+  await ensureMemoryScaffold(input.workspaceRoot, env)
+  const resolved = resolveMemoryRelativePath(
+    input.workspaceRoot,
+    input.relativePath,
+    env,
+  )
+
+  try {
+    await unlink(resolved.path)
+    await removeMemoryEntrypointLink(
+      input.workspaceRoot,
+      resolved.relativePath,
+      env,
+    )
+    return {
+      path: resolved.path,
+      relativePath: resolved.relativePath,
+      didDelete: true,
+    }
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return {
+        path: resolved.path,
+        relativePath: resolved.relativePath,
+        didDelete: false,
+      }
+    }
+
+    throw error
+  }
 }

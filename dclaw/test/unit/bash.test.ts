@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { sanitizeMemoryProjectKey } from '../../src/memory/paths.js'
 import { bashTool } from '../../src/tools/builtin/bash.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
@@ -79,21 +80,32 @@ test('Bash run_in_background returns task metadata and writes output to disk', a
 test('Bash persists large foreground output with metadata', async () => {
   const dclawHome = await mkdtemp(join(tmpdir(), 'dclaw-bash-home-'))
   const originalDclawHome = process.env.DCLAW_HOME
+  const workspaceRoot = join(dclawHome, 'workspace project')
+  const expectedToolResultsDir = join(
+    dclawHome,
+    'projects',
+    sanitizeMemoryProjectKey(workspaceRoot),
+    'tool-results',
+  )
   process.env.DCLAW_HOME = dclawHome
 
   try {
+    await mkdir(workspaceRoot, { recursive: true })
     const result = await bashTool.call(
       {
         command:
           'node -e "process.stdout.write(\'x\'.repeat(13000)); process.stderr.write(\'warn\')"',
       },
-      createToolContext(),
+      createToolContext({ cwd: workspaceRoot }),
     )
 
     assert.equal(result.ok, true)
     assert.ok(result.output.persistedOutputPath)
     assert.ok((result.output.persistedOutputSize ?? 0) > 13_000)
-    assert.match(result.output.persistedOutputPath!, /tool-results/)
+    assert.equal(
+      dirname(result.output.persistedOutputPath!),
+      expectedToolResultsDir,
+    )
     assert.equal(result.output.executionMode, 'foreground')
     assert.equal(result.output.stdoutTruncated, true)
     assert.equal(result.output.stderrTruncated, false)

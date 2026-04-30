@@ -67,19 +67,27 @@ test('project session paths use projects/<workspace>/sessions layout', () => {
   )
 })
 
-test('query trace, background tasks, and tool results use configured DCLAW_HOME', () => {
+test('query trace and tool results use workspace project layout', () => {
   const env = {
     HOME: '/tmp/example-home',
     DCLAW_HOME: '/tmp/dev-dclaw',
   } as NodeJS.ProcessEnv
-  const projectKey = sanitizeMemoryProjectKey('/tmp/workspaces/demo app')
+  const workspaceRoot = '/tmp/workspaces/demo app'
+  const projectKey = sanitizeMemoryProjectKey(workspaceRoot)
 
   assert.equal(
-    getProjectQueryTracesDir('/tmp/workspaces/demo app', env),
+    getProjectQueryTracesDir(workspaceRoot, env),
     `/tmp/dev-dclaw/projects/${projectKey}/query-traces`,
   )
   assert.equal(getBackgroundTasksDir(env), '/tmp/dev-dclaw/background-tasks')
-  assert.equal(getToolResultsDir(env), '/tmp/dev-dclaw/tool-results')
+  assert.equal(
+    getToolResultsDir(workspaceRoot, env),
+    `/tmp/dev-dclaw/projects/${projectKey}/tool-results`,
+  )
+  assert.equal(
+    getToolResultsDir({ ...env, DCLAW_WORKSPACE_ROOT: workspaceRoot }),
+    `/tmp/dev-dclaw/projects/${projectKey}/tool-results`,
+  )
 })
 
 test('getDclawConfigPath uses configured DCLAW_HOME', () => {

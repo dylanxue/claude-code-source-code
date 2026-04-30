@@ -37,6 +37,7 @@ export type ToolResultBudgetOptions = {
   defaultMaxResultSizeChars?: number
   maxToolResultsPerTurnChars?: number
   previewChars?: number
+  workspaceRoot?: string
   env?: NodeJS.ProcessEnv
 }
 
@@ -69,6 +70,7 @@ export function resolveToolResultBudgetOptions(
       options.maxToolResultsPerTurnChars ??
       DEFAULT_MAX_TOOL_RESULTS_PER_TURN_CHARS,
     previewChars: options.previewChars ?? DEFAULT_PREVIEW_CHARS,
+    workspaceRoot: options.workspaceRoot ?? process.cwd(),
     env: options.env ?? process.env,
   }
 }
@@ -182,9 +184,10 @@ async function persistToolResult(
   serializedOutput: string,
   originalSizeChars: number,
   previewChars: number,
+  workspaceRoot: string,
   env: NodeJS.ProcessEnv,
 ): Promise<PersistedToolResultOutput> {
-  const directory = getToolResultsDir(env)
+  const directory = getToolResultsDir(workspaceRoot, env)
   await mkdir(directory, { recursive: true })
 
   const filepath = join(directory, `${randomUUID()}.txt`)
@@ -277,6 +280,7 @@ async function replaceCandidate(
       candidate.serializedOutput,
       candidate.sizeChars,
       options.previewChars,
+      options.workspaceRoot,
       options.env,
     )
     messages[candidate.messageIndex] = replaceBlockOutput(

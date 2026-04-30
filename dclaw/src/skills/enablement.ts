@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { getDclawHomeDir } from '../session/paths.js'
+import { getProjectDir } from '../session/paths.js'
 import type { LoadedSkill } from './types.js'
 
 type SkillEnablementState = {
@@ -11,8 +11,11 @@ export type SkillStatus = LoadedSkill & {
   enabled: boolean
 }
 
-function getSkillStatePath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(getDclawHomeDir(env), 'skills-state.json')
+function getSkillStatePath(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getProjectDir(workspaceRoot, env), 'skills-state.json')
 }
 
 function normalizeSkillName(value: string): string {
@@ -33,11 +36,12 @@ function parseDisabledSkillNames(value: unknown): Set<string> {
 }
 
 export async function loadDisabledSkillNames(
+  workspaceRoot: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Set<string>> {
   try {
     const parsed = JSON.parse(
-      await readFile(getSkillStatePath(env), 'utf8'),
+      await readFile(getSkillStatePath(workspaceRoot, env), 'utf8'),
     ) as SkillEnablementState
     return parseDisabledSkillNames(parsed.disabledSkills)
   } catch {
@@ -46,10 +50,11 @@ export async function loadDisabledSkillNames(
 }
 
 async function saveDisabledSkillNames(
+  workspaceRoot: string,
   disabledSkillNames: Set<string>,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  const path = getSkillStatePath(env)
+  const path = getSkillStatePath(workspaceRoot, env)
   await mkdir(dirname(path), { recursive: true })
   await writeFile(
     path,
@@ -67,6 +72,7 @@ async function saveDisabledSkillNames(
 }
 
 export async function setSkillEnabled(
+  workspaceRoot: string,
   skillName: string,
   enabled: boolean,
   env: NodeJS.ProcessEnv = process.env,
@@ -76,13 +82,13 @@ export async function setSkillEnabled(
     throw new Error('Skill name is required.')
   }
 
-  const disabledSkillNames = await loadDisabledSkillNames(env)
+  const disabledSkillNames = await loadDisabledSkillNames(workspaceRoot, env)
   if (enabled) {
     disabledSkillNames.delete(normalizedName)
   } else {
     disabledSkillNames.add(normalizedName)
   }
-  await saveDisabledSkillNames(disabledSkillNames, env)
+  await saveDisabledSkillNames(workspaceRoot, disabledSkillNames, env)
 }
 
 export function filterEnabledSkills(

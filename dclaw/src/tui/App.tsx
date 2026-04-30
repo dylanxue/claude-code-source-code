@@ -26,6 +26,12 @@ import {
   type SkillsMenuState,
 } from './views/SkillsMenu.js'
 import {
+  filterMemoryFiles,
+  getMemoryBodyLines,
+  getSelectedMemory,
+  type MemoryMenuState,
+} from './views/MemoryMenu.js'
+import {
   computeTranscriptSliceStart,
   TranscriptPane,
   type TranscriptSliceAnchor,
@@ -33,6 +39,7 @@ import {
 import type { WelcomeCardData } from '../cli/welcome.js'
 import type { SessionHistoryEntry } from '../session/history.js'
 import type { SkillStatus } from '../skills/enablement.js'
+import type { StoredMemoryFile } from '../memory/store.js'
 import type {
   AskUserQuestion,
   AskUserQuestionAnnotations,
@@ -97,6 +104,7 @@ type Props = {
   getBottomDockMeta: () => BottomDockMeta
   onListResumeSessions: () => Promise<SessionHistoryEntry[]>
   onListSkillStatuses: () => Promise<SkillStatus[]>
+  onListMemoryFiles: () => Promise<StoredMemoryFile[]>
   onLocalCommand: (
     prompt: string,
     options: {
@@ -122,6 +130,7 @@ type Props = {
     skillName: string,
     enabled: boolean,
   ) => Promise<SkillStatus[]>
+  onDeleteMemory: (relativePath: string) => Promise<StoredMemoryFile[]>
 }
 
 function isAbortLikeError(error: unknown): boolean {
@@ -371,6 +380,8 @@ export function TuiApp({
   getBottomSheetOptions,
   initialPrompt,
   welcomeCard,
+  onDeleteMemory,
+  onListMemoryFiles,
   onListResumeSessions,
   onListSkillStatuses,
   onLocalCommand,
@@ -404,6 +415,9 @@ export function TuiApp({
     sessions: SessionHistoryEntry[]
   } | undefined>(undefined)
   const [skillsMenu, setSkillsMenu] = useState<SkillsMenuState | undefined>(
+    undefined,
+  )
+  const [memoryMenu, setMemoryMenu] = useState<MemoryMenuState | undefined>(
     undefined,
   )
   const [questionDialog, setQuestionDialog] = useState<
@@ -654,6 +668,12 @@ export function TuiApp({
       return
     }
 
+    if (normalizedPrompt === '/memory') {
+      setComposerInput({ value: '', cursorIndex: 0 })
+      void openMemoryMenu()
+      return
+    }
+
     const handledLocally = await onLocalCommand(trimmed, {
       allowDuringActivePrompt: Boolean(activeControllerRef.current),
       onUiEvent: dispatchUiEvent,
@@ -699,6 +719,7 @@ export function TuiApp({
 
   const openSkillsMenu = async (): Promise<void> => {
     setBottomSheet(undefined)
+    setMemoryMenu(undefined)
     setActiveSuggestionIndex(0)
     setSkillsMenu({
       isLoading: true,
@@ -858,6 +879,232 @@ export function TuiApp({
     }
 
     void toggleSelectedSkill(skillsMenu)
+  }
+
+  const openMemoryMenu = async (): Promise<void> => {
+    setBottomSheet(undefined)
+    setSkillsMenu(undefined)
+    setActiveSuggestionIndex(0)
+    setMemoryMenu({
+      isLoading: true,
+      mode: 'root',
+      searchQuery: '',
+      selectedIndex: 0,
+      viewScrollOffset: 0,
+      memories: [],
+    })
+
+    try {
+      const memories = await onListMemoryFiles()
+      if (!mountedRef.current) {
+        return
+      }
+
+      setMemoryMenu({
+        isLoading: false,
+        mode: 'root',
+        searchQuery: '',
+        selectedIndex: 0,
+        viewScrollOffset: 0,
+        memories,
+      })
+    } catch (error) {
+      if (!mountedRef.current) {
+        return
+      }
+
+      setMemoryMenu({
+        errorText: getCliErrorInfo(error).formattedText,
+        isLoading: false,
+        mode: 'root',
+        searchQuery: '',
+        selectedIndex: 0,
+        viewScrollOffset: 0,
+        memories: [],
+      })
+    }
+  }
+
+  const moveMemorySelection = (direction: 1 | -1): void => {
+    setMemoryMenu(menu => {
+      if (!menu) {
+        return menu
+      }
+
+      if (menu.mode === 'view') {
+        const memory = getSelectedMemory(menu)
+        const maxOffset = memory
+          ? Math.max(0, getMemoryBodyLines(memory).length - 9)
+          : 0
+        return {
+          ...menu,
+          viewScrollOffset: Math.max(
+            0,
+            Math.min(menu.viewScrollOffset + direction, maxOffset),
+          ),
+        }
+      }
+
+      const itemCount =
+        menu.mode === 'root'
+          ? 2
+          : menu.mode === 'list' || menu.mode === 'delete'
+            ? filterMemoryFiles(menu.memories, menu.searchQuery).length
+            : 0
+
+      if (itemCount === 0) {
+        return menu
+      }
+
+      return {
+        ...menu,
+        selectedIndex: (menu.selectedIndex + direction + itemCount) % itemCount,
+        statusText: undefined,
+      }
+    })
+  }
+
+  const setMemorySearchQuery = (updater: (value: string) => string): void => {
+    setMemoryMenu(menu =>
+      menu
+        ? {
+            ...menu,
+            searchQuery: updater(menu.searchQuery),
+            selectedIndex: 0,
+            statusText: undefined,
+          }
+        : menu,
+    )
+  }
+
+  const selectRootMemoryMenuItem = (selectedIndex: number): void => {
+    setMemoryMenu(menu =>
+      menu
+        ? {
+            ...menu,
+            activeRelativePath: undefined,
+            mode: selectedIndex === 0 ? 'list' : 'delete',
+            searchQuery: '',
+            selectedIndex: 0,
+            statusText: undefined,
+            viewScrollOffset: 0,
+          }
+        : menu,
+    )
+  }
+
+  const viewSelectedMemory = (menu: MemoryMenuState): void => {
+    const memories = filterMemoryFiles(menu.memories, menu.searchQuery)
+    const selectedMemory =
+      memories[clampMenuIndex(menu.selectedIndex, memories.length)]
+    if (!selectedMemory) {
+      return
+    }
+
+    setMemoryMenu({
+      ...menu,
+      activeRelativePath: selectedMemory.relativePath,
+      mode: 'view',
+      statusText: undefined,
+      viewScrollOffset: 0,
+    })
+  }
+
+  const confirmSelectedMemoryDelete = (menu: MemoryMenuState): void => {
+    const memories = filterMemoryFiles(menu.memories, menu.searchQuery)
+    const selectedMemory =
+      menu.activeRelativePath
+        ? getSelectedMemory(menu)
+        : memories[clampMenuIndex(menu.selectedIndex, memories.length)]
+    if (!selectedMemory) {
+      return
+    }
+
+    setMemoryMenu({
+      ...menu,
+      activeRelativePath: selectedMemory.relativePath,
+      mode: 'confirm_delete',
+      statusText: undefined,
+      viewScrollOffset: 0,
+    })
+  }
+
+  const deleteSelectedMemory = async (menu: MemoryMenuState): Promise<void> => {
+    const selectedMemory = getSelectedMemory(menu)
+    if (!selectedMemory) {
+      return
+    }
+
+    setMemoryMenu({
+      ...menu,
+      errorText: undefined,
+      isLoading: true,
+    })
+
+    try {
+      const nextMemories = await onDeleteMemory(selectedMemory.relativePath)
+      if (!mountedRef.current) {
+        return
+      }
+
+      const nextFilteredMemories = filterMemoryFiles(
+        nextMemories,
+        menu.searchQuery,
+      )
+      setMemoryMenu({
+        activeRelativePath: undefined,
+        isLoading: false,
+        mode: 'delete',
+        searchQuery: menu.searchQuery,
+        selectedIndex: clampMenuIndex(menu.selectedIndex, nextFilteredMemories.length),
+        statusText: `Deleted memory: ${selectedMemory.relativePath}`,
+        viewScrollOffset: 0,
+        memories: nextMemories,
+      })
+    } catch (error) {
+      if (!mountedRef.current) {
+        return
+      }
+
+      setMemoryMenu({
+        ...menu,
+        errorText: getCliErrorInfo(error).formattedText,
+        isLoading: false,
+      })
+    }
+  }
+
+  const submitMemoryMenuSelection = (): void => {
+    if (!memoryMenu || memoryMenu.isLoading) {
+      return
+    }
+
+    if (memoryMenu.mode === 'root') {
+      selectRootMemoryMenuItem(memoryMenu.selectedIndex)
+      return
+    }
+
+    if (memoryMenu.mode === 'list') {
+      viewSelectedMemory(memoryMenu)
+      return
+    }
+
+    if (memoryMenu.mode === 'view') {
+      setMemoryMenu({
+        ...memoryMenu,
+        activeRelativePath: undefined,
+        mode: 'list',
+        viewScrollOffset: 0,
+      })
+      return
+    }
+
+    if (memoryMenu.mode === 'delete') {
+      confirmSelectedMemoryDelete(memoryMenu)
+      return
+    }
+
+    void deleteSelectedMemory(memoryMenu)
   }
 
   const createQuestionDialog = (
@@ -1153,6 +1400,44 @@ export function TuiApp({
     resolveQuestionDialog({})
   }
 
+  const closeOrBackMemoryMenu = (): void => {
+    setMemoryMenu(menu => {
+      if (!menu) {
+        return menu
+      }
+
+      if (menu.mode === 'root') {
+        return undefined
+      }
+
+      if (menu.mode === 'view') {
+        return {
+          ...menu,
+          activeRelativePath: undefined,
+          mode: 'list',
+          viewScrollOffset: 0,
+        }
+      }
+
+      if (menu.mode === 'confirm_delete') {
+        return {
+          ...menu,
+          mode: 'delete',
+          viewScrollOffset: 0,
+        }
+      }
+
+      return {
+        ...menu,
+        activeRelativePath: undefined,
+        mode: 'root',
+        searchQuery: '',
+        selectedIndex: 0,
+        viewScrollOffset: 0,
+      }
+    })
+  }
+
   const closeOrBackSkillsMenu = (): void => {
     setSkillsMenu(menu => {
       if (!menu) {
@@ -1187,6 +1472,13 @@ export function TuiApp({
       return true
     }
 
+    if (suggestion.name === '/memory') {
+      setComposerInput({ value: '', cursorIndex: 0 })
+      setActiveSuggestionIndex(0)
+      void openMemoryMenu()
+      return true
+    }
+
     const nextSheet = buildBottomSheet(completedInput)
     setComposerInput({
       value: completedInput,
@@ -1214,6 +1506,8 @@ export function TuiApp({
 
   const openResumeOverlay = async (): Promise<void> => {
     setBottomSheet(undefined)
+    setMemoryMenu(undefined)
+    setSkillsMenu(undefined)
     setActiveSuggestionIndex(0)
     setResumeOverlay({
       isLoading: true,
@@ -1310,6 +1604,7 @@ export function TuiApp({
       isShiftTabRawInput(rawInput) &&
       !resumeOverlay &&
       !questionDialog &&
+      !memoryMenu &&
       !skillsMenu &&
       !bottomSheet
     ) {
@@ -1375,6 +1670,11 @@ export function TuiApp({
         return
       }
 
+      if (memoryMenu) {
+        closeOrBackMemoryMenu()
+        return
+      }
+
       if (skillsMenu) {
         closeOrBackSkillsMenu()
         return
@@ -1428,6 +1728,48 @@ export function TuiApp({
         normalizedInput.length > 0
       ) {
         updateQuestionDialogText(value => `${value}${normalizedInput}`)
+        return
+      }
+
+      return
+    }
+
+    if (memoryMenu) {
+      if (key.upArrow) {
+        moveMemorySelection(-1)
+        return
+      }
+
+      if (key.downArrow || key.tab) {
+        moveMemorySelection(1)
+        return
+      }
+
+      if (
+        (memoryMenu.mode === 'list' || memoryMenu.mode === 'delete') &&
+        (isTerminalBackspace || (key.delete && !isTerminalForwardDelete))
+      ) {
+        setMemorySearchQuery(value => value.slice(0, -1))
+        return
+      }
+
+      if (key.return || normalizedInput.includes('\n')) {
+        submitMemoryMenuSelection()
+        return
+      }
+
+      if (memoryMenu.mode === 'view' && input.toLowerCase() === 'd') {
+        confirmSelectedMemoryDelete(memoryMenu)
+        return
+      }
+
+      if (
+        (memoryMenu.mode === 'list' || memoryMenu.mode === 'delete') &&
+        !key.ctrl &&
+        !key.meta &&
+        normalizedInput.length > 0
+      ) {
+        setMemorySearchQuery(value => `${value}${normalizedInput}`)
         return
       }
 
@@ -1638,6 +1980,7 @@ export function TuiApp({
       cwd={bottomDockMeta.cwd}
       inputValue={inputValue}
       isBusy={isBusy}
+      memoryMenu={memoryMenu}
       permissionLabel={bottomDockMeta.permissionLabel}
       placeholder={
         isBusy

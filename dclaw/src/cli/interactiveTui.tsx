@@ -19,6 +19,11 @@ import { createWelcomeCardData } from './welcome.js'
 import { buildConfigAwareEnvWithSources } from './configFile.js'
 import { loadResolvedLlmConfig } from '../llm/config.js'
 import { listSessionHistory } from '../session/history.js'
+import {
+  deleteMemoryFile,
+  ensureMemoryScaffold,
+  listMemoryFiles,
+} from '../memory/store.js'
 import { loadExecutionTaskBoardForSession } from '../taskboard/store.js'
 import { presentTaskBoardSnapshot } from '../tui/presenters/taskSnapshotPresenter.js'
 
@@ -184,6 +189,27 @@ export async function runInteractiveTui(
       }}
       initialPrompt={command.prompt}
       welcomeCard={welcomeCard}
+      onListMemoryFiles={async () => {
+        await ensureMemoryScaffold(
+          interactiveContext.interactiveOptions.cwd,
+          interactiveContext.env,
+        )
+        return listMemoryFiles(
+          interactiveContext.interactiveOptions.cwd,
+          interactiveContext.env,
+        )
+      }}
+      onDeleteMemory={async relativePath => {
+        await deleteMemoryFile({
+          workspaceRoot: interactiveContext.interactiveOptions.cwd,
+          relativePath,
+          env: interactiveContext.env,
+        })
+        return listMemoryFiles(
+          interactiveContext.interactiveOptions.cwd,
+          interactiveContext.env,
+        )
+      }}
       onListResumeSessions={() => listSessionHistory(command.options.cwd)}
       onListSkillStatuses={() => {
         if (!interactiveContext.slashCommandContext.listSkillStatuses) {

@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getMemoryDir, getMemoryEntrypointPath } from '../../src/memory/paths.js'
 import {
+  deleteMemoryFile,
   ensureMemoryScaffold,
   listMemoryFiles,
   readMemoryFile,
@@ -71,6 +72,65 @@ test('memory store supports nested memory files and excludes MEMORY.md from enum
 
     assert.equal(files.length, 1)
     assert.equal(files[0]?.relativePath, 'project/db-migration-policy.md')
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('deleteMemoryFile removes a workspace memory and prunes index links', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-memory-store-delete-'))
+  const env = { ...process.env, HOME: homeDir }
+  const workspaceRoot = join(homeDir, 'workspace')
+
+  try {
+    await ensureMemoryScaffold(workspaceRoot, env)
+    const written = await writeMemoryFile({
+      workspaceRoot,
+      env,
+      relativePath: 'project/delete-me.md',
+      frontmatter: {
+        name: 'Delete Me',
+        description: 'Temporary memory for deletion.',
+        type: 'project',
+        updated_at: '2026-04-18T10:00:00.000Z',
+      },
+      body: 'This memory should be removed.',
+    })
+    await writeFile(
+      getMemoryEntrypointPath(workspaceRoot, env),
+      [
+        '# Memory',
+        '',
+        '- [Delete Me](project/delete-me.md)',
+        '- [Keep Me](project/keep-me.md)',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const deleted = await deleteMemoryFile({
+      workspaceRoot,
+      env,
+      relativePath: written.relativePath,
+    })
+    const entrypoint = await readFile(
+      getMemoryEntrypointPath(workspaceRoot, env),
+      'utf8',
+    )
+
+    assert.equal(deleted.didDelete, true)
+    assert.equal(deleted.relativePath, 'project/delete-me.md')
+    assert.deepEqual(await listMemoryFiles(workspaceRoot, env), [])
+    assert.doesNotMatch(entrypoint, /project\/delete-me\.md/)
+    assert.match(entrypoint, /project\/keep-me\.md/)
+    await assert.rejects(
+      deleteMemoryFile({
+        workspaceRoot,
+        env,
+        relativePath: '../escape.md',
+      }),
+      /inside/,
+    )
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

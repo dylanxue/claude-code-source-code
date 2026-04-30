@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { sanitizeMemoryProjectKey } from '../../src/memory/paths.js'
 import {
   filterEnabledSkills,
   getSkillStatuses,
@@ -30,13 +31,25 @@ const skills: LoadedSkill[] = [
 
 test('skill enablement persists disabled skills and filters registries', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-skill-enablement-'))
-  const env = { ...process.env, HOME: homeDir }
+  const workspaceRoot = join(homeDir, 'workspace project')
+  const env = { ...process.env, HOME: homeDir } as NodeJS.ProcessEnv
+  env.DCLAW_HOME = join(homeDir, '.dclaw')
+  const statePath = join(
+    homeDir,
+    '.dclaw',
+    'projects',
+    sanitizeMemoryProjectKey(workspaceRoot),
+    'skills-state.json',
+  )
 
   try {
-    await setSkillEnabled('review', false, env)
-    const disabled = await loadDisabledSkillNames(env)
+    await setSkillEnabled(workspaceRoot, 'review', false, env)
+    const disabled = await loadDisabledSkillNames(workspaceRoot, env)
 
     assert.deepEqual([...disabled], ['review'])
+    assert.deepEqual(JSON.parse(await readFile(statePath, 'utf8')), {
+      disabledSkills: ['review'],
+    })
     assert.deepEqual(
       filterEnabledSkills(skills, disabled).map(skill => skill.name),
       ['pdf'],
@@ -52,8 +65,8 @@ test('skill enablement persists disabled skills and filters registries', async (
       ],
     )
 
-    await setSkillEnabled('review', true, env)
-    assert.deepEqual([...(await loadDisabledSkillNames(env))], [])
+    await setSkillEnabled(workspaceRoot, 'review', true, env)
+    assert.deepEqual([...(await loadDisabledSkillNames(workspaceRoot, env))], [])
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

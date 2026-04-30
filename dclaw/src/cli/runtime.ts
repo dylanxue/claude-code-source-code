@@ -97,7 +97,7 @@ export async function prepareCliRuntime(
   const buildSkillRegistry = async () => {
     const [skills, disabledSkillNames] = await Promise.all([
       loadAllSkills(),
-      loadDisabledSkillNames(configured.env),
+      loadDisabledSkillNames(options.cwd, configured.env),
     ])
     return createSkillRegistry(filterEnabledSkills(skills, disabledSkillNames))
   }
@@ -472,17 +472,17 @@ export async function prepareCliRuntime(
     listSkillStatuses: async () => {
       const [skills, disabledSkillNames] = await Promise.all([
         loadAllSkills(),
-        loadDisabledSkillNames(configured.env),
+        loadDisabledSkillNames(options.cwd, configured.env),
       ])
       return getSkillStatuses(skills, disabledSkillNames)
     },
     setSkillEnabled: async (skillName: string, enabled: boolean) => {
-      await persistSkillEnabled(skillName, enabled, configured.env)
+      await persistSkillEnabled(options.cwd, skillName, enabled, configured.env)
       skillRegistry = await buildSkillRegistry()
       engine.setSkillRegistry(skillRegistry)
       return getSkillStatuses(
         await loadAllSkills(),
-        await loadDisabledSkillNames(configured.env),
+        await loadDisabledSkillNames(options.cwd, configured.env),
       )
     },
     env: configured.env,

@@ -821,8 +821,7 @@ async function persistLargeOutput(
     return undefined
   }
 
-  void cwd
-  const toolResultsDir = getToolResultsDir(process.env)
+  const toolResultsDir = getToolResultsDir(cwd, process.env)
   await mkdir(toolResultsDir, { recursive: true })
 
   const persistedOutputPath = join(toolResultsDir, `${randomUUID()}.log`)

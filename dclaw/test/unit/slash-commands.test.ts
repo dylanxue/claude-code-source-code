@@ -24,6 +24,7 @@ import type {
   InteractiveSessionState,
 } from '../../src/cli/slashCommands.js'
 import { getMemoryEntrypointPath } from '../../src/memory/paths.js'
+import { listMemoryFiles, writeMemoryFile } from '../../src/memory/store.js'
 
 function createEngine() {
   return new QueryEngine({
@@ -512,15 +513,47 @@ test('maybeHandleSlashCommand creates and shows workspace memory with /memory', 
       },
       env,
     })
+    await writeMemoryFile({
+      workspaceRoot: workspaceDir,
+      env,
+      relativePath: 'project/answer-style.md',
+      frontmatter: {
+        name: 'Answer Style',
+        description: 'Prefer concise direct answers.',
+        type: 'feedback',
+        updated_at: '2026-04-18T10:00:00.000Z',
+      },
+      body: 'The user prefers direct answers without long recaps.',
+    })
     const handled = await maybeHandleSlashCommand('/memory', context)
+    assert.equal(await maybeHandleSlashCommand('/memory list', context), true)
+    assert.equal(
+      await maybeHandleSlashCommand(
+        '/memory view project/answer-style.md',
+        context,
+      ),
+      true,
+    )
+    assert.equal(
+      await maybeHandleSlashCommand(
+        '/memory delete project/answer-style.md',
+        context,
+      ),
+      true,
+    )
     const entrypoint = await readFile(
       getMemoryEntrypointPath(workspaceDir, env),
       'utf8',
     )
 
     assert.equal(handled, true)
-    assert.match(output.join(''), /Memory:/)
-    assert.match(output.join(''), /entrypoint:/)
+    const text = output.join('')
+    assert.match(text, /Memory:/)
+    assert.match(text, /entrypoint:/)
+    assert.match(text, /project\/answer-style\.md/)
+    assert.match(text, /The user prefers direct answers/)
+    assert.match(text, /Deleted memory: project\/answer-style\.md/)
+    assert.deepEqual(await listMemoryFiles(workspaceDir, env), [])
     assert.match(entrypoint, /# Memory/)
   } finally {
     process.stdout.write = originalWrite

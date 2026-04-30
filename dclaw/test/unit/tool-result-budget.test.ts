@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   applyToolResultBudget,
   deriveToolResultBudgetFromModelLimits,
   type PersistedToolResultOutput,
 } from '../../src/core/toolResultBudget.js'
+import { sanitizeMemoryProjectKey } from '../../src/memory/paths.js'
 import { executeSingleTurn } from '../../src/core/queryLoop.js'
 import type {
   CreateMessageRequest,
@@ -65,6 +66,13 @@ test('deriveToolResultBudgetFromModelLimits scales budgets with context size', (
 
 test('applyToolResultBudget persists the largest outputs when the turn aggregate budget is exceeded', async () => {
   const dclawHome = await mkdtemp(join(tmpdir(), 'dclaw-budget-home-'))
+  const workspaceRoot = join(dclawHome, 'workspace project')
+  const expectedToolResultsDir = join(
+    dclawHome,
+    'projects',
+    sanitizeMemoryProjectKey(workspaceRoot),
+    'tool-results',
+  )
 
   try {
     const first = createToolResultMessage('user', 'tool_1', 'a'.repeat(80))
@@ -80,6 +88,7 @@ test('applyToolResultBudget persists the largest outputs when the turn aggregate
         defaultMaxResultSizeChars: 1_000,
         maxToolResultsPerTurnChars: 100,
         previewChars: 16,
+        workspaceRoot,
         env: {
           ...process.env,
           DCLAW_HOME: dclawHome,
@@ -95,6 +104,10 @@ test('applyToolResultBudget persists the largest outputs when the turn aggregate
     assert.equal(
       (replacedBlock.output as PersistedToolResultOutput).type,
       'persisted_tool_result',
+    )
+    assert.equal(
+      dirname((replacedBlock.output as PersistedToolResultOutput).filepath),
+      expectedToolResultsDir,
     )
     const persisted = await readFile(
       (replacedBlock.output as PersistedToolResultOutput).filepath,

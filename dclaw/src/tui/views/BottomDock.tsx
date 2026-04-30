@@ -4,6 +4,7 @@ import { formatPathForDisplay } from '../../cli/welcome.js'
 import type { BottomSheetState } from '../hooks/useBottomSheet.js'
 import type { SlashSuggestion } from '../hooks/useSlashSuggestions.js'
 import { BottomSheet } from './BottomSheet.js'
+import { MemoryMenu, type MemoryMenuState } from './MemoryMenu.js'
 import { QuestionDialog, type QuestionDialogState } from './QuestionDialog.js'
 import { SkillsMenu, type SkillsMenuState } from './SkillsMenu.js'
 import { SlashSuggestionMenu } from './SlashSuggestionMenu.js'
@@ -15,6 +16,7 @@ type Props = {
   cwd: string
   inputValue: string
   isBusy: boolean
+  memoryMenu?: MemoryMenuState
   permissionLabel: string
   placeholder: string
   queuedPrompts: string[]
@@ -37,6 +39,7 @@ export function BottomDock({
   cwd,
   inputValue,
   isBusy,
+  memoryMenu,
   permissionLabel,
   placeholder,
   queuedPrompts,
@@ -68,6 +71,8 @@ export function BottomDock({
     <Box flexDirection="column" paddingX={1} paddingBottom={1}>
       {questionDialog ? (
         <QuestionDialog dialog={questionDialog} />
+      ) : memoryMenu ? (
+        <MemoryMenu menu={memoryMenu} />
       ) : skillsMenu ? (
         <SkillsMenu menu={skillsMenu} />
       ) : bottomSheet ? (
