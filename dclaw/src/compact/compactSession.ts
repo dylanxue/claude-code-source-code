@@ -146,7 +146,6 @@ export async function compactSession(
       provider: input.provider,
       model: input.model,
       planMode: sourceMeta?.planMode,
-      taskBoardId: sourceMeta?.taskBoardId,
       createdAt,
       updatedAt: createdAt,
       persistedToolResults: [],

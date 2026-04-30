@@ -26,6 +26,7 @@ import {
 } from '../memory/store.js'
 import { loadExecutionTaskBoardForSession } from '../taskboard/store.js'
 import { presentTaskBoardSnapshot } from '../tui/presenters/taskSnapshotPresenter.js'
+import { formatCompactPressureStatusLabel } from '../compact/pressure.js'
 
 const TUI_BACKGROUND_DRAIN_TIMEOUT_MS = 5_000
 
@@ -138,6 +139,9 @@ export async function runInteractiveTui(
         cwd: interactiveContext.interactiveOptions.cwd,
         permissionLabel: interactiveContext.interactiveSession.permissionMode,
         runtimeLabel: getInteractiveRuntimeLabel(interactiveContext),
+        tokenPressureLabel: formatCompactPressureStatusLabel(
+          interactiveContext.slashCommandContext.engine.getCompactRecommendation(),
+        ),
       })}
       getBottomSheetOptions={() => {
         const runtimeNames = Object.keys(llmConfig.runtimes).sort((left, right) =>

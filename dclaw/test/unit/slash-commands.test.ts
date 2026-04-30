@@ -592,16 +592,17 @@ test('maybeHandleSlashCommand prints current status for /status', async () => {
   const text = output.join('')
   assert.match(text, /status:/)
   assert.match(text, /session id: session-123/)
-  assert.match(text, /mode: interactive/)
   assert.match(text, /runtime: default/)
-  assert.match(text, /runtime source: default/)
-  assert.match(text, /provider: stub/)
-  assert.match(text, /model: stub-model/)
-  assert.match(text, /vision side query\s+not configured/)
-  assert.match(text, /permission mode: default/)
+  assert.match(text, /main model: stub \/ stub-model/)
+  assert.match(text, /image model: not configured/)
+  assert.match(text, /permission: default/)
+  assert.match(text, /directory: \/tmp\/project/)
   assert.match(text, /compact pressure: low \(thresholds unavailable\)/)
-  assert.match(text, /compact dry-run recommendation: no immediate compact needed/)
-  assert.match(text, /compact tokens: \d+ used \(model limits unavailable\)/)
+  assert.match(text, /token usage: \d+ used \/ total unavailable/)
+  assert.doesNotMatch(text, /runtime source:/)
+  assert.doesNotMatch(text, /provider source:/)
+  assert.doesNotMatch(text, /permission mode:/)
+  assert.doesNotMatch(text, /query trace:/)
 })
 
 test('maybeHandleSlashCommand shows canonicalized model details in /status', async () => {
@@ -678,9 +679,10 @@ test('maybeHandleSlashCommand shows canonicalized model details in /status', asy
   }
 
   const text = output.join('')
-  assert.match(text, /model: anthropic\/claude-opus-4\.7/)
-  assert.match(text, /model canonicalized to: claude-opus-4-7/)
-  assert.match(text, /catalog match: claude-opus-4-7/)
+  assert.match(text, /runtime: canonical/)
+  assert.match(text, /main model: openai \/ anthropic\/claude-opus-4\.7/)
+  assert.doesNotMatch(text, /model canonicalized to:/)
+  assert.doesNotMatch(text, /catalog match:/)
 })
 
 test('maybeHandleSlashCommand allows read-only status commands while a response is active', async () => {
@@ -829,7 +831,6 @@ test('maybeHandleSlashCommand leaves plan mode when /clear starts a fresh sessio
   assert.equal(context.session.permissionMode, 'default')
   assert.equal(context.engine.getPlanFilePath(), undefined)
   assert.ok(newMeta)
-  assert.equal(newMeta?.taskBoardId, undefined)
 })
 
 test('maybeHandleSlashCommand toggles plan mode manually with /plan', async () => {

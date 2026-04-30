@@ -33,7 +33,7 @@ import {
   repairDanglingToolUseMessages,
   type Message,
 } from '../types/message.js'
-import { loadExecutionTaskBoardForSession } from '../taskboard/store.js'
+import { loadActiveExecutionTaskBoardForSession } from '../taskboard/store.js'
 import { cleanupExecutionTaskBoardForTurnEnd } from '../taskboard/turnCleanup.js'
 import type { ToolRegistry } from '../tools/registry.js'
 import type { SkillRegistry } from '../skills/registry.js'
@@ -681,7 +681,7 @@ export class QueryEngine {
       transientMessages.push(...planModeReminderMessages)
     }
 
-    const executionBoard = await loadExecutionTaskBoardForSession(
+    const executionBoard = await loadActiveExecutionTaskBoardForSession(
       this.toolContext.sessionId,
       this.modelLimitsEnv,
     )

@@ -328,23 +328,6 @@ export async function attachPlanBoardToSession(
   }
 }
 
-async function detachRetiredPlanBoardFromSession(
-  sessionId: string,
-  boardId: string,
-  env: NodeJS.ProcessEnv,
-): Promise<void> {
-  await updateSessionMeta(
-    sessionId,
-    meta => ({
-      ...meta,
-      taskBoardId:
-        meta.taskBoardId === boardId ? undefined : meta.taskBoardId,
-      updatedAt: nowIso(),
-    }),
-    env,
-  )
-}
-
 export async function loadPlanBoardForSession(
   sessionId: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -356,7 +339,6 @@ export async function loadPlanBoardForSession(
 
   const rawBoard = await readJsonFile<unknown>(getPlanBoardPath(boardId, env))
   if (isRetiredCompletedLegacyPlanBoard(rawBoard)) {
-    await detachRetiredPlanBoardFromSession(sessionId, boardId, env)
     return null
   }
 

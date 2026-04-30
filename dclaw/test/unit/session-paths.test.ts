@@ -5,10 +5,10 @@ import {
   getBackgroundTasksDir,
   getDclawConfigPath,
   getDclawHomeDir,
-  getExecutionTaskBoardPath,
   getPlanBoardPath,
   getProjectQueryTracesDir,
   getProjectSessionsDir,
+  getSessionExecutionTaskBoardPath,
   getSessionMessagesPath,
   getToolResultsDir,
 } from '../../src/session/paths.js'
@@ -62,8 +62,8 @@ test('project session paths use projects/<workspace>/sessions layout', () => {
     `/tmp/dev-dclaw/projects/${projectKey}/task-boards/board-123.json`,
   )
   assert.equal(
-    getExecutionTaskBoardPath('taskboard-123', workspaceRoot, env),
-    `/tmp/dev-dclaw/projects/${projectKey}/execution-task-boards/taskboard-123.json`,
+    getSessionExecutionTaskBoardPath('session-123', workspaceRoot, env),
+    `/tmp/dev-dclaw/projects/${projectKey}/sessions/session-123/task-board.json`,
   )
 })
 

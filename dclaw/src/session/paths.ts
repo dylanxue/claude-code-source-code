@@ -62,13 +62,6 @@ export function getProjectPlanBoardsDir(
   return join(getProjectDir(workspaceRoot, env), 'task-boards')
 }
 
-export function getProjectExecutionTaskBoardsDir(
-  workspaceRoot: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return join(getProjectDir(workspaceRoot, env), 'execution-task-boards')
-}
-
 export function getProjectQueryTracesDir(
   workspaceRoot: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -205,6 +198,17 @@ export function getSessionAgentLinksPath(
   return join(getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv), 'agents.json')
 }
 
+export function getSessionExecutionTaskBoardPath(
+  sessionId: string,
+  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
+  maybeEnv: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(
+    getSessionDir(sessionId, workspaceRootOrEnv, maybeEnv),
+    'task-board.json',
+  )
+}
+
 export function getPlanBoardPath(
   boardId: string,
   workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
@@ -216,25 +220,6 @@ export function getPlanBoardPath(
 
   const env = workspaceRootOrEnv
   return join(getProjectPlanBoardsDir(resolveWorkspaceRoot(env), env), `${boardId}.json`)
-}
-
-export function getExecutionTaskBoardPath(
-  boardId: string,
-  workspaceRootOrEnv: string | NodeJS.ProcessEnv = process.env,
-  maybeEnv: NodeJS.ProcessEnv = process.env,
-): string {
-  if (typeof workspaceRootOrEnv === 'string') {
-    return join(
-      getProjectExecutionTaskBoardsDir(workspaceRootOrEnv, maybeEnv),
-      `${boardId}.json`,
-    )
-  }
-
-  const env = workspaceRootOrEnv
-  return join(
-    getProjectExecutionTaskBoardsDir(resolveWorkspaceRoot(env), env),
-    `${boardId}.json`,
-  )
 }
 
 export function getPlanFilePath(

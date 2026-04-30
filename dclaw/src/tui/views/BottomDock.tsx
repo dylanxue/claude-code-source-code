@@ -22,6 +22,7 @@ type Props = {
   queuedPrompts: string[]
   questionDialog?: QuestionDialogState
   runtimeLabel: string
+  tokenPressureLabel?: string
   skillsMenu?: SkillsMenuState
   slashSuggestions: SlashSuggestion[]
 }
@@ -45,6 +46,7 @@ export function BottomDock({
   queuedPrompts,
   questionDialog,
   runtimeLabel,
+  tokenPressureLabel,
   skillsMenu,
   slashSuggestions,
 }: Props) {
@@ -52,13 +54,14 @@ export function BottomDock({
   const metaParts = [
     runtimeLabel,
     formatPermissionStatusLabel(permissionLabel),
+    ...(tokenPressureLabel ? [tokenPressureLabel] : []),
     displayCwd,
     ...(isBusy ? ['busy'] : []),
     ...(queuedPrompts.length > 0 ? [`queued:${queuedPrompts.length}`] : []),
   ]
   const hasSlashSuggestions = slashSuggestions.length > 0
   const inputSurface = (
-    <Box backgroundColor="#f2f2f2" paddingX={1} paddingY={1}>
+    <Box backgroundColor="#f2f2f2" paddingX={1} paddingY={1} width="100%">
       <ComposerLine
         cursorIndex={cursorIndex}
         placeholder={placeholder}
@@ -68,7 +71,7 @@ export function BottomDock({
   )
 
   return (
-    <Box flexDirection="column" paddingX={1} paddingBottom={1}>
+    <Box flexDirection="column" paddingX={1} paddingBottom={1} width="100%">
       {questionDialog ? (
         <QuestionDialog dialog={questionDialog} />
       ) : memoryMenu ? (

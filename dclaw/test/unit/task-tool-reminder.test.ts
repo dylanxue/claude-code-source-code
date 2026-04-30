@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { QueryEngine } from '../../src/core/queryEngine.js'
@@ -13,11 +13,13 @@ import type {
 import type { AskUserQuestionHostResult } from '../../src/types/tool.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { createSession } from '../../src/session/store.js'
+import { getSessionExecutionTaskBoardPath } from '../../src/session/paths.js'
 import {
   createExecutionTaskBoardForSession,
-  loadExecutionTaskBoard,
+  loadActiveExecutionTaskBoardForSession,
   loadExecutionTaskBoardForSession,
 } from '../../src/taskboard/store.js'
+import type { TaskBoard } from '../../src/taskboard/types.js'
 import { createToolContext } from '../helpers/toolContext.js'
 
 class CapturingLlmClient implements LlmClient {
@@ -338,11 +340,15 @@ test('QueryEngine retries once before ending a turn with unfinished execution ta
       .join('\n') ?? ''
     assert.match(repairRequestText, /You still have an active execution task list/i)
 
-    const attachedBoard = await loadExecutionTaskBoardForSession(session.sessionId, env)
-    assert.equal(attachedBoard, null)
+    const activeBoard = await loadActiveExecutionTaskBoardForSession(session.sessionId, env)
+    assert.equal(activeBoard, null)
 
-    const finalizedBoard = await loadExecutionTaskBoard(created.board.boardId, env)
-    assert.ok(finalizedBoard)
+    const finalizedBoard = JSON.parse(
+      await readFile(
+        getSessionExecutionTaskBoardPath(session.sessionId, '/tmp/project', env),
+        'utf8',
+      ),
+    ) as TaskBoard
     assert.equal(finalizedBoard.executionState, 'cancelled')
     assert.deepEqual(
       finalizedBoard.tasks.map(task => task.status),
@@ -421,11 +427,15 @@ test('AskUserQuestion handoff allows the turn to end without execution-turn repa
       .join('\n') ?? ''
     assert.doesNotMatch(finalRequestText, /You still have an active execution task list/i)
 
-    const attachedBoard = await loadExecutionTaskBoardForSession(session.sessionId, env)
-    assert.equal(attachedBoard, null)
+    const activeBoard = await loadActiveExecutionTaskBoardForSession(session.sessionId, env)
+    assert.equal(activeBoard, null)
 
-    const finalizedBoard = await loadExecutionTaskBoard(created.board.boardId, env)
-    assert.ok(finalizedBoard)
+    const finalizedBoard = JSON.parse(
+      await readFile(
+        getSessionExecutionTaskBoardPath(session.sessionId, '/tmp/project', env),
+        'utf8',
+      ),
+    ) as TaskBoard
     assert.equal(finalizedBoard.executionState, 'cancelled')
     assert.deepEqual(
       finalizedBoard.tasks.map(task => task.status),

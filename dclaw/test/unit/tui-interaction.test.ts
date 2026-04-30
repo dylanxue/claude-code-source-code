@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import React, { isValidElement } from 'react'
 import {
   appendAssistantTextDeltaToBuffer,
   createAssistantTextBufferState,
@@ -15,7 +16,32 @@ import {
   getTranscriptEntryMarginBottom,
   getTranscriptRenderItems,
 } from '../../src/tui/views/TranscriptPane.js'
-import { formatPermissionStatusLabel } from '../../src/tui/views/BottomDock.js'
+import {
+  BottomDock,
+  formatPermissionStatusLabel,
+} from '../../src/tui/views/BottomDock.js'
+import { formatCompactPressureStatusLabel } from '../../src/compact/pressure.js'
+
+function findInputSurfaceWidth(node: React.ReactNode): unknown {
+  if (!isValidElement(node)) {
+    return undefined
+  }
+
+  const props = node.props as {
+    backgroundColor?: string
+    children?: React.ReactNode
+    width?: unknown
+  }
+  if (props.backgroundColor === '#f2f2f2') {
+    return props.width
+  }
+
+  let found: unknown
+  React.Children.forEach(props.children, child => {
+    found ??= findInputSurfaceWidth(child)
+  })
+  return found
+}
 
 test('formatQueuedPromptsForSubmission keeps queued prompts separated by a blank line', () => {
   assert.equal(
@@ -38,6 +64,59 @@ test('formatPermissionStatusLabel makes plan mode explicit in bottom status', ()
     'PLAN MODE (Shift+Tab to exit plan)',
   )
   assert.equal(formatPermissionStatusLabel('default'), 'default')
+})
+
+test('formatCompactPressureStatusLabel formats bottom token pressure', () => {
+  assert.equal(
+    formatCompactPressureStatusLabel({
+      level: 'low',
+      shouldCompact: false,
+      reasons: [],
+      tokenUsage: 42,
+      effectiveContextWindowTokens: 100,
+      percentUsed: 42,
+      isAboveWarningThreshold: false,
+      isAboveErrorThreshold: false,
+      isAboveAutoCompactThreshold: false,
+      isAtBlockingLimit: false,
+    }),
+    'tokens:42%',
+  )
+  assert.equal(
+    formatCompactPressureStatusLabel({
+      level: 'low',
+      shouldCompact: false,
+      reasons: [],
+      tokenUsage: 42,
+      isAboveWarningThreshold: false,
+      isAboveErrorThreshold: false,
+      isAboveAutoCompactThreshold: false,
+      isAtBlockingLimit: false,
+    }),
+    'tokens:n/a',
+  )
+})
+
+test('BottomDock keeps the composer surface full-width for natural wrapping', () => {
+  const dock = BottomDock({
+    activeSuggestionIndex: 0,
+    cursorIndex: 0,
+    cwd: '/tmp/project',
+    inputValue: 'one long sentence with spaces that should wrap at terminal width',
+    isBusy: false,
+    permissionLabel: 'default',
+    placeholder: 'Ask DCLAW',
+    queuedPrompts: [],
+    runtimeLabel: 'openai/gpt-5',
+    slashSuggestions: [],
+  })
+
+  assert.ok(isValidElement(dock))
+  assert.equal(
+    (dock.props as { width?: unknown }).width,
+    '100%',
+  )
+  assert.equal(findInputSurfaceWidth(dock), '100%')
 })
 
 test('reduceUiEvent records interruption and clears the active turn', () => {

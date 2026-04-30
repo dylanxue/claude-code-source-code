@@ -83,7 +83,7 @@ export const taskListTool: Tool<TaskListInput, TaskListOutput> = buildTool({
 
     const summary =
       outputTasks.length === 0
-        ? 'No execution tasks found'
+        ? 'No active execution tasks found'
         : outputTasks
             .map(task => {
               const owner = task.owner ? ` (${task.owner})` : ''

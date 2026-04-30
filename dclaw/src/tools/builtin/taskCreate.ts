@@ -2,7 +2,7 @@ import type { ToolResult } from '../../types/tool.js'
 import { createTextMessage } from '../../types/message.js'
 import {
   createExecutionTaskBoardForSession,
-  loadExecutionTaskBoardForSession,
+  loadActiveExecutionTaskBoardForSession,
 } from '../../taskboard/store.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './taskCreatePrompt.js'
@@ -253,7 +253,7 @@ export const taskCreateTool: Tool<TaskCreateInput, TaskCreateOutput> = buildTool
       return parsed
     }
 
-    const existingBoard = await loadExecutionTaskBoardForSession(context.sessionId)
+    const existingBoard = await loadActiveExecutionTaskBoardForSession(context.sessionId)
     if (existingBoard) {
       return {
         ok: false,

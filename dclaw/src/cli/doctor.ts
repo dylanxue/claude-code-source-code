@@ -4,7 +4,6 @@ import { loadResolvedLlmConfig } from '../llm/config.js'
 import { resolveLlmRuntimeConfig } from '../llm/runtimeConfig.js'
 import { getMemoryDir, getMemoryEntrypointPath } from '../memory/paths.js'
 import {
-  getProjectExecutionTaskBoardsDir,
   getProjectPlanBoardsDir,
   getProjectQueryTracesDir,
   getProjectSessionsDir,
@@ -62,8 +61,8 @@ export async function runDoctor(command: DoctorCommand): Promise<void> {
     statusLine('query trace dir', getProjectQueryTracesDir(cwd, configured.env)),
     statusLine('plan board dir', getProjectPlanBoardsDir(cwd, configured.env)),
     statusLine(
-      'execution task board dir',
-      getProjectExecutionTaskBoardsDir(cwd, configured.env),
+      'execution task board file',
+      `${getProjectSessionsDir(cwd, configured.env)}/<session-id>/task-board.json`,
     ),
     statusLine(
       'memory entrypoint',

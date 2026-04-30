@@ -54,7 +54,6 @@ export type SessionMeta = {
     updatedAt?: string
   }
   planMode?: PlanModeState
-  taskBoardId?: string
   listedSkillNames?: string[]
   invokedSkillNames?: string[]
   createdAt: string
@@ -68,7 +67,6 @@ export type CreateSessionInput = {
   runtimeName?: string
   provider: string
   model?: string
-  taskBoardId?: string
   sessionId?: string
   env?: NodeJS.ProcessEnv
 }
@@ -117,10 +115,6 @@ function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
         : undefined,
     sessionMemory: normalizeSessionMemoryState(meta.sessionMemory),
     planMode: normalizePlanModeState(meta.planMode),
-    taskBoardId:
-      typeof meta.taskBoardId === 'string' && meta.taskBoardId.trim().length > 0
-        ? meta.taskBoardId
-        : undefined,
     listedSkillNames: normalizeSkillNameList(meta.listedSkillNames),
     invokedSkillNames: normalizeSkillNameList(meta.invokedSkillNames),
     persistedToolResults: Array.isArray(meta.persistedToolResults)
@@ -292,7 +286,6 @@ export async function createSession(
     runtimeName: input.runtimeName,
     provider: input.provider,
     model: input.model,
-    taskBoardId: input.taskBoardId,
     createdAt: now,
     updatedAt: now,
     persistedToolResults: [],

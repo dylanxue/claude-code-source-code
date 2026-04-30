@@ -80,6 +80,7 @@ export type BottomDockMeta = {
   cwd: string
   permissionLabel: string
   runtimeLabel: string
+  tokenPressureLabel?: string
 }
 
 type ComposerInputState = {
@@ -1990,6 +1991,7 @@ export function TuiApp({
       questionDialog={questionDialog}
       queuedPrompts={queuedPrompts}
       runtimeLabel={bottomDockMeta.runtimeLabel}
+      tokenPressureLabel={bottomDockMeta.tokenPressureLabel}
       skillsMenu={skillsMenu}
       slashSuggestions={slashSuggestionState.suggestions}
     />

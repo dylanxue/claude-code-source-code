@@ -38,7 +38,7 @@ import { QueryLoopAbortError, QueryLoopLlmError } from './queryErrors.js'
 import type { QueryTraceSink } from './queryTrace.js'
 import type { RelevantMemoryRecentTool } from './relevantMemoryPrefetch.js'
 import {
-  isExecutionBoardActive,
+  loadActiveExecutionTaskBoardForSession,
   loadExecutionTaskBoardForSession,
 } from '../taskboard/store.js'
 import type { TaskBoard } from '../taskboard/types.js'
@@ -1099,11 +1099,10 @@ export async function executeSingleTurn(
       }
       if (toolUseBlocks.length === 0) {
         const activeExecutionBoard = request.toolContext.sessionId
-          ? await loadExecutionTaskBoardForSession(request.toolContext.sessionId)
+          ? await loadActiveExecutionTaskBoardForSession(request.toolContext.sessionId)
           : null
         const shouldGuardTurnEnd =
           activeExecutionBoard !== null &&
-          isExecutionBoardActive(activeExecutionBoard) &&
           !request.toolContext.taskTurnHandoffReason
         if (shouldGuardTurnEnd) {
           recordTrace(

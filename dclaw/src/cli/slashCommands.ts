@@ -5,7 +5,10 @@ import {
   getMessagesAfterCompactBoundary,
 } from '../compact/boundaryMessage.js'
 import { compactSession } from '../compact/compactSession.js'
-import { formatCompactRecommendationLines } from '../compact/pressure.js'
+import {
+  formatCompactPressureSummaryLine,
+  formatCompactTokenSummaryLine,
+} from '../compact/pressure.js'
 import { formatCompactBoundaryLabel } from '../compact/types.js'
 import type { QueryEngine } from '../core/queryEngine.js'
 import { loadResolvedLlmConfig } from '../llm/config.js'
@@ -49,10 +52,6 @@ import {
 import {
   buildConfigAwareEnvWithSources,
 } from './configFile.js'
-import {
-  appendModelLimitLines,
-  appendVisionRuntimeLines,
-} from './diagnostics.js'
 import { ALL_PERMISSION_MODES } from './permissionModeConfig.js'
 import type { CommonCliOptions } from './types.js'
 
@@ -181,7 +180,6 @@ async function syncPlanModeRuntime(
 }
 
 async function printSessionInfo(context: SlashCommandContext): Promise<void> {
-  const meta = await loadSessionMeta(context.session.sessionId)
   const configured = await buildConfigAwareEnvWithSources(context.options.cwd)
   const llmConfig = await loadResolvedLlmConfig(context.options.cwd, configured.env)
   const runtime = resolveLlmRuntimeConfig(
@@ -193,54 +191,23 @@ async function printSessionInfo(context: SlashCommandContext): Promise<void> {
     configured.env,
   )
   const compactRecommendation = context.engine.getCompactRecommendation()
-  const messages = context.engine.getMessages()
-  const compactBoundaries = getCompactBoundaryMessages(messages)
-  const lastCompactBoundary = getLastCompactBoundary(messages)
+  const runtimeName = context.session.runtimeName ?? runtime.runtimeName ?? 'stub'
+  const mainModel = `${runtime.primary.provider} / ${runtime.primary.model ?? 'default'}`
+  const imageModel = runtime.imageFallback
+    ? `${runtime.imageFallback.provider} / ${runtime.imageFallback.model ?? 'default'}`
+    : 'not configured'
 
   const lines = [
     'status:',
     `session id: ${context.session.sessionId}`,
-    `mode: ${context.session.mode}`,
-    `cwd: ${context.options.cwd}`,
-    `runtime: ${context.session.runtimeName ?? runtime.runtimeName ?? 'stub'}`,
-    `runtime source: ${runtime.runtimeSource}`,
-    `provider: ${context.session.provider}`,
-    `provider source: ${context.session.providerSource}`,
-    `model: ${context.session.model ?? 'default'}`,
-    `model source: ${context.session.modelSource}`,
-    ...(runtime.model && runtime.canonicalModel && runtime.canonicalModel !== runtime.model
-      ? [`model canonicalized to: ${runtime.canonicalModel}`]
-      : []),
-    ...(runtime.model
-      ? [`catalog match: ${runtime.catalogMatch ?? 'none'}`]
-      : []),
-    `permission mode: ${context.session.permissionMode}`,
-    `permission mode source: ${context.session.permissionModeSource}`,
-    `stream: ${context.options.stream ? 'enabled' : 'disabled'}`,
-    ...(context.engine.getQueryTracePath()
-      ? [`query trace: ${context.engine.getQueryTracePath()}`]
-      : []),
-    ...(meta?.planMode ? [`plan mode state: ${meta.planMode.status}`] : []),
-    ...(meta?.planMode?.planFilePath
-      ? [`plan file: ${meta.planMode.planFilePath}`]
-      : []),
-    ...formatCompactRecommendationLines(compactRecommendation),
-    ...(compactBoundaries.length > 0
-      ? [`compact boundaries: ${compactBoundaries.length}`]
-      : []),
-    ...(lastCompactBoundary
-      ? [`last compact boundary: ${formatCompactBoundaryLabel(lastCompactBoundary)}`]
-      : []),
+    `runtime: ${runtimeName}`,
+    `main model: ${mainModel}`,
+    `image model: ${imageModel}`,
+    `permission: ${context.session.permissionMode}`,
+    `directory: ${context.options.cwd}`,
+    formatCompactPressureSummaryLine(compactRecommendation),
+    formatCompactTokenSummaryLine(compactRecommendation),
   ]
-
-  if (
-    (runtime.providerConfig.provider === 'anthropic' ||
-      runtime.providerConfig.provider === 'openai') &&
-    runtime.model
-  ) {
-    appendModelLimitLines(lines, runtime.providerConfig.provider, runtime.model)
-  }
-  appendVisionRuntimeLines(lines, runtime.imageFallback)
   lines.push('')
 
   printLines(lines)

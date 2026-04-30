@@ -457,6 +457,77 @@ test('OpenAiLlmClient accepts Responses SSE bodies from non-streaming requests',
   }
 })
 
+test('OpenAiLlmClient maps multi-part assistant text to Responses output_text content', async () => {
+  let capturedBody: unknown
+
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      body += chunk
+    })
+    request.on('end', () => {
+      capturedBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'ok' }],
+            },
+          ],
+        }),
+      )
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+
+  try {
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected IPv4 server address')
+    }
+
+    const client = new OpenAiLlmClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiStyle: 'responses',
+    })
+
+    await client.createMessage({
+      model: 'gpt-5',
+      messages: [
+        createMessage('assistant', [
+          { type: 'text', text: 'first' },
+          { type: 'text', text: 'second' },
+        ]),
+        createTextMessage('user', 'continue'),
+      ],
+    })
+
+    const body = capturedBody as {
+      input?: Array<{
+        role?: string
+        content?: Array<{ type?: string; text?: string }> | string
+      }>
+    }
+    assert.deepEqual(body.input?.[0], {
+      role: 'assistant',
+      content: [
+        { type: 'output_text', text: 'first' },
+        { type: 'output_text', text: 'second' },
+      ],
+    })
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(() => resolve(undefined)))
+  }
+})
+
 test('OpenAiLlmClient uses Codex Responses request shape for Codex backends', async () => {
   let capturedBody: unknown
 

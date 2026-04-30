@@ -49,6 +49,10 @@ type OpenAiResponsesMessageInputContent =
       text: string
     }
   | {
+      type: 'output_text'
+      text: string
+    }
+  | {
       type: 'input_image'
       image_url: string
     }
@@ -351,12 +355,18 @@ function stringifyToolResultForOpenAi(output: unknown): string {
 
 function toResponsesMessageContent(
   block: Extract<ContentBlock, { type: 'text' | 'image' | 'pdf' }>,
+  role: 'user' | 'assistant',
 ): OpenAiResponsesMessageInputContent {
   if (block.type === 'text') {
-    return {
-      type: 'input_text',
-      text: block.text,
-    }
+    return role === 'assistant'
+      ? {
+          type: 'output_text',
+          text: block.text,
+        }
+      : {
+          type: 'input_text',
+          text: block.text,
+        }
   }
 
   if (block.type === 'pdf') {
@@ -438,7 +448,9 @@ function toResponsesInput(messages: Message[]): OpenAiResponsesInputItem[] {
       } else {
         items.push({
           role,
-          content: messageContent.map(toResponsesMessageContent),
+          content: messageContent.map(block =>
+            toResponsesMessageContent(block, role),
+          ),
         })
       }
 

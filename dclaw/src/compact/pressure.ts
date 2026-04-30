@@ -193,3 +193,27 @@ export function formatCompactRecommendationLines(
       : []),
   ]
 }
+
+export function formatCompactPressureSummaryLine(
+  recommendation: CompactRecommendation,
+): string {
+  return recommendation.percentUsed === undefined
+    ? `compact pressure: ${recommendation.level} (thresholds unavailable)`
+    : `compact pressure: ${formatPercent(recommendation.percentUsed)} used (${recommendation.level})`
+}
+
+export function formatCompactTokenSummaryLine(
+  recommendation: CompactRecommendation,
+): string {
+  return recommendation.effectiveContextWindowTokens === undefined
+    ? `token usage: ${recommendation.tokenUsage} used / total unavailable`
+    : `token usage: ${recommendation.tokenUsage}/${recommendation.effectiveContextWindowTokens}`
+}
+
+export function formatCompactPressureStatusLabel(
+  recommendation: CompactRecommendation,
+): string {
+  return recommendation.percentUsed === undefined
+    ? 'tokens:n/a'
+    : `tokens:${formatPercent(recommendation.percentUsed)}`
+}

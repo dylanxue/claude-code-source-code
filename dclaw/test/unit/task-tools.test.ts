@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSession } from '../../src/session/store.js'
+import { getSessionExecutionTaskBoardPath } from '../../src/session/paths.js'
 import { loadExecutionTaskBoardForSession } from '../../src/taskboard/store.js'
 import { taskCreateTool } from '../../src/tools/builtin/taskCreate.js'
 import { taskGetTool } from '../../src/tools/builtin/taskGet.js'
@@ -129,6 +130,8 @@ test('TaskCreate can seed a new task board with multiple tasks', async () => {
       blockedBy: [],
     })
     assert.match(fetched.summary ?? '', /Task #1: Define task schema/)
+
+    await access(getSessionExecutionTaskBoardPath(session.sessionId, '/tmp/project', env))
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })
@@ -345,33 +348,35 @@ test('TaskUpdate enforces a single active task and supports cancellation', async
     })
 
     const listed = await taskListTool.call({}, context)
-    assert.deepEqual(listed.output.tasks, [
-      {
-        id: '1',
-        subject: 'Define task schema',
-        status: 'completed',
-        owner: undefined,
-        blockedBy: [],
-      },
-      {
-        id: '2',
-        subject: 'Wire task tools',
-        status: 'completed',
-        owner: 'codex',
-        blockedBy: [],
-      },
-      {
-        id: '3',
-        subject: 'Verify task tools',
-        status: 'cancelled',
-        owner: undefined,
-        blockedBy: [],
-      },
-    ])
+    assert.deepEqual(listed.output.tasks, [])
 
     const board = await loadExecutionTaskBoardForSession(session.sessionId, env)
     assert.ok(board)
     assert.equal(board.currentTaskId, undefined)
+
+    const nextBatch = await taskCreateTool.call(
+      {
+        tasks: [
+          {
+            subject: 'Start follow-up batch',
+            description: 'Create a fresh task board after terminal tasks.',
+          },
+          {
+            subject: 'Wire follow-up work',
+            description: 'Continue with the new execution batch.',
+          },
+          {
+            subject: 'Verify follow-up work',
+            description: 'Confirm the new batch can proceed.',
+          },
+        ],
+      },
+      context,
+    )
+    assert.equal(nextBatch.output.tasks[0]?.subject, 'Start follow-up batch')
+    const nextBoard = await loadExecutionTaskBoardForSession(session.sessionId, env)
+    assert.equal(nextBoard?.executionState, 'active')
+    assert.equal(nextBoard?.tasks[0]?.subject, 'Start follow-up batch')
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })

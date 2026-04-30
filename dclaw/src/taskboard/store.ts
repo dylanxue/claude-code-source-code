@@ -1,10 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { dirname } from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import {
-  getExecutionTaskBoardPath,
-  getProjectExecutionTaskBoardsDir,
-} from '../session/paths.js'
-import { loadSessionMeta, updateSessionMeta } from '../session/store.js'
+import { getSessionExecutionTaskBoardPath } from '../session/paths.js'
+import { loadSessionMeta } from '../session/store.js'
 import {
   computeExecutionState,
   createTaskRecord,
@@ -139,27 +137,25 @@ function normalizeTaskBoard(board: TaskBoard): TaskBoard {
 async function writeTaskBoard(
   board: TaskBoard,
   env: NodeJS.ProcessEnv,
+  sessionId: string,
 ): Promise<void> {
-  await ensureDirectory(getProjectExecutionTaskBoardsDir(board.workspaceId, env))
-  await writeFile(
-    getExecutionTaskBoardPath(board.boardId, board.workspaceId, env),
-    JSON.stringify(board, null, 2) + '\n',
-    'utf8',
-  )
+  const path = getSessionExecutionTaskBoardPath(sessionId, board.workspaceId, env)
+  await ensureDirectory(dirname(path))
+  await writeFile(path, JSON.stringify(board, null, 2) + '\n', 'utf8')
 }
 
 async function updateTaskBoard(
-  boardId: string,
+  sessionId: string,
   updater: (board: TaskBoard) => TaskBoard,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<TaskBoard | null> {
-  const current = await loadExecutionTaskBoard(boardId, env)
+  const current = await loadExecutionTaskBoardForSession(sessionId, env)
   if (!current) {
     return null
   }
 
   const next = normalizeTaskBoard(updater(current))
-  await writeTaskBoard(next, env)
+  await writeTaskBoard(next, env, sessionId)
   return next
 }
 
@@ -204,72 +200,27 @@ function withBlockedRelation(
   })
 }
 
-export async function loadExecutionTaskBoard(
-  boardId: string,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<TaskBoard | null> {
-  const raw = await readJsonFile<TaskBoard>(
-    getExecutionTaskBoardPath(boardId, env),
-  )
-  return raw ? normalizeTaskBoard(raw) : null
-}
-
-export async function attachExecutionTaskBoardToSession(
-  sessionId: string,
-  boardId: string,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
-  await updateSessionMeta(
-    sessionId,
-    meta => ({
-      ...meta,
-      taskBoardId: boardId,
-      updatedAt: nowIso(),
-    }),
-    env,
-  )
-}
-
-export async function detachExecutionTaskBoardFromSession(
-  sessionId: string,
-  boardId: string,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
-  await updateSessionMeta(
-    sessionId,
-    meta => ({
-      ...meta,
-      taskBoardId: meta.taskBoardId === boardId ? undefined : meta.taskBoardId,
-      updatedAt: nowIso(),
-    }),
-    env,
-  )
-}
-
 export async function loadExecutionTaskBoardForSession(
   sessionId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<TaskBoard | null> {
   const meta = await loadSessionMeta(sessionId, env)
-  if (!meta?.taskBoardId) {
+  if (!meta) {
     return null
   }
 
-  const board = await loadExecutionTaskBoard(meta.taskBoardId, env)
-  if (board) {
-    return board
-  }
-
-  await updateSessionMeta(
-    sessionId,
-    current => ({
-      ...current,
-      taskBoardId: current.taskBoardId === meta.taskBoardId ? undefined : current.taskBoardId,
-      updatedAt: nowIso(),
-    }),
-    env,
+  const sessionRaw = await readJsonFile<TaskBoard>(
+    getSessionExecutionTaskBoardPath(sessionId, meta.cwd, env),
   )
-  return null
+  return sessionRaw ? normalizeTaskBoard(sessionRaw) : null
+}
+
+export async function loadActiveExecutionTaskBoardForSession(
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<TaskBoard | null> {
+  const board = await loadExecutionTaskBoardForSession(sessionId, env)
+  return isExecutionBoardActive(board) ? board : null
 }
 
 export async function createExecutionTaskBoardForSession(
@@ -285,7 +236,7 @@ export async function createExecutionTaskBoardForSession(
   tasks: TaskRecord[]
 }> {
   env.DCLAW_WORKSPACE_ROOT = workspaceId
-  const existing = await loadExecutionTaskBoardForSession(sessionId, env)
+  const existing = await loadActiveExecutionTaskBoardForSession(sessionId, env)
   if (existing) {
     throw new Error(
       `TaskCreate cannot start a new task list while execution board ${existing.boardId} is still attached to this turn.`,
@@ -329,8 +280,7 @@ export async function createExecutionTaskBoardForSession(
     tasks,
   })
 
-  await writeTaskBoard(board, env)
-  await attachExecutionTaskBoardToSession(sessionId, board.boardId, env)
+  await writeTaskBoard(board, env, sessionId)
   return {
     board,
     tasks,
@@ -344,7 +294,7 @@ export async function listExecutionSessionTasks(
   board: TaskBoard | null
   tasks: TaskRecord[]
 }> {
-  const board = await loadExecutionTaskBoardForSession(sessionId, env)
+  const board = await loadActiveExecutionTaskBoardForSession(sessionId, env)
   if (!board) {
     return {
       board: null,
@@ -501,7 +451,7 @@ export async function updateExecutionSessionTask(
 
   const updated =
     (await updateTaskBoard(
-      board.boardId,
+      sessionId,
       current => {
         let tasks = current.tasks.map(task => (task.id === taskId ? nextTask : task))
 
@@ -602,7 +552,7 @@ export async function finalizeExecutionTaskBoardForTurnEnd(
   const nextExecutionState = computeExecutionState(tasks)
   const updated =
     (await updateTaskBoard(
-      board.boardId,
+      sessionId,
       current => ({
         ...current,
         latestSessionId: sessionId,
@@ -617,8 +567,6 @@ export async function finalizeExecutionTaskBoardForTurnEnd(
       }),
       env,
     )) ?? board
-
-  await detachExecutionTaskBoardFromSession(sessionId, board.boardId, env)
   return updated
 }
 
