@@ -1,3 +1,4 @@
+import { unlink } from 'node:fs/promises'
 import { basename, relative, resolve, sep } from 'node:path'
 import { executeSingleTurn } from '../core/queryLoop.js'
 import type { QueryTraceSink } from '../core/queryTrace.js'
@@ -30,6 +31,7 @@ import {
 
 const MEMORY_EXTRACTION_MAX_TURNS = 5
 const MEMORY_EXTRACTION_DRAIN_TIMEOUT_MS = 60_000
+const DELETE_MEMORY_TOOL_NAME = 'DeleteMemory'
 
 function isWithinDirectory(targetPath: string, directoryPath: string): boolean {
   const normalizedTarget = resolve(targetPath)
@@ -302,7 +304,89 @@ function wrapMemoryEditTool(
   })
 }
 
-function createMemoryToolRegistry(
+type DeleteMemoryToolInput = {
+  file_path: string
+}
+
+type DeleteMemoryToolOutput = {
+  filePath: string
+  didDelete: boolean
+}
+
+function createDeleteMemoryTool(
+  memoryDir: string,
+  knownEntries: MemoryManifestEntry[],
+): Tool<DeleteMemoryToolInput, DeleteMemoryToolOutput> {
+  return buildTool({
+    name: DELETE_MEMORY_TOOL_NAME,
+    description:
+      'Delete an obsolete memory markdown file inside the workspace memory directory. Use this only for explicit forget requests or consolidation cleanup.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_path: {
+          type: 'string',
+          description: 'Absolute path to the memory markdown file to delete.',
+        },
+      },
+      required: ['file_path'],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string' },
+        didDelete: { type: 'boolean' },
+      },
+      required: ['filePath', 'didDelete'],
+      additionalProperties: false,
+    },
+    async validate(input) {
+      const scoped = validateMemoryScopedPath(input, memoryDir)
+      if (!scoped.ok) {
+        return scoped
+      }
+
+      if (isMemoryEntrypointPath(input.file_path)) {
+        return {
+          ok: false,
+          error: 'DeleteMemory may not delete MEMORY.md. Edit it instead.',
+        }
+      }
+
+      return { ok: true }
+    },
+    async call(input) {
+      const scoped = validateMemoryScopedPath(input, memoryDir)
+      if (!scoped.ok) {
+        throw new Error(scoped.error)
+      }
+      if (isMemoryEntrypointPath(input.file_path)) {
+        throw new Error('DeleteMemory may not delete MEMORY.md. Edit it instead.')
+      }
+
+      const normalizedPath = resolve(input.file_path)
+      await unlink(normalizedPath)
+      const existingIndex = knownEntries.findIndex(
+        candidate => candidate.path === normalizedPath,
+      )
+      if (existingIndex !== -1) {
+        knownEntries.splice(existingIndex, 1)
+      }
+
+      return {
+        ok: true,
+        output: {
+          filePath: normalizedPath,
+          didDelete: true,
+        },
+        summary: `Deleted memory ${normalizedPath}`,
+      }
+    },
+  })
+}
+
+export function createMemoryToolRegistry(
   memoryDir: string,
   knownEntries: MemoryManifestEntry[],
 ): ToolRegistry {
@@ -319,28 +403,41 @@ function createMemoryToolRegistry(
   registry.register(
     wrapMemoryWriteTool(memoryDir, knownEntries),
   )
+  registry.register(createDeleteMemoryTool(memoryDir, knownEntries))
   return registry
 }
 
-function extractWrittenMemoryPaths(
+type ChangedMemoryPath = {
+  path: string
+  action: 'write' | 'delete'
+}
+
+function extractChangedMemoryPaths(
   messages: Message[],
   memoryDir: string,
-): string[] {
-  const pendingToolPaths = new Map<string, string>()
+): ChangedMemoryPath[] {
+  const pendingToolPaths = new Map<string, ChangedMemoryPath>()
   const seen = new Set<string>()
-  const paths: string[] = []
+  const paths: ChangedMemoryPath[] = []
 
   for (const message of messages) {
     if (message.role === 'assistant') {
       for (const block of getToolUseBlocks(message)) {
-        if (block.name !== 'Edit' && block.name !== 'Write') {
+        if (
+          block.name !== 'Edit' &&
+          block.name !== 'Write' &&
+          block.name !== DELETE_MEMORY_TOOL_NAME
+        ) {
           continue
         }
         const filePath = getInputPath(block.input)
         if (!filePath || !isWithinDirectory(filePath, memoryDir)) {
           continue
         }
-        pendingToolPaths.set(block.id, resolve(filePath))
+        pendingToolPaths.set(block.id, {
+          path: resolve(filePath),
+          action: block.name === DELETE_MEMORY_TOOL_NAME ? 'delete' : 'write',
+        })
       }
       continue
     }
@@ -349,8 +446,8 @@ function extractWrittenMemoryPaths(
       if (block.type !== 'tool_result') {
         continue
       }
-      const filePath = pendingToolPaths.get(block.toolUseId)
-      if (!filePath) {
+      const changed = pendingToolPaths.get(block.toolUseId)
+      if (!changed) {
         continue
       }
       if (
@@ -360,11 +457,11 @@ function extractWrittenMemoryPaths(
       ) {
         continue
       }
-      if (seen.has(filePath)) {
+      if (seen.has(changed.path)) {
         continue
       }
-      seen.add(filePath)
-      paths.push(filePath)
+      seen.add(changed.path)
+      paths.push(changed)
     }
   }
 
@@ -387,9 +484,13 @@ function countMessagesSince(
   return messages.length - index - 1
 }
 
-function formatMemorySavedSummary(paths: string[]): Message {
+function formatMemoryChangeSummary(
+  paths: string[],
+  action: 'saved' | 'updated',
+): Message {
+  const label = action === 'saved' ? 'Saved' : 'Updated'
   const lines = [
-    `Saved ${paths.length} memory ${paths.length === 1 ? 'file' : 'files'}:`,
+    `${label} ${paths.length} memory ${paths.length === 1 ? 'file' : 'files'}:`,
     ...paths.map(path => `- ${path}`),
   ]
   return createTranscriptOnlyTextMessage('system', lines.join('\n'))
@@ -480,27 +581,34 @@ export function createAutomaticMemoryExtractor(input: {
       })
 
       lastProcessedMessageId = latestMessage.id
-      const writtenPaths = extractWrittenMemoryPaths(result.addedMessages, memoryDir)
-      const savedMemoryPaths = writtenPaths.filter(
-        path => basename(path) !== basename(entrypointPath),
+      const changedPaths = extractChangedMemoryPaths(result.addedMessages, memoryDir)
+      const changedMemoryPaths = changedPaths.filter(
+        change => basename(change.path) !== basename(entrypointPath),
       )
+      const changedMemoryPathStrings = changedMemoryPaths.map(change => change.path)
+      const didDelete = changedMemoryPaths.some(change => change.action === 'delete')
 
       state.queryTraceSink?.record({
         event: 'memory.extract.success',
         data: {
           memoryDir,
-          writtenPaths,
-          savedMemoryPaths,
+          writtenPaths: changedPaths.map(change => change.path),
+          savedMemoryPaths: changedMemoryPathStrings,
         },
       })
 
-      if (savedMemoryPaths.length === 0) {
+      if (changedMemoryPathStrings.length === 0) {
         await state.queryTraceSink?.flush().catch(() => undefined)
         return []
       }
 
       await state.queryTraceSink?.flush().catch(() => undefined)
-      return [formatMemorySavedSummary(savedMemoryPaths)]
+      return [
+        formatMemoryChangeSummary(
+          changedMemoryPathStrings,
+          didDelete ? 'updated' : 'saved',
+        ),
+      ]
     } catch (error) {
       state.queryTraceSink?.record({
         event: 'memory.extract.failure',

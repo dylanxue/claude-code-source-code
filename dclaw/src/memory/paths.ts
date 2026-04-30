@@ -5,6 +5,8 @@ import { getDclawHomeDir } from '../session/paths.js'
 const PROJECTS_DIRNAME = 'projects'
 const MEMORY_DIRNAME = 'memory'
 const MEMORY_ENTRYPOINT_NAME = 'MEMORY.md'
+const MEMORY_CONSOLIDATION_STATE_NAME = 'auto-dream.json'
+const MEMORY_CONSOLIDATION_LOCK_NAME = 'auto-dream.lock'
 
 export function sanitizeMemoryProjectKey(workspaceRoot: string): string {
   return sanitizeProjectKey(workspaceRoot)
@@ -40,4 +42,18 @@ export function getMemoryFilePath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return join(getMemoryDir(workspaceRoot, env), relativePath)
+}
+
+export function getMemoryConsolidationStatePath(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getMemoryDir(workspaceRoot, env), MEMORY_CONSOLIDATION_STATE_NAME)
+}
+
+export function getMemoryConsolidationLockPath(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(getMemoryDir(workspaceRoot, env), MEMORY_CONSOLIDATION_LOCK_NAME)
 }

@@ -98,6 +98,8 @@ test('QueryEngine injects a plan_mode reminder as a temporary system-reminder me
 
     const reminders = findReminderMessages(client.requests[0])
     assert.equal(reminders.length, 1)
+    assert.equal(reminders[0]?.runtimeAttachment?.type, 'plan_mode')
+    assert.equal(reminders[0]?.runtimeVisibility?.transcript, false)
     assert.match(getTextContent(reminders[0]!), /## Plan Mode/)
     assert.match(getTextContent(reminders[0]!), /Do not start implementation yet/)
     assert.match(
@@ -166,6 +168,8 @@ test('QueryEngine injects a one-time plan_mode_exit reminder after leaving plan 
     const firstResult = await engine.submitUserPrompt('start implementation')
     const firstReminders = findReminderMessages(client.requests[0])
     assert.equal(firstReminders.length, 1)
+    assert.equal(firstReminders[0]?.runtimeAttachment?.type, 'plan_mode')
+    assert.equal(firstReminders[0]?.runtimeVisibility?.transcript, false)
     assert.match(getTextContent(firstReminders[0]!), /## Exited Plan Mode/)
     assert.equal(
       firstResult.appendedMessages.some(message =>

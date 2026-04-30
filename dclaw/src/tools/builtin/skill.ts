@@ -2,13 +2,10 @@ import { runAgentToCompletion } from '../../agent/runner.js'
 import { filterSubagentAvailableTools } from '../../agent/runtime.js'
 import { createAgent } from '../../agent/store.js'
 import type { AgentRecord, AgentToolRuntime } from '../../agent/types.js'
-import { createTextMessage } from '../../types/message.js'
 import type { ToolResult } from '../../types/tool.js'
 import { recordInvokedSkill } from '../../skills/state.js'
-import {
-  buildInvokedSkillReminderText,
-  buildSkillPrompt,
-} from '../../skills/prompt.js'
+import { buildSkillPrompt } from '../../skills/prompt.js'
+import { createSingleInvokedSkillAttachmentMessage } from '../../skills/runtimeAttachments.js'
 import type { LoadedSkill } from '../../skills/types.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './skillPrompt.js'
@@ -63,10 +60,7 @@ function resolveSkill(
 }
 
 function buildReminderMessage(skill: LoadedSkill) {
-  return createTextMessage(
-    'user',
-    `<system-reminder>\n${buildInvokedSkillReminderText(skill)}\n</system-reminder>`,
-  )
+  return createSingleInvokedSkillAttachmentMessage(skill)
 }
 
 function buildForkedSkillPrompt(skill: LoadedSkill): string {

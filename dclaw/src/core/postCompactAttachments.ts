@@ -4,11 +4,16 @@ import {
   isFreshlyCompactedSession,
 } from '../compact/boundaryMessage.js'
 import {
-  buildPersistedInvokedSkillsReminderText,
   buildSkillPrompt,
 } from '../skills/prompt.js'
+import { createInvokedSkillAttachmentMessage } from '../skills/runtimeAttachments.js'
 import type { InvokedSkill } from '../skills/state.js'
-import { createMessage, createTextMessage, type Message } from '../types/message.js'
+import {
+  createMessage,
+  createTextMessage,
+  withRuntimeAttachment,
+  type Message,
+} from '../types/message.js'
 import type { ReadStateEntry } from '../types/tool.js'
 
 const MAX_POST_COMPACT_FILES = 3
@@ -25,6 +30,18 @@ export type PostCompactReadStateSnapshot = Map<string, ReadStateEntry>
 
 function wrapSystemReminder(text: string): Message {
   return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
+}
+
+function withPostCompactAttachment(
+  message: Message,
+  subtype: string,
+  data: Record<string, unknown> = {},
+): Message {
+  return withRuntimeAttachment(message, {
+    type: 'post_compact_files',
+    subtype,
+    ...data,
+  })
 }
 
 function truncateText(
@@ -105,16 +122,20 @@ function buildPostCompactReadFileMessage(
       ? `range: offset=${entry.offset ?? 1}, limit=${entry.limit ?? 'all'}`
       : null
 
-  return wrapSystemReminder(
-    [
-      '# Post-Compact Read File',
-      `path: ${filePath}`,
-      `view: ${viewKind}`,
-      ...(rangeLine ? [rangeLine] : []),
-      'This file content was available before compaction. Re-read the file if you need fresher or broader context.',
-      '',
-      text,
-    ].join('\n'),
+  return withPostCompactAttachment(
+    wrapSystemReminder(
+      [
+        '# Post-Compact Read File',
+        `path: ${filePath}`,
+        `view: ${viewKind}`,
+        ...(rangeLine ? [rangeLine] : []),
+        'This file content was available before compaction. Re-read the file if you need fresher or broader context.',
+        '',
+        text,
+      ].join('\n'),
+    ),
+    'read_file',
+    { path: filePath },
   )
 }
 
@@ -129,14 +150,18 @@ async function createPostCompactPlanFileMessage(
     }
 
     const { text } = truncateText(trimmed, MAX_POST_COMPACT_PLAN_FILE_CHARS)
-    return wrapSystemReminder(
-      [
-        '# Post-Compact Plan File',
-        `path: ${planFilePath}`,
-        'This is the current plan file content restored after compaction.',
-        '',
-        text,
-      ].join('\n'),
+    return withPostCompactAttachment(
+      wrapSystemReminder(
+        [
+          '# Post-Compact Plan File',
+          `path: ${planFilePath}`,
+          'This is the current plan file content restored after compaction.',
+          '',
+          text,
+        ].join('\n'),
+      ),
+      'plan_file',
+      { path: planFilePath },
     )
   } catch {
     return null
@@ -222,9 +247,7 @@ function createPostCompactInvokedSkillMessage(
     return null
   }
 
-  return wrapSystemReminder(
-    buildPersistedInvokedSkillsReminderText(budgetedSkills),
-  )
+  return createInvokedSkillAttachmentMessage(budgetedSkills)
 }
 
 function createPostCompactImageMessages(messages: Message[]): Message[] {
@@ -270,34 +293,40 @@ function createPostCompactImageMessages(messages: Message[]): Message[] {
       seenToolUseIds.add(block.toolUseId)
       usedChars += nextSize
       attachments.push(
-        createMessage(
-          'user',
-          block.content.map(item =>
-            item.type === 'text'
-              ? {
-                  type: 'text' as const,
-                  text: item.text,
-                  ...(item.annotations ? { annotations: item.annotations } : {}),
-                }
-              : item.type === 'image'
-              ? {
-                  type: 'image' as const,
-                  source: {
-                    type: 'base64' as const,
-                    mediaType: item.source.mediaType,
-                    data: item.source.data,
+        withPostCompactAttachment(
+          createMessage(
+            'user',
+            block.content.map(item =>
+              item.type === 'text'
+                ? {
+                    type: 'text' as const,
+                    text: item.text,
+                    ...(item.annotations
+                      ? { annotations: item.annotations }
+                      : {}),
+                  }
+                : item.type === 'image'
+                ? {
+                    type: 'image' as const,
+                    source: {
+                      type: 'base64' as const,
+                      mediaType: item.source.mediaType,
+                      data: item.source.data,
+                    },
+                  }
+                : {
+                    type: 'pdf' as const,
+                    source: {
+                      type: 'base64' as const,
+                      mediaType: item.source.mediaType,
+                      data: item.source.data,
+                    },
+                    ...(item.filename ? { filename: item.filename } : {}),
                   },
-                }
-              : {
-                  type: 'pdf' as const,
-                  source: {
-                    type: 'base64' as const,
-                    mediaType: item.source.mediaType,
-                    data: item.source.data,
-                  },
-                  ...(item.filename ? { filename: item.filename } : {}),
-                },
+            ),
           ),
+          'image_or_pdf',
+          { toolUseId: block.toolUseId },
         ),
       )
 

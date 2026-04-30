@@ -25,4 +25,6 @@ export type RelevantMemoryPrefetcher = (state: {
   recentTools: RelevantMemoryRecentTool[]
   abortSignal?: AbortSignal
   queryTraceSink?: QueryTraceSink
+  excludedPaths?: Set<string>
+  remainingSessionBytes?: number
 }) => RelevantMemoryPrefetchHandle | undefined

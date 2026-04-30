@@ -46,6 +46,14 @@ test('memory extraction prompt keeps memory writes scoped to durable facts and i
   )
   assert.match(
     prompt,
-    /If the user explicitly asked you to forget something, remove or update the relevant memory\./,
+    /If the user explicitly asked you to forget something, treat that as higher priority than saving new facts/,
+  )
+  assert.match(
+    prompt,
+    /delete obsolete memory files with DeleteMemory or edit them to remove only the forgotten content/,
+  )
+  assert.match(
+    prompt,
+    /After any delete, remove the deleted file link from MEMORY\.md/,
   )
 })

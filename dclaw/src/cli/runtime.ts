@@ -18,6 +18,7 @@ import {
   MAX_SURFACED_MEMORY_SESSION_BYTES,
 } from '../memory/prompt.js'
 import { createAutomaticMemoryExtractor } from '../memory/extract.js'
+import { createAutoDream } from '../memory/autoDream.js'
 import { getMemoryDir } from '../memory/paths.js'
 import { createRelevantMemoryReminderMessage } from '../memory/reminder.js'
 import { createSessionMemoryUpdater } from '../sessionMemory/sessionMemory.js'
@@ -44,6 +45,7 @@ import type { PermissionMode } from '../types/tool.js'
 import type {
   RelevantMemoryPrefetchHandle,
   RelevantMemoryPrefetchResult,
+  RelevantMemoryPrefetcher,
   RelevantMemoryRecentTool,
 } from '../core/relevantMemoryPrefetch.js'
 import { appendSessionMessages } from '../session/store.js'
@@ -102,7 +104,6 @@ export async function prepareCliRuntime(
   let skillRegistry = await buildSkillRegistry()
   const invokedSkills = createInvokedSkillState()
   restoreInvokedSkillsFromMessages(initialMessages, invokedSkills)
-  const surfacedMemoryPaths = new Set<string>()
   let surfacedMemoryBytes = 0
 
   const getReadMemoryPaths = () => {
@@ -114,9 +115,9 @@ export async function prepareCliRuntime(
     )
   }
 
-  const getExcludedMemoryPaths = () =>
+  const getExcludedMemoryPaths = (prefetchedExcludedPaths?: Set<string>) =>
     new Set([
-      ...surfacedMemoryPaths,
+      ...(prefetchedExcludedPaths ?? []),
       ...getReadMemoryPaths(),
     ])
 
@@ -126,12 +127,9 @@ export async function prepareCliRuntime(
       ...(tool.summary ? [`summary: ${tool.summary}`] : []),
     ].join(' | ')
 
-  const startRelevantMemoryPrefetch = (state: {
-    userPrompt: string
-    recentTools: RelevantMemoryRecentTool[]
-    abortSignal?: AbortSignal
-    queryTraceSink?: QueryTraceSink
-  }): RelevantMemoryPrefetchHandle => {
+  const startRelevantMemoryPrefetch: RelevantMemoryPrefetcher = (
+    state,
+  ): RelevantMemoryPrefetchHandle => {
     const controller = new AbortController()
     const relayAbort = () => controller.abort()
     if (state.abortSignal?.aborted) {
@@ -157,11 +155,13 @@ export async function prepareCliRuntime(
         client,
         model: runtime.primary.model,
         queryTraceSink: state.queryTraceSink,
-        excludedPaths: getExcludedMemoryPaths(),
-        remainingSessionBytes: Math.max(
-          0,
-          MAX_SURFACED_MEMORY_SESSION_BYTES - surfacedMemoryBytes,
-        ),
+        excludedPaths: getExcludedMemoryPaths(state.excludedPaths),
+        remainingSessionBytes:
+          state.remainingSessionBytes ??
+          Math.max(
+            0,
+            MAX_SURFACED_MEMORY_SESSION_BYTES - surfacedMemoryBytes,
+          ),
         recentTools: state.recentTools.map(formatRecentMemoryTool),
         signal: controller.signal,
       },
@@ -216,9 +216,6 @@ export async function prepareCliRuntime(
   const consumeRelevantMemoryPrefetch = (
     result: RelevantMemoryPrefetchResult,
   ) => {
-    for (const memoryPath of result.recalledPaths) {
-      surfacedMemoryPaths.add(memoryPath)
-    }
     surfacedMemoryBytes += result.recalledBytes
   }
 
@@ -306,6 +303,12 @@ export async function prepareCliRuntime(
   }
 
   const memoryExtractor = createAutomaticMemoryExtractor({
+    client,
+    model: runtime.primary.model,
+    workspaceRoot: options.cwd,
+    env: configured.env,
+  })
+  const autoDream = createAutoDream({
     client,
     model: runtime.primary.model,
     workspaceRoot: options.cwd,
@@ -422,6 +425,14 @@ export async function prepareCliRuntime(
         onMessages: async messages =>
           appendBackgroundMessages(state.sessionId, messages),
       })
+      autoDream.scheduleAutoDream({
+        state: {
+          currentSessionId: state.sessionId,
+          queryTraceSink: state.queryTraceSink,
+        },
+        onMessages: async messages =>
+          appendBackgroundMessages(state.sessionId, messages),
+      })
       return []
     },
     dclawMdEntries,
@@ -454,6 +465,7 @@ export async function prepareCliRuntime(
     },
     drainBackgroundWork: async (timeoutMs?: number) => {
       await memoryExtractor.drainPendingExtraction(timeoutMs)
+      await autoDream.drainPendingAutoDream(timeoutMs)
       await sessionMemoryUpdater.drainPendingUpdate(timeoutMs)
       await drainAgentRuns(timeoutMs)
     },

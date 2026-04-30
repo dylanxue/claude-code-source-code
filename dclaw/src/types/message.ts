@@ -91,6 +91,48 @@ export type ContentBlock =
 
 export type MessageRole = 'system' | 'user' | 'assistant'
 
+export type RuntimeAttachmentVisibility = {
+  model?: boolean
+  transcript?: boolean
+  ui?: boolean
+}
+
+export type RuntimeSkillListingMode = 'full' | 'names_only' | 'delta'
+
+export type RuntimeSkillRef = {
+  name: string
+}
+
+export type RuntimeRelevantMemoryRef = {
+  path: string
+  relativePath?: string
+  content?: string
+}
+
+export type RuntimeAttachment =
+  | {
+      type: 'skill_listing'
+      mode: RuntimeSkillListingMode
+      skills: RuntimeSkillRef[]
+    }
+  | {
+      type: 'invoked_skills'
+      skills: RuntimeSkillRef[]
+    }
+  | {
+      type: 'relevant_memories'
+      memories: RuntimeRelevantMemoryRef[]
+    }
+  | {
+      type:
+        | 'dclaw_md'
+        | 'plan_mode'
+        | 'task_reminder'
+        | 'post_compact_files'
+        | 'tool_result_attachments'
+      [key: string]: unknown
+    }
+
 export type Message = {
   id: string
   role: MessageRole
@@ -98,6 +140,8 @@ export type Message = {
   createdAt: string
   compactBoundary?: CompactBoundary
   transcriptOnly?: boolean
+  runtimeAttachment?: RuntimeAttachment
+  runtimeVisibility?: RuntimeAttachmentVisibility
 }
 
 export function createMessage(
@@ -114,6 +158,22 @@ export function createMessage(
 
 export function createTextMessage(role: MessageRole, text: string): Message {
   return createMessage(role, [{ type: 'text', text }])
+}
+
+export function withRuntimeAttachment(
+  message: Message,
+  runtimeAttachment: RuntimeAttachment,
+  runtimeVisibility: RuntimeAttachmentVisibility = {
+    model: true,
+    transcript: false,
+    ui: false,
+  },
+): Message {
+  return {
+    ...message,
+    runtimeAttachment,
+    runtimeVisibility,
+  }
 }
 
 export function createImageBlock(
@@ -275,5 +335,13 @@ export function getPdfContentBlocks(message: Message): PdfContentBlock[] {
 }
 
 export function getModelVisibleMessages(messages: Message[]): Message[] {
-  return messages.filter(message => message.transcriptOnly !== true)
+  return messages.filter(
+    message =>
+      message.transcriptOnly !== true &&
+      message.runtimeVisibility?.model !== false,
+  )
+}
+
+export function getTranscriptSerializableMessages(messages: Message[]): Message[] {
+  return messages.filter(message => message.runtimeVisibility?.transcript !== false)
 }

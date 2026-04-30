@@ -14,6 +14,10 @@ import {
   type ResolvedLlmRuntimeConfig,
 } from '../llm/runtimeConfig.js'
 import { listSessionHistory } from '../session/history.js'
+import {
+  loadMemoryManifest,
+} from '../memory/manifest.js'
+import { ensureMemoryScaffold } from '../memory/store.js'
 import { loadSessionForResume } from '../session/resume.js'
 import {
   createSession,
@@ -660,6 +664,31 @@ async function handleSkillsCommand(
   ])
 }
 
+async function handleMemoryCommand(
+  args: string[],
+  context: SlashCommandContext,
+): Promise<void> {
+  if (args.length > 0) {
+    printLines([
+      'Usage: /memory',
+      '',
+    ])
+    return
+  }
+
+  const env = context.env ?? process.env
+  const scaffold = await ensureMemoryScaffold(context.options.cwd, env)
+  const manifest = await loadMemoryManifest(context.options.cwd, env)
+
+  printLines([
+    'Memory:',
+    `directory: ${scaffold.memoryDir}`,
+    `entrypoint: ${scaffold.entrypointPath}`,
+    `memory files: ${manifest.length}`,
+    '',
+  ])
+}
+
 function setCurrentPermissionMode(
   args: string[],
   context: SlashCommandContext,
@@ -884,6 +913,18 @@ const SLASH_COMMANDS: SlashCommandDefinition[] = [
     presentationTitle: 'Skills',
     async handle(args, context) {
       await handleSkillsCommand(args, context)
+    },
+  },
+  {
+    name: '/memory',
+    displayName: 'Memory',
+    argKind: 'none',
+    description: 'Create and show the current workspace memory entrypoint.',
+    canRunWhileBusy: true,
+    presentationKind: 'structured_card',
+    presentationTitle: 'Memory',
+    async handle(args, context) {
+      await handleMemoryCommand(args, context)
     },
   },
   {

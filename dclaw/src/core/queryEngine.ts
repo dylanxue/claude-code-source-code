@@ -21,7 +21,11 @@ import {
 import {
   deriveToolResultBudgetFromModelLimits,
 } from './toolResultBudget.js'
-import { loadSessionMeta, type SessionMode } from '../session/store.js'
+import {
+  loadSessionMeta,
+  updateSessionMeta,
+  type SessionMode,
+} from '../session/store.js'
 import type { PermissionMode, ToolContext } from '../types/tool.js'
 import {
   createTextMessage,
@@ -67,9 +71,14 @@ import {
 } from '../skills/state.js'
 import { getLastCompactBoundary, isFreshlyCompactedSession } from '../compact/boundaryMessage.js'
 import {
-  buildSkillListingReminderText,
+  parseInvokedSkillReminderText,
   parseSkillListingReminderText,
 } from '../skills/prompt.js'
+import {
+  createInvokedSkillAttachmentMessage,
+  createSkillListingAttachmentMessage,
+} from '../skills/runtimeAttachments.js'
+import type { LoadedSkill } from '../skills/types.js'
 
 export type QueryEngineOptions = {
   client: LlmClient
@@ -164,12 +173,8 @@ export class QueryEngine {
     boundaryId: string
     skills: InvokedSkill[]
   }
-  private sentSkillNames = new Set<string>()
-  private suppressNextSkillListing = false
-  private postCompactSentSkillNames?: {
-    boundaryId: string
-    names: string[]
-  }
+  private localListedSkillNames = new Set<string>()
+  private localInvokedSkillNames = new Set<string>()
 
   constructor(options: QueryEngineOptions) {
     this.client = options.client
@@ -204,7 +209,6 @@ export class QueryEngine {
         this.toolContext.invokedSkills,
       )
     }
-    this.restoreSkillListingStateFromMessages(this.messages)
     this.queryTraceSink = options.queryTraceSink
     this.toolContext.queryTraceSink = this.queryTraceSink
     this.dclawMdEntries = [...(options.dclawMdEntries ?? [])]
@@ -242,19 +246,11 @@ export class QueryEngine {
         this.toolContext.invokedSkills,
         this.postCompactInvokedSkills.skills,
       )
-      this.sentSkillNames = new Set(
-        this.postCompactSentSkillNames?.boundaryId === compactBoundary.boundaryId
-          ? this.postCompactSentSkillNames.names
-          : [],
-      )
-      this.suppressNextSkillListing = false
       return
     }
 
     this.postCompactInvokedSkills = undefined
-    this.postCompactSentSkillNames = undefined
     restoreInvokedSkillsFromMessages(messages, this.toolContext.invokedSkills)
-    this.restoreSkillListingStateFromMessages(messages)
   }
 
   setModel(model: string | undefined): void {
@@ -293,8 +289,6 @@ export class QueryEngine {
     if (this.toolContext.agentRuntime) {
       this.toolContext.agentRuntime.skillRegistry = skillRegistry
     }
-    this.sentSkillNames.clear()
-    this.suppressNextSkillListing = false
   }
 
   getSessionId(): string | undefined {
@@ -328,18 +322,56 @@ export class QueryEngine {
       boundaryId,
       skills: listInvokedSkills(this.toolContext.invokedSkills),
     }
-    this.postCompactSentSkillNames = {
-      boundaryId,
-      names: [...this.sentSkillNames],
-    }
     this.toolContext.readState.clear()
   }
 
-  private restoreSkillListingStateFromMessages(messages: Message[]): void {
-    const sent = new Set<string>()
-    let sawListing = false
+  private getSortedCurrentSkills(): LoadedSkill[] {
+    if (
+      !this.toolRegistry.list().some(tool => tool.name === 'Skill') ||
+      !this.toolContext.availableTools.includes('Skill') ||
+      !this.toolContext.skillRegistry
+    ) {
+      return []
+    }
 
-    for (const message of messages) {
+    return [...this.toolContext.skillRegistry.list()].sort((left, right) => {
+      if (left.name === 'install-skills' && right.name !== 'install-skills') {
+        return -1
+      }
+      if (right.name === 'install-skills' && left.name !== 'install-skills') {
+        return 1
+      }
+      return left.name.localeCompare(right.name)
+    })
+  }
+
+  private hasRuntimeAttachment(type: NonNullable<Message['runtimeAttachment']>['type']): boolean {
+    return getMessagesAfterCompactBoundary(this.messages).some(
+      message => message.runtimeAttachment?.type === type,
+    )
+  }
+
+  private hasPersistedInvokedSkillReminder(): boolean {
+    return getMessagesAfterCompactBoundary(this.messages).some(message =>
+      parseInvokedSkillReminderText(
+        message.content
+          .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+          .map(block => block.text)
+          .join('\n'),
+      ),
+    )
+  }
+
+  private collectListedSkillNamesFromMessages(): Set<string> {
+    const names = new Set<string>()
+    for (const message of getMessagesAfterCompactBoundary(this.messages)) {
+      if (message.runtimeAttachment?.type === 'skill_listing') {
+        for (const skill of message.runtimeAttachment.skills) {
+          names.add(skill.name)
+        }
+        continue
+      }
+
       const listing = parseSkillListingReminderText(
         message.content
           .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
@@ -349,64 +381,185 @@ export class QueryEngine {
       if (!listing) {
         continue
       }
-
-      sawListing = true
       for (const skill of listing) {
-        sent.add(skill.name)
+        names.add(skill.name)
       }
     }
-
-    this.sentSkillNames = sent
-    this.suppressNextSkillListing = sawListing
+    return names
   }
 
-  private createSkillListingMessages(): Message[] {
-    if (
-      !this.toolRegistry.list().some(tool => tool.name === 'Skill') ||
-      !this.toolContext.availableTools.includes('Skill') ||
-      !this.toolContext.skillRegistry
-    ) {
-      return []
+  private async getSessionSkillNameState(): Promise<{
+    listedSkillNames: Set<string>
+    invokedSkillNames: Set<string>
+  }> {
+    if (!this.toolContext.sessionId) {
+      return {
+        listedSkillNames: new Set(this.localListedSkillNames),
+        invokedSkillNames: new Set(this.localInvokedSkillNames),
+      }
     }
 
-    const currentSkills = [...this.toolContext.skillRegistry.list()].sort((left, right) => {
-      if (left.name === 'install-skills' && right.name !== 'install-skills') {
-        return -1
+    const meta = await loadSessionMeta(
+      this.toolContext.sessionId,
+      this.modelLimitsEnv,
+    )
+    if (!meta) {
+      return {
+        listedSkillNames: new Set([
+          ...this.localListedSkillNames,
+          ...this.collectListedSkillNamesFromMessages(),
+        ]),
+        invokedSkillNames: new Set(this.localInvokedSkillNames),
       }
-      if (right.name === 'install-skills' && left.name !== 'install-skills') {
-        return 1
-      }
-      return left.name.localeCompare(right.name)
-    })
+    }
+
+    return {
+      listedSkillNames: new Set(
+        meta.listedSkillNames ??
+          [...this.collectListedSkillNamesFromMessages()],
+      ),
+      invokedSkillNames: new Set(meta.invokedSkillNames ?? []),
+    }
+  }
+
+  private async persistSessionSkillNameState(state: {
+    listedSkillNames: Set<string>
+    invokedSkillNames: Set<string>
+  }): Promise<void> {
+    const listedSkillNames = [...state.listedSkillNames].sort((left, right) =>
+      left.localeCompare(right),
+    )
+    const invokedSkillNames = [...state.invokedSkillNames].sort((left, right) =>
+      left.localeCompare(right),
+    )
+
+    if (!this.toolContext.sessionId) {
+      this.localListedSkillNames = new Set(listedSkillNames)
+      this.localInvokedSkillNames = new Set(invokedSkillNames)
+      return
+    }
+
+    const updated = await updateSessionMeta(
+      this.toolContext.sessionId,
+      meta => ({
+        ...meta,
+        listedSkillNames,
+        invokedSkillNames,
+        updatedAt: new Date().toISOString(),
+      }),
+      this.modelLimitsEnv,
+    )
+    if (!updated) {
+      this.localListedSkillNames = new Set(listedSkillNames)
+      this.localInvokedSkillNames = new Set(invokedSkillNames)
+    }
+  }
+
+  private async persistCurrentInvokedSkillNames(): Promise<void> {
+    const skillState = await this.getSessionSkillNameState()
+    for (const skill of listInvokedSkills(this.toolContext.invokedSkills)) {
+      skillState.invokedSkillNames.add(skill.name)
+    }
+    await this.persistSessionSkillNameState(skillState)
+  }
+
+  private async createSkillContextMessages(): Promise<Message[]> {
+    const currentSkills = this.getSortedCurrentSkills()
     if (currentSkills.length === 0) {
       return []
     }
 
-    if (this.suppressNextSkillListing) {
-      this.suppressNextSkillListing = false
-      currentSkills.forEach(skill => {
-        this.sentSkillNames.add(skill.name)
-      })
-      return []
+    const skillByName = new Map(currentSkills.map(skill => [skill.name, skill]))
+    const skillState = await this.getSessionSkillNameState()
+    for (const skill of listInvokedSkills(this.toolContext.invokedSkills)) {
+      if (skillByName.has(skill.name)) {
+        skillState.invokedSkillNames.add(skill.name)
+      }
+    }
+
+    const messages: Message[] = []
+    const hasSkillListingAttachment = this.hasRuntimeAttachment('skill_listing')
+    const hasInvokedSkillContext =
+      this.hasRuntimeAttachment('invoked_skills') ||
+      this.hasPersistedInvokedSkillReminder()
+
+    const invokedSkills = [...skillState.invokedSkillNames]
+      .map(name => skillByName.get(name))
+      .filter((skill): skill is LoadedSkill => Boolean(skill))
+
+    if (invokedSkills.length > 0 && !hasInvokedSkillContext) {
+      const message = createInvokedSkillAttachmentMessage(invokedSkills)
+      if (message) {
+        messages.push(message)
+      }
+    }
+
+    if (
+      skillState.listedSkillNames.size === 0 &&
+      skillState.invokedSkillNames.size === 0
+    ) {
+      const message = createSkillListingAttachmentMessage('full', currentSkills)
+      if (message) {
+        messages.push(message)
+      }
+      currentSkills.forEach(skill => skillState.listedSkillNames.add(skill.name))
+      await this.persistSessionSkillNameState(skillState)
+      return messages
+    }
+
+    if (!hasSkillListingAttachment && skillState.listedSkillNames.size > 0) {
+      const namesOnlySkills = [...skillState.listedSkillNames]
+        .filter(name => !skillState.invokedSkillNames.has(name))
+        .map(name => skillByName.get(name) ?? { name, description: '' })
+        .filter(skill => skill.name.length > 0)
+      const message = createSkillListingAttachmentMessage(
+        'names_only',
+        namesOnlySkills,
+      )
+      if (message) {
+        messages.push(message)
+      }
     }
 
     const newSkills = currentSkills.filter(
-      skill => !this.sentSkillNames.has(skill.name),
+      skill =>
+        !skillState.listedSkillNames.has(skill.name) &&
+        !skillState.invokedSkillNames.has(skill.name),
     )
-    if (newSkills.length === 0) {
-      return []
+    if (newSkills.length > 0) {
+      const message = createSkillListingAttachmentMessage('delta', newSkills)
+      if (message) {
+        messages.push(message)
+      }
+      newSkills.forEach(skill => skillState.listedSkillNames.add(skill.name))
     }
 
-    newSkills.forEach(skill => {
-      this.sentSkillNames.add(skill.name)
-    })
+    await this.persistSessionSkillNameState(skillState)
+    return messages
+  }
 
-    return [
-      createTextMessage(
-        'user',
-        `<system-reminder>\n${buildSkillListingReminderText(newSkills)}\n</system-reminder>`,
-      ),
-    ]
+  private collectSurfacedMemoryState(): {
+    paths: Set<string>
+    totalBytes: number
+  } {
+    const paths = new Set<string>()
+    let totalBytes = 0
+
+    for (const message of getMessagesAfterCompactBoundary(this.messages)) {
+      if (message.runtimeAttachment?.type !== 'relevant_memories') {
+        continue
+      }
+
+      for (const memory of message.runtimeAttachment.memories) {
+        paths.add(memory.path)
+        if (memory.relativePath) {
+          paths.add(memory.relativePath)
+        }
+        totalBytes += memory.content?.length ?? 0
+      }
+    }
+
+    return { paths, totalBytes }
   }
 
   private async getResolvedSystemPrompt(
@@ -434,11 +587,17 @@ export class QueryEngine {
       return
     }
 
+    const surfaced = this.collectSurfacedMemoryState()
     this.relevantMemoryPrefetch = this.relevantMemoryPrefetcher({
       userPrompt,
       recentTools,
       abortSignal,
       queryTraceSink: this.queryTraceSink,
+      excludedPaths: surfaced.paths,
+      remainingSessionBytes: Math.max(
+        0,
+        64_000 - surfaced.totalBytes,
+      ),
     })
   }
 
@@ -450,6 +609,9 @@ export class QueryEngine {
 
     this.relevantMemoryPrefetch = undefined
     this.onRelevantMemoryPrefetchConsumed?.(result)
+    if (result.messages.length > 0) {
+      this.messages.push(...result.messages)
+    }
     return result.messages
   }
 
@@ -722,7 +884,7 @@ export class QueryEngine {
       getModelVisibleMessages(persistedMessagesBeforeUser),
     )
     const userMessage = createTextMessage('user', prompt)
-    const skillListingMessages = this.createSkillListingMessages()
+    const skillListingMessages = await this.createSkillContextMessages()
     this.messages.push(userMessage, ...skillListingMessages)
     const baseTurnMessages = [...priorMessages, userMessage, ...skillListingMessages]
     const persistedMessagesWithUser = this.getMessages()
@@ -823,6 +985,7 @@ export class QueryEngine {
     }
 
     await this.cleanupExecutionTaskBoard(response.turnEndReason)
+    await this.persistCurrentInvokedSkillNames()
     this.abortRelevantMemoryPrefetch()
 
     return {

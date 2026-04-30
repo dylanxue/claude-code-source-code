@@ -16,8 +16,10 @@ import {
   getTextContent,
   getToolUseBlocks,
   repairDanglingToolUseMessages,
+  withRuntimeAttachment,
   type ContentBlock,
   type Message,
+  type RuntimeAttachment,
 } from '../types/message.js'
 import type {
   ToolContext,
@@ -259,8 +261,17 @@ function stringifyOutput(value: unknown): string {
   return stringifyJson(value)
 }
 
-function createSystemReminderMessage(text: string): Message {
-  return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
+function createSystemReminderMessage(
+  text: string,
+  runtimeAttachment?: RuntimeAttachment,
+): Message {
+  const message = createTextMessage(
+    'user',
+    `<system-reminder>\n${text}\n</system-reminder>`,
+  )
+  return runtimeAttachment
+    ? withRuntimeAttachment(message, runtimeAttachment)
+    : message
 }
 
 function normalizeToolUseIntentText(value: string): string {
@@ -463,7 +474,10 @@ function buildActiveExecutionTaskContinuationReminderMessage(
   lines.push('Current execution tasks:')
   lines.push(...formatExecutionTaskPreview(board))
 
-  return createSystemReminderMessage(lines.join('\n'))
+  return createSystemReminderMessage(lines.join('\n'), {
+    type: 'task_reminder',
+    subtype: 'active_execution_continuation',
+  })
 }
 
 function resolveTurnEndReason(

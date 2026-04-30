@@ -249,6 +249,77 @@ class DuplicateUpgradeClient implements LlmClient {
   }
 }
 
+class ForgetMemoryClient implements LlmClient {
+  readonly providerName = 'capture'
+  requests: CreateMessageRequest[] = []
+  private memoryDir?: string
+
+  async createMessage(
+    request: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> {
+    this.requests.push(request)
+    const assistantCount = request.messages.filter(
+      message => message.role === 'assistant',
+    ).length
+    this.memoryDir ??= getTextContent(
+      request.messages.at(-1) ?? createTextMessage('user', ''),
+    )
+      .match(/Memory directory: (.+)/)?.[1]?.trim()
+
+    const entrypointPath = this.memoryDir
+      ? join(this.memoryDir, 'MEMORY.md')
+      : '/placeholder'
+    const memoryFilePath = this.memoryDir
+      ? join(this.memoryDir, 'feedback', 'terse-responses.md')
+      : '/placeholder'
+
+    if (assistantCount === 1) {
+      return {
+        message: createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'tool_read_memory_file',
+            name: 'Read',
+            input: { file_path: memoryFilePath },
+          },
+          {
+            type: 'tool_use',
+            id: 'tool_read_memory_index',
+            name: 'Read',
+            input: { file_path: entrypointPath },
+          },
+        ]),
+      }
+    }
+
+    if (assistantCount === 2) {
+      return {
+        message: createMessage('assistant', [
+          {
+            type: 'tool_use',
+            id: 'tool_delete_memory_file',
+            name: 'DeleteMemory',
+            input: { file_path: memoryFilePath },
+          },
+          {
+            type: 'tool_use',
+            id: 'tool_update_memory_index',
+            name: 'Write',
+            input: {
+              file_path: entrypointPath,
+              content: '# Memory\n\n',
+            },
+          },
+        ]),
+      }
+    }
+
+    return {
+      message: createTextMessage('assistant', 'forgotten memory removed'),
+    }
+  }
+}
+
 function createConversationMessages(): Message[] {
   return [
     createTextMessage('user', 'Please remember that I prefer terse responses.'),
@@ -466,6 +537,65 @@ test('automatic memory extractor redirects uniquely similar descriptions to the 
     assert.equal(appended.length, 1)
     assert.match(getTextContent(appended[0]!), /Saved 1 memory file/)
     assert.match(upgradedMemory, /Keep answers terse and avoid recap padding/)
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
+test('automatic memory extractor handles explicit forget by deleting memory and updating index', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-memory-extract-forget-'))
+  const env = { ...process.env, HOME: homeDir }
+  const workspaceRoot = join(homeDir, 'workspace')
+  const memoryRelativePath = 'feedback/terse-responses.md'
+  const client = new ForgetMemoryClient()
+  const extractor = createAutomaticMemoryExtractor({
+    client,
+    model: 'stub-model',
+    workspaceRoot,
+    env,
+  })
+
+  try {
+    await seedMemoryFile({
+      workspaceRoot,
+      env,
+      relativePath: memoryRelativePath,
+      name: 'Terse Responses',
+      description: 'User prefers concise replies.',
+      type: 'feedback',
+      body: 'Keep answers terse.',
+    })
+    await writeFile(
+      getMemoryEntrypointPath(workspaceRoot, env),
+      [
+        '# Memory',
+        '',
+        '- [Terse Responses](feedback/terse-responses.md) - User prefers concise replies.',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const appended = await extractor.extractTurn({
+      userPrompt: 'Forget that I prefer terse responses.',
+      messages: [
+        createTextMessage('user', 'Forget that I prefer terse responses.'),
+        createTextMessage('assistant', 'I will remove that memory.'),
+      ],
+      systemPrompt: 'BASE SYSTEM PROMPT',
+    })
+
+    const memoryIndex = await readFile(
+      getMemoryEntrypointPath(workspaceRoot, env),
+      'utf8',
+    )
+
+    await assert.rejects(
+      readFile(getMemoryFilePath(workspaceRoot, memoryRelativePath, env), 'utf8'),
+    )
+    assert.equal(appended.length, 1)
+    assert.match(getTextContent(appended[0]!), /Updated 1 memory file/)
+    assert.doesNotMatch(memoryIndex, /terse-responses\.md/)
   } finally {
     await rm(homeDir, { recursive: true, force: true })
   }

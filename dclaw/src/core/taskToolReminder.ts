@@ -1,4 +1,8 @@
-import { createTextMessage, type Message } from '../types/message.js'
+import {
+  createTextMessage,
+  withRuntimeAttachment,
+  type Message,
+} from '../types/message.js'
 import type { TaskBoard } from '../taskboard/types.js'
 
 const TASK_CREATE_TOOL_NAME = 'TaskCreate'
@@ -101,8 +105,13 @@ export function createTaskToolReminderMessage(
     return null
   }
 
-  return createTextMessage(
-    'user',
-    `<system-reminder>\n${text}\n</system-reminder>`,
+  return withRuntimeAttachment(
+    createTextMessage(
+      'user',
+      `<system-reminder>\n${text}\n</system-reminder>`,
+    ),
+    {
+      type: 'task_reminder',
+    },
   )
 }

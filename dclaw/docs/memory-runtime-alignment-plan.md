@@ -700,22 +700,151 @@ dclaw 当前差距：
 - [x] compact 成功后 checkpoint 被清空或更新。
 - [x] resume 后 session memory path 与 checkpoint 状态恢复一致。
 
+### Phase 3.2：Structured Runtime Attachments
+
+目标：补齐 Claude Code 风格的结构化 runtime attachment message 层，把当前散落的 `<system-reminder>` 注入统一成可进入 runtime messages、可 normalize 到模型上下文、可按策略持久化/隐藏的结构化上下文消息。这个阶段是重新修正 relevant memory 注入和 surfaced 去重语义的前置抽象。
+
+当前 dclaw 语义：
+
+- `QueryEngine.messages` 与 session transcript 基本等价；写入 session 时直接 JSONL 序列化 `Message`。
+- system prompt、session meta、session-memory.md、task board、plan file 是外部状态，不是 message。
+- `getTransientContextMessages` 会临时拼接多种 `role: user` 的 `<system-reminder>`，只进入当前 LLM request，不进入 runtime messages / transcript。
+- skill listing 是例外：当前作为真实 user `<system-reminder>` push 到 `messages`，因此会进入 transcript。
+- relevant memory prefetch 当前也是 transient reminder；但 surfaced 去重却使用进程内 `surfacedMemoryPaths`，导致“runtime 认为已 surfaced，但后续 LLM request 不再拥有该 memory 原文”的语义断层。
+
+Claude Code 参考行为：
+
+- Claude Code 有内部 `attachment` message，不等同于 API 的 user / tool_result。
+- attachment 进入 runtime messages；发 API 前通过 normalize 转换成 `role: user` 的 `<system-reminder>` 或其他合法消息形态。
+- UI 是否显示、磁盘 transcript 是否持久化、模型是否可见是分开的策略。
+- relevant memory 作为 `attachment.type === 'relevant_memories'` 进入 runtime messages；surfaced state 通过扫描 runtime messages 恢复。
+- compact 后旧 attachment 被裁掉，surfaced state 可以自然 reset；post-compact 需要恢复的上下文则通过新的 attachment 重新注入。
+- transcript 与 runtime messages 不完全等价；尤其非内部用户场景下，部分 attachment 可以不落磁盘 transcript，但仍参与当前 runtime context。
+
+设计方向：
+
+```ts
+type RuntimeAttachmentMessage = {
+  id: string
+  kind: 'attachment'
+  attachment: RuntimeAttachment
+  createdAt: string
+  visibility?: {
+    model: boolean
+    transcript: boolean
+    ui: boolean
+  }
+}
+
+type RuntimeAttachment =
+  | { type: 'relevant_memories'; memories: RuntimeRelevantMemory[] }
+  | { type: 'dclaw_md'; entries: DclawMdEntry[] }
+  | { type: 'plan_mode'; reminderType: 'full' | 'sparse' | 'reentry' | 'exit'; planFilePath?: string }
+  | { type: 'task_reminder'; /* execution task summary */ }
+  | { type: 'skill_listing'; mode: 'full' | 'names_only' | 'delta'; skills: RuntimeSkillRef[] }
+  | { type: 'invoked_skills'; skills: RuntimeSkillRef[] }
+  | { type: 'post_compact_files'; /* readState / image / plan-file restore */ }
+```
+
+第一版不一定要一次迁移所有 attachment 类型，但需要先建立统一边界：
+
+- `Message` 类型支持 structured attachment，或新增 `RuntimeMessage = Message | RuntimeAttachmentMessage`。
+- `QueryEngine` 内部 messages 使用 runtime message 列表。
+- LLM request 前增加 `normalizeRuntimeMessagesForModel`，把 attachment 转成现有 `Message[]`。
+- session store 写入前增加 `serializeRuntimeMessagesForTranscript`，按 attachment 类型和 visibility 决定落完整结构、落摘要，或不落。
+- resume 读取 transcript 后能恢复可恢复 attachment；不可恢复 attachment 应有明确重新生成策略。
+- compact / context stats 以 model-normalized messages 为准，避免 attachment 本体和展开文本重复计 token。
+
+Skill listing / invoked skills 策略：
+
+- 不照抄 Claude Code 的 `sentSkillNames` 进程内 latch + transcript attachment 恢复策略。
+- session meta 只记录 skill 名字，不记录 description、hash、mtime、path 或完整内容：
+  - `listedSkillNames: string[]`
+  - `invokedSkillNames: string[]`
+- skill registry 是 skill 信息事实源；description、path、完整内容都以当前 registry 为准。
+- 新 session（非 resume）启动时，`listedSkillNames` / `invokedSkillNames` 为空，通过 `skill_listing(mode: 'full')` attachment 注入完整 `name + description`，并把这些名字写入 `listedSkillNames`。
+- 运行过程中发现 registry 有新增 skill 时，通过 `skill_listing(mode: 'delta')` attachment 只注入新增 skill 的 `name + description`，并更新 `listedSkillNames`。
+- compact / resume 后：
+  - `invokedSkillNames` 对应的 skills 通过 `invoked_skills` attachment 注入完整 skill 内容。
+  - `listedSkillNames` 中尚未 invoked 的 skills 通过 `skill_listing(mode: 'names_only')` attachment 只注入名字列表，提醒模型可用 `Skill("<name>")` 加载完整指令。
+  - 当前 registry 中不在 `listedSkillNames` / `invokedSkillNames` 的 skills 视为新发现，通过 `skill_listing(mode: 'delta')` 注入完整 `name + description`，并更新 `listedSkillNames`。
+- skill 相关 runtime attachment 不作为 transcript message 持久化；跨 compact / resume 的状态由 session meta 恢复。
+- 如果 session meta 中的 skill name 已从 registry 删除或被禁用，恢复时跳过即可；不需要向模型注入失效 skill。
+
+System reminder 迁移策略：
+
+- `DCLAW.md`、plan mode、task reminder、relevant memory、skill listing / invoked skills、post-compact read-file / image / plan restore 都使用 runtime attachment 承载。
+- 这些 attachment 当前默认 `visibility: { model: true, transcript: false, ui: false }`：进入本次模型请求，但不写入 `messages.jsonl`。
+- 仍需跨 turn / compact / resume 恢复的状态不依赖 transcript 中的 reminder 原文：
+  - skill listing / invoked skills 由 session meta 的唯一 skill name 集合恢复。
+  - relevant memory surfaced state 从当前 runtime messages 中的 `relevant_memories` attachment 扫描；compact 裁掉 attachment 后自然 reset。
+  - plan mode 由 session meta / plan file 恢复，并维持 active / reentry / exit 的一次性或节流语义。
+  - post-compact read-file / image / plan restore 保持一次性，只在 fresh compact boundary 后生成 runtime attachment。
+  - task reminder 由 task board 当前状态和 turn guard 重新判断，不从 transcript 恢复。
+
+迁移范围建议：
+
+- Phase 3.2a：引入类型、normalize、store/resume 基础设施，不迁移业务。
+- Phase 3.2b：迁移已有 transient system reminders：
+  - relevant memory prefetch
+  - DCLAW.md reminder
+  - plan mode active / reentry / exit reminder
+  - task tool reminder
+  - post-compact file/image/plan restore
+  - invoked skill restore
+- Phase 3.2c：迁移当前真实入 history 的 skill listing reminder，使它走 runtime attachment + session meta 语义，不再落 transcript。
+- Phase 3.2d：重新实现 surfaced memory state：扫描 runtime messages 中的 `relevant_memories` attachment，而不是进程内闭包 set。
+
+任务：
+
+- [x] 定义 runtime attachment 数据模型和 visibility 策略。
+- [x] 将 QueryEngine 内部 message 容器从纯 `Message[]` 抽象为 runtime messages。
+- [x] 新增 model normalize 层：attachment -> `role: user` `<system-reminder>` / 其他合法 message。
+- [x] 新增 transcript serialize / resume restore 层，解除 runtime messages 与 transcript 的强等价。
+- [x] 明确每类 system reminder 的 lifecycle：每 turn、一次性、post-compact、session-scoped、transcript-persisted。
+- [x] 扩展 session meta：新增 `listedSkillNames` / `invokedSkillNames`，只保存唯一 skill name。
+- [x] 新 session 首轮通过 `skill_listing(mode: 'full')` 注入完整 skill `name + description`，并更新 `listedSkillNames`。
+- [x] 运行过程中发现新增 skill 时，通过 `skill_listing(mode: 'delta')` 注入新增 skill `name + description`，并更新 `listedSkillNames`。
+- [x] skill invoke 成功后写入 `invokedSkillNames`，compact / resume 后从 skill registry 读取完整内容并注入 `invoked_skills`。
+- [x] compact / resume 后对已 listed 但未 invoked 的 skills 只注入 `skill_listing(mode: 'names_only')`。
+- [x] skill 相关 runtime attachments 设置为不持久化 transcript，状态恢复只依赖 session meta + skill registry。
+- [x] 迁移 relevant memory prefetch 为 `relevant_memories` attachment。
+- [x] 迁移 DCLAW.md / plan mode / task reminder / post-compact restore / invoked skills / skill listing。
+- [x] 移除或降级进程内 `surfacedMemoryPaths`，改从 runtime messages 收集 surfaced memory。
+- [x] 更新 compact 行为：compact 后 attachment 是否裁掉、重建或转入 summary 必须逐类定义。
+
+测试：
+
+- [x] attachment 可进入 runtime messages，并在下一轮 request 中再次 normalize 给模型。
+- [x] visibility.transcript=false 的 attachment 不写入 session messages.jsonl，但仍在当前进程后续 turn 可见。
+- [ ] visibility.transcript=true 的 attachment resume 后可恢复。
+- [x] plan mode exit reminder 仍保持一次性，不因 attachment 化重复注入。
+- [x] 新 session 首轮注入完整 skill listing，并把 skill names 写入 session meta。
+- [x] compact 后不重新注入完整 skill listing，只注入已 listed skill names。
+- [x] resume 后通过 session meta 恢复 listed / invoked skill names，不依赖 transcript 中的 skill attachment。
+- [x] 新增 skill 只作为 delta 注入一次，并更新 `listedSkillNames`。
+- [x] invoked skill 在 compact / resume 后注入完整内容，内容来自当前 skill registry。
+- [x] skill attachments 不写入 transcript，但 model-normalized request 中可见。
+- [x] relevant memory surfaced state 可从 runtime messages 扫描得到。
+- [x] compact 后旧 relevant memory attachment 被裁掉时，surfaced state 自然 reset 或按显式恢复策略恢复。
+- [ ] model-normalized token stats 不重复计算 attachment 结构体和展开文本。
+
 ### Phase 4：显式遗忘与 /memory
 
 目标：补齐用户可控的 memory 管理与可测试遗忘路径。
 
 任务：
 
-- [ ] memory extraction prompt 加强显式 forget 规则。
-- [ ] 增加 forget 行为测试：删除正文、更新索引。
-- [ ] 新增 `/memory` 最小命令，打开 memory 文件/目录。
-- [ ] 成功修改后追加 transcript-only note。
+- [x] memory extraction prompt 加强显式 forget 规则。
+- [x] 增加 forget 行为测试：删除正文、更新索引。
+- [x] 新增 `/memory` 最小命令，打开 memory 文件/目录。
+- [x] 成功修改后追加 transcript-only note。
 
 测试：
 
-- [ ] “忘记 X”会定位并修改已有 memory。
-- [ ] `MEMORY.md` 不留下 orphan pointer。
-- [ ] `/memory` 能创建并打开缺失的 `MEMORY.md`。
+- [x] “忘记 X”会定位并修改已有 memory。
+- [x] `MEMORY.md` 不留下 orphan pointer。
+- [x] `/memory` 能创建并打开缺失的 `MEMORY.md`。
 
 ### Phase 5：autoDream
 
@@ -723,26 +852,28 @@ dclaw 当前差距：
 
 任务：
 
-- [ ] 新增 consolidation lock。
-- [ ] 实现 lastConsolidatedAt mtime 语义。
-- [ ] 扫描当前 workspace session transcripts，按 mtime 计算 touched session 数。
-- [ ] 实现 dream forked agent。
-- [ ] 约束工具权限。
-- [ ] 记录 improved memory system note。
+- [x] 新增 consolidation lock。
+- [x] 实现 lastConsolidatedAt mtime 语义。
+- [x] 扫描当前 workspace session transcripts，按 mtime 计算 touched session 数。
+- [x] 实现 dream forked agent。
+- [x] 约束工具权限。
+- [x] 记录 improved memory system note。
 
 测试：
 
-- [ ] minHours 未满足不触发。
-- [ ] minSessions 未满足不触发。
-- [ ] 当前 session 被排除。
-- [ ] lock 持有时不触发。
-- [ ] 触发后调用 forked agent，使用 consolidation prompt。
+- [x] minHours 未满足不触发。
+- [x] minSessions 未满足不触发。
+- [x] 当前 session 被排除。
+- [x] lock 持有时不触发。
+- [x] 触发后调用 forked agent，使用 consolidation prompt。
 
 ## 10. 风险与约束
 
 - Session 路径 workspace 化会影响 resume、history、agent session、plan/task 文件引用，必须分清新写路径与 legacy 读取路径。
 - Prefetch 注入时机要避免破坏 tool_use / tool_result 配对。
 - Surfaced state 如果持久化到 transcript，compact / resume 需要明确恢复策略。
+- Structured runtime attachment 会改变 session messages 与 transcript 的关系，必须先定义 resume、history、compact、UI 展示和 query trace 的边界。
+- 迁移 system reminder 时要避免同一上下文同时以 attachment 和 transient reminder 两种形态进入模型。
 - Session memory 不应被误当作长期 memory，否则会污染未来 session。
 - Extraction 遗忘必须严格基于最近消息中的明确证据。
 - autoDream 使用 transcript search 时必须限制范围，避免大文件 OOM。
@@ -756,7 +887,9 @@ dclaw 当前差距：
 1. Surfaced 去重 + freshness header
 2. Relevant memory prefetch
 3. Session memory + compact 接入
-4. 显式遗忘 + `/memory`
-5. autoDream
+4. Structured runtime attachments
+5. 基于 attachment 重新收敛 memory 注入与 surfaced 去重
+6. 显式遗忘 + `/memory`
+7. autoDream
 
-这个顺序先降低 recall 噪声和延迟，再增强长会话连续性，最后补长期 memory 的整理能力。
+这个顺序先降低 recall 噪声和延迟，再增强长会话连续性。当前实现已暴露出 transient reminder 与 session 级 surfaced 去重的语义断层，因此后续应先补 structured runtime attachment 层，再继续收敛 memory 注入、去重、compact / resume 行为。

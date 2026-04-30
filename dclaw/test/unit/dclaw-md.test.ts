@@ -116,6 +116,8 @@ test('QueryEngine injects DCLAW.md as transient context', async () => {
   const reminders = findReminderMessages(client.requests[0])
   assert.equal(reminders.length, 1)
   assert.match(getTextContent(reminders[0]!), /# DCLAW\.md/)
+  assert.equal(reminders[0]?.runtimeAttachment?.type, 'dclaw_md')
+  assert.equal(reminders[0]?.runtimeVisibility?.transcript, false)
 
   assert.equal(
     engine.getMessages().some(message =>

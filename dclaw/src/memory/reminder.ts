@@ -43,15 +43,30 @@ export function createRelevantMemoryReminderMessage(
     ].join('\n'),
   )
 
-  return createTextMessage(
-    'user',
-    [
-      '<system-reminder>',
-      'Relevant memories prefetched for the current query:',
-      `- recalled memories for this query: ${memory.recalledEntries.length}/${memory.manifestCount}`,
-      '',
-      ...blocks,
-      '</system-reminder>',
-    ].join('\n'),
-  )
+  return {
+    ...createTextMessage(
+      'user',
+      [
+        '<system-reminder>',
+        'Relevant memories prefetched for the current query:',
+        `- recalled memories for this query: ${memory.recalledEntries.length}/${memory.manifestCount}`,
+        '',
+        ...blocks,
+        '</system-reminder>',
+      ].join('\n'),
+    ),
+    runtimeAttachment: {
+      type: 'relevant_memories' as const,
+      memories: memory.recalledEntries.map(entry => ({
+        path: entry.path,
+        relativePath: entry.relativePath,
+        content: entry.content,
+      })),
+    },
+    runtimeVisibility: {
+      model: true,
+      transcript: false,
+      ui: false,
+    },
+  }
 }

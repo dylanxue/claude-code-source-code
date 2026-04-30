@@ -170,6 +170,8 @@ test('Skill tool validates and applies a loaded skill in the current context', a
     path: '/tmp/review.md',
   })
   assert.equal(result.newMessages?.length, 1)
+  assert.equal(result.newMessages?.[0]?.runtimeAttachment?.type, 'invoked_skills')
+  assert.equal(result.newMessages?.[0]?.runtimeVisibility?.transcript, false)
   assert.match(
     getTextContent(result.newMessages?.[0]!),
     /Apply the following skill while continuing the current task/,

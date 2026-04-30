@@ -2,7 +2,11 @@ import { access, readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { getDclawHomeDir } from '../session/paths.js'
-import { createTextMessage, type Message } from '../types/message.js'
+import {
+  createTextMessage,
+  withRuntimeAttachment,
+  type Message,
+} from '../types/message.js'
 
 export type DclawMdSource = 'user' | 'project' | 'local' | 'rules'
 
@@ -405,5 +409,14 @@ export function createDclawMdReminderMessage(
     return null
   }
 
-  return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
+  return withRuntimeAttachment(
+    createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`),
+    {
+      type: 'dclaw_md',
+      entries: entries.map(entry => ({
+        source: entry.source,
+        path: entry.path,
+      })),
+    },
+  )
 }

@@ -59,6 +59,18 @@ export function buildSkillListingReminderText(
   ].join('\n')
 }
 
+export function buildSkillNameListingReminderText(
+  skillNames: string[],
+): string {
+  return [
+    'The following skill names were previously listed in this session:',
+    '',
+    skillNames.map(name => `- ${name}`).join('\n'),
+    '',
+    'Use the Skill tool with one of these names to load the full instructions when relevant.',
+  ].join('\n')
+}
+
 function unwrapSystemReminder(text: string): string | null {
   const trimmed = text.trim()
   if (

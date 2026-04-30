@@ -176,6 +176,8 @@ test('QueryEngine appends a task tool reminder when task tracking is stale', asy
       )
     })
     assert.ok(reminderMessage)
+    assert.equal(reminderMessage.runtimeAttachment?.type, 'task_reminder')
+    assert.equal(reminderMessage.runtimeVisibility?.transcript, false)
     const reminderText = getTextContent(reminderMessage)
     assert.match(reminderText, /# Task Tool Reminder/)
     assert.match(reminderText, /TaskCreate/)
@@ -320,6 +322,13 @@ test('QueryEngine retries once before ending a turn with unfinished execution ta
     await engine.submitUserPrompt('continue')
 
     assert.equal(client.requests.length, 2)
+    const repairReminder = client.requests[1]?.messages.find(
+      message =>
+        message.runtimeAttachment?.type === 'task_reminder' &&
+        message.runtimeAttachment.subtype === 'active_execution_continuation',
+    )
+    assert.ok(repairReminder)
+    assert.equal(repairReminder.runtimeVisibility?.transcript, false)
     const repairRequestText = client.requests[1]?.messages
       .map(message =>
         message.content

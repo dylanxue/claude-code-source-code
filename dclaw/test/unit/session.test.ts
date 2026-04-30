@@ -24,6 +24,7 @@ import {
 import { getProjectSessionsDir } from '../../src/session/paths.js'
 import { createExecutionTaskBoardForSession } from '../../src/taskboard/store.js'
 import { createSkillRegistry } from '../../src/skills/registry.js'
+import { createSkillListingAttachmentMessage } from '../../src/skills/runtimeAttachments.js'
 import { recordInvokedSkill } from '../../src/skills/state.js'
 import { createDefaultToolRegistry } from '../../src/tools/index.js'
 import { ToolRegistry } from '../../src/tools/registry.js'
@@ -484,6 +485,60 @@ test('QueryEngine passes recent tool results to relevant memory prefetch', async
   ])
 })
 
+test('QueryEngine passes surfaced runtime memory paths to relevant memory prefetch', async () => {
+  const client = new CapturingLlmClient()
+  const excludedPathBatches: string[][] = []
+  let calls = 0
+  const memoryMessage = createTextMessage(
+    'user',
+    '<system-reminder>\nRelevant memory: use staging database.\n</system-reminder>',
+  )
+  memoryMessage.runtimeAttachment = {
+    type: 'relevant_memories',
+    memories: [
+      {
+        path: '/tmp/project/.dclaw/memory/project/staging.md',
+        relativePath: 'project/staging.md',
+        content: 'use staging database',
+      },
+    ],
+  }
+  memoryMessage.runtimeVisibility = {
+    model: true,
+    transcript: false,
+    ui: false,
+  }
+
+  const engine = new QueryEngine({
+    client,
+    toolRegistry: new ToolRegistry(),
+    toolContext: createToolContext(),
+    relevantMemoryPrefetcher: state => {
+      calls += 1
+      excludedPathBatches.push([...(state.excludedPaths ?? [])].sort())
+      return {
+        getSettled: () => ({
+          messages: calls === 1 ? [memoryMessage] : [],
+          recalledPaths: [],
+          recalledBytes: 0,
+          skippedAlreadySurfacedCount: 0,
+          skippedBySessionByteLimitCount: 0,
+        }),
+        abort: () => undefined,
+      }
+    },
+  })
+
+  await engine.submitUserPrompt('first turn')
+  await engine.submitUserPrompt('second turn')
+
+  assert.deepEqual(excludedPathBatches[0], [])
+  assert.deepEqual(excludedPathBatches[1], [
+    '/tmp/project/.dclaw/memory/project/staging.md',
+    'project/staging.md',
+  ])
+})
+
 test('QueryEngine aborts relevant memory prefetch when the query aborts', async () => {
   const controller = new AbortController()
   let prefetchAborted = false
@@ -702,6 +757,11 @@ test('QueryEngine restores image tool results across compact boundaries via tran
   const transientImageMessage = requestMessages.at(-1)
   assert.ok(transientImageMessage)
   assert.equal(transientImageMessage?.role, 'user')
+  assert.equal(
+    transientImageMessage?.runtimeAttachment?.type,
+    'post_compact_files',
+  )
+  assert.equal(transientImageMessage?.runtimeVisibility?.transcript, false)
   assert.deepEqual(
     transientImageMessage?.content.map(block => block.type),
     ['text', 'image'],
@@ -992,6 +1052,42 @@ test('session store persists transcript messages for resume', async () => {
   }
 })
 
+test('session store skips runtime attachments that are hidden from transcript', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-attachments-'))
+  const env = { ...process.env, HOME: homeDir }
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'exec',
+      provider: 'stub',
+      model: 'stub-model',
+      env,
+    })
+
+    const userMessage = createTextMessage('user', 'hello')
+    const skillAttachment = createSkillListingAttachmentMessage('full', [
+      {
+        name: 'review',
+        description: 'Inspect a proposed change before shipping.',
+      },
+    ])
+    assert.ok(skillAttachment)
+
+    await appendSessionMessages(
+      session.sessionId,
+      [userMessage, skillAttachment],
+      env,
+    )
+
+    const storedMessages = await loadSessionMessages(session.sessionId, env)
+    assert.equal(storedMessages.length, 1)
+    assert.equal(getTextContent(storedMessages[0]!), 'hello')
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
 test('QueryEngine injects skill listing only for newly surfaced skills', async () => {
   const client = new CapturingLlmClient()
   const toolRegistry = createDefaultToolRegistry()
@@ -1059,6 +1155,58 @@ test('QueryEngine injects skill listing only for newly surfaced skills', async (
     ).length,
     1,
   )
+})
+
+test('QueryEngine records listed skill names in session meta without transcript skill messages', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-session-skill-meta-'))
+  const env = { ...process.env, HOME: homeDir }
+  const client = new CapturingLlmClient()
+  const toolRegistry = createDefaultToolRegistry()
+  const skillRegistry = createSkillRegistry([
+    {
+      name: 'review',
+      description: 'Inspect a proposed change before shipping.',
+      source: 'builtin',
+      prompt: 'Prioritize bugs and missing tests.',
+      path: '/tmp/review.md',
+    },
+  ])
+
+  try {
+    const session = await createSession({
+      cwd: '/tmp/project',
+      mode: 'interactive',
+      provider: 'stub',
+      model: 'stub-model',
+      env,
+    })
+    const engine = new QueryEngine({
+      client,
+      model: 'stub-model',
+      modelLimitsEnv: env,
+      toolRegistry,
+      toolContext: createToolContext({
+        sessionId: session.sessionId,
+        availableTools: toolRegistry.list().map(tool => tool.name),
+        skillRegistry,
+      }),
+    })
+
+    const result = await engine.submitUserPrompt('continue with skills')
+    await appendSessionMessages(session.sessionId, result.appendedMessages, env)
+
+    const meta = await loadSessionMeta(session.sessionId, env)
+    const storedMessages = await loadSessionMessages(session.sessionId, env)
+    const transcriptText = storedMessages.map(getTextContent).join('\n')
+
+    assert.deepEqual(meta?.listedSkillNames, ['review'])
+    assert.doesNotMatch(
+      transcriptText,
+      /The following skills are available for use with the Skill tool:/,
+    )
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
 })
 
 test('resumed sessions preserve tool_result image content for transient reinjection', async () => {
@@ -1406,6 +1554,24 @@ test('QueryEngine injects post-compact file and plan attachments on the first tu
     assert.doesNotMatch(secondRequestText, /# Post-Compact Plan File/)
     assert.doesNotMatch(secondRequestText, /## Plan Mode/)
     assert.doesNotMatch(secondRequestText, /# Post-Compact Task Board/)
+
+    const postCompactAttachments = client.requests[0]?.messages.filter(
+      message => message.runtimeAttachment?.type === 'post_compact_files',
+    ) ?? []
+    assert.equal(postCompactAttachments.length, 2)
+    const postCompactAttachmentData = postCompactAttachments.map(message => {
+      const attachment = message.runtimeAttachment
+      assert.equal(attachment?.type, 'post_compact_files')
+      return attachment
+    })
+    assert.deepEqual(
+      postCompactAttachmentData.map(attachment => attachment.subtype),
+      ['read_file', 'plan_file'],
+    )
+    assert.deepEqual(
+      postCompactAttachments.map(message => message.runtimeVisibility?.transcript),
+      [false, false],
+    )
   } finally {
     process.env = originalEnv
     await rm(homeDir, { recursive: true, force: true })

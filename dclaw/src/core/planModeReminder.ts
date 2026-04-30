@@ -1,4 +1,9 @@
-import { createTextMessage, getTextContent, type Message } from '../types/message.js'
+import {
+  createTextMessage,
+  getTextContent,
+  withRuntimeAttachment,
+  type Message,
+} from '../types/message.js'
 import { isFreshlyCompactedSession } from '../compact/boundaryMessage.js'
 import { updateSessionPlanMode, type PlanModeState } from '../session/store.js'
 import type { PermissionMode } from '../types/tool.js'
@@ -86,8 +91,19 @@ function buildPlanModeExitText(planMode: PlanModeState): string {
   ].join('\n')
 }
 
-function wrapSystemReminder(text: string): Message {
-  return createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`)
+function wrapPlanModeReminder(
+  text: string,
+  reminderType: 'full' | 'sparse' | 'reentry' | 'exit',
+  planMode: PlanModeState,
+): Message {
+  return withRuntimeAttachment(
+    createTextMessage('user', `<system-reminder>\n${text}\n</system-reminder>`),
+    {
+      type: 'plan_mode',
+      reminderType,
+      planFilePath: planMode.planFilePath,
+    },
+  )
 }
 
 export function createPostCompactPlanModeReminderMessage(
@@ -104,7 +120,11 @@ export function createPostCompactPlanModeReminderMessage(
     return null
   }
 
-  return wrapSystemReminder(buildPlanModeReminderText(planMode, 'full'))
+  return wrapPlanModeReminder(
+    buildPlanModeReminderText(planMode, 'full'),
+    'full',
+    planMode,
+  )
 }
 
 function shouldAttachPlanModeReminder(
@@ -148,7 +168,9 @@ export async function createPlanModeReminderMessages(
       env,
     )
 
-    return [wrapSystemReminder(buildPlanModeExitText(planMode))]
+    return [
+      wrapPlanModeReminder(buildPlanModeExitText(planMode), 'exit', planMode),
+    ]
   }
 
   if (planMode.status !== 'active') {
@@ -179,10 +201,20 @@ export async function createPlanModeReminderMessages(
 
   const reminderMessages: Message[] = []
   if (planMode.hasExitedInSession) {
-    reminderMessages.push(wrapSystemReminder(buildPlanModeReentryText(planMode)))
+    reminderMessages.push(
+      wrapPlanModeReminder(
+        buildPlanModeReentryText(planMode),
+        'reentry',
+        planMode,
+      ),
+    )
   }
   reminderMessages.push(
-    wrapSystemReminder(buildPlanModeReminderText(planMode, reminderType)),
+    wrapPlanModeReminder(
+      buildPlanModeReminderText(planMode, reminderType),
+      reminderType,
+      planMode,
+    ),
   )
   return reminderMessages
 }

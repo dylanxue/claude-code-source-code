@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { QueryEngine } from '../../src/core/queryEngine.js'
@@ -23,6 +23,7 @@ import type {
   SlashCommandContext,
   InteractiveSessionState,
 } from '../../src/cli/slashCommands.js'
+import { getMemoryEntrypointPath } from '../../src/memory/paths.js'
 
 function createEngine() {
   return new QueryEngine({
@@ -489,6 +490,43 @@ test('maybeHandleSlashCommand lists skills with /skills only', async () => {
   assert.match(text, /Usage: \/skills/)
   assert.match(text, /enabled\s+review \(user\)\s+Review code changes\./)
   assert.match(text, /disabled\s+pdf \(builtin\)\s+Analyze PDFs\./)
+})
+
+test('maybeHandleSlashCommand creates and shows workspace memory with /memory', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'dclaw-slash-memory-'))
+  const workspaceDir = await mkdtemp(join(tmpdir(), 'dclaw-slash-memory-workspace-'))
+  const env = { ...process.env, HOME: homeDir }
+  const output: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  try {
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output.push(String(chunk))
+      return true
+    }) as typeof process.stdout.write
+
+    const context = createCommandContext({
+      options: {
+        cwd: workspaceDir,
+        stream: false,
+      },
+      env,
+    })
+    const handled = await maybeHandleSlashCommand('/memory', context)
+    const entrypoint = await readFile(
+      getMemoryEntrypointPath(workspaceDir, env),
+      'utf8',
+    )
+
+    assert.equal(handled, true)
+    assert.match(output.join(''), /Memory:/)
+    assert.match(output.join(''), /entrypoint:/)
+    assert.match(entrypoint, /# Memory/)
+  } finally {
+    process.stdout.write = originalWrite
+    await rm(homeDir, { recursive: true, force: true })
+    await rm(workspaceDir, { recursive: true, force: true })
+  }
 })
 
 test('maybeHandleSlashCommand prints current status for /status', async () => {

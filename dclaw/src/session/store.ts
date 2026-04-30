@@ -5,7 +5,10 @@ import type { CompactBoundary } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
 import { getSessionPlanFilePath, readPlanFile, writePlanFile } from '../tasks/planFiles.js'
 import type { Message } from '../types/message.js'
-import { repairDanglingToolUseMessages } from '../types/message.js'
+import {
+  getTranscriptSerializableMessages,
+  repairDanglingToolUseMessages,
+} from '../types/message.js'
 import type { PermissionMode } from '../types/tool.js'
 import {
   getProjectSessionsDir,
@@ -52,6 +55,8 @@ export type SessionMeta = {
   }
   planMode?: PlanModeState
   taskBoardId?: string
+  listedSkillNames?: string[]
+  invokedSkillNames?: string[]
   createdAt: string
   updatedAt: string
   persistedToolResults: SessionPersistedToolResultRecord[]
@@ -116,10 +121,29 @@ function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
       typeof meta.taskBoardId === 'string' && meta.taskBoardId.trim().length > 0
         ? meta.taskBoardId
         : undefined,
+    listedSkillNames: normalizeSkillNameList(meta.listedSkillNames),
+    invokedSkillNames: normalizeSkillNameList(meta.invokedSkillNames),
     persistedToolResults: Array.isArray(meta.persistedToolResults)
       ? meta.persistedToolResults
       : [],
   }
+}
+
+function normalizeSkillNameList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const names = [
+    ...new Set(
+      value
+        .filter((name): name is string => typeof name === 'string')
+        .map(name => name.trim())
+        .filter(name => name.length > 0),
+    ),
+  ].sort((left, right) => left.localeCompare(right))
+
+  return names.length > 0 ? names : undefined
 }
 
 function normalizeSessionMemoryState(
@@ -313,7 +337,12 @@ export async function appendSessionMessages(
     return
   }
 
-  const safeMessages = repairDanglingToolUseMessages(messages)
+  const transcriptMessages = getTranscriptSerializableMessages(messages)
+  if (transcriptMessages.length === 0) {
+    return
+  }
+
+  const safeMessages = repairDanglingToolUseMessages(transcriptMessages)
   await ensureSessionMessagesFile(sessionId, env)
   const serialized = safeMessages
     .map(message => JSON.stringify(message))
