@@ -84,11 +84,13 @@
 - task / plan 状态管理
 - session 生命周期管理
 
-其中阶段 9 首版建议引入 `task board` 作为 planning / execution 状态容器：
+当前 plan / task 已经拆成两条运行时语义：
 
 - session 负责消息历史
-- task board 负责 `plan mode`、task、current step 真值
-- session meta 通过 `taskBoardId` 挂接 task board
+- `src/planboard/` 负责 PlanBoard、plan file、plan snapshot 等 planning 状态
+- `src/taskboard/` 负责 execution TaskBoard 和当前执行批次
+- execution task board 保存在 `sessions/<sessionId>/task-board.json`
+- active task board 由 `task-board.json.executionState` 判断，不再通过 session meta 挂接
 
 详细结构见 [plan-task-spec.md](./plan-task-spec.md)。
 
@@ -96,7 +98,7 @@
 
 - `src/permissions/`
 - `src/hooks/`
-- `src/tasks/`
+- `src/planboard/`
 - `src/session/`
 
 ### 2.6 Long Context 层

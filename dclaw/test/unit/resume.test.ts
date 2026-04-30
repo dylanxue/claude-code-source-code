@@ -12,7 +12,7 @@ import {
   ensureSessionPlanFile,
   updateSessionPlanMode,
 } from '../../src/session/store.js'
-import { createPlanSnapshotMessage } from '../../src/tasks/planSnapshots.js'
+import { createPlanSnapshotMessage } from '../../src/planboard/planSnapshots.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 
 test('runResume prints restored transcript when no prompt is provided', async () => {

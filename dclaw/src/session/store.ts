@@ -3,7 +3,7 @@ import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promise
 import { dirname, join, resolve } from 'node:path'
 import type { CompactBoundary } from '../compact/types.js'
 import { isPersistedToolResultOutput } from '../core/toolResultBudget.js'
-import { getSessionPlanFilePath, readPlanFile, writePlanFile } from '../tasks/planFiles.js'
+import { getSessionPlanFilePath, readPlanFile, writePlanFile } from '../planboard/planFiles.js'
 import type { Message } from '../types/message.js'
 import {
   getTranscriptSerializableMessages,

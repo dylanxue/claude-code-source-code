@@ -618,7 +618,7 @@ QueryEngine events -> UI event reducer -> Transcript / Bottom Dock / Overlay
   已有 slash 命令体系
 - `src/permissions/evaluator.ts`
   已有权限判定逻辑
-- `src/tasks/*`
+- `src/planboard/*`
   已有 task board、task state、plan file 语义
 
 ## 10.2 推荐的 TUI 分层
@@ -1110,9 +1110,9 @@ QueryEngine
 
 建议改动文件：
 
-- `dclaw/src/tasks/store.ts`
-- `dclaw/src/tasks/taskState.ts`
-- `dclaw/src/tasks/observability.ts`
+- `dclaw/src/planboard/store.ts`
+- `dclaw/src/planboard/observability.ts`
+- `dclaw/src/taskboard/state.ts`
 - `dclaw/src/cli/slashCommands.ts`
 - `dclaw/src/tui/presenters/taskSnapshotPresenter.ts`
 - `dclaw/src/tui/views/items/TaskListSnapshot.tsx`

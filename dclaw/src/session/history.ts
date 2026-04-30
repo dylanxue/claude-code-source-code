@@ -16,7 +16,7 @@ import {
   describeSystemReminderText,
   getPlanModeObservationLines,
   isSystemReminderText,
-} from '../tasks/observability.js'
+} from '../planboard/observability.js'
 import { getProjectSessionsDir } from './paths.js'
 import {
   loadSessionMessages,

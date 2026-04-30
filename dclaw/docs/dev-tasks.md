@@ -415,7 +415,7 @@
 
 - [x] 先按 `docs/plan-task-spec.md` 的首版方案落地：引入 `task board`，由 session meta 挂接 `taskBoardId`
 
-- [x] 新建 `src/tasks/`，先落：
+- [x] 新建 `src/planboard/`，先落：
   - `types.ts`
   - `store.ts`
   - `planFiles.ts`

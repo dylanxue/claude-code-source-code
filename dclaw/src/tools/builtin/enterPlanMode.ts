@@ -2,8 +2,8 @@ import {
   ensurePlanBoardPlanFile,
   getOrCreatePlanBoardForSession,
   updatePlanBoard,
-} from '../../tasks/store.js'
-import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
+} from '../../planboard/store.js'
+import { appendPlanSnapshotForFile } from '../../planboard/planSnapshots.js'
 import type { PermissionMode, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
 import { DESCRIPTION, PROMPT } from './enterPlanModePrompt.js'

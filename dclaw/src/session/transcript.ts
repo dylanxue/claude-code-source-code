@@ -11,8 +11,8 @@ import {
   describePlanModeToolResult,
   describePlanModeToolUse,
   describeSystemReminderText,
-} from '../tasks/observability.js'
-import { describePlanSnapshotText } from '../tasks/planSnapshots.js'
+} from '../planboard/observability.js'
+import { describePlanSnapshotText } from '../planboard/planSnapshots.js'
 import {
   isPersistedToolResultOutput,
 } from '../core/toolResultBudget.js'

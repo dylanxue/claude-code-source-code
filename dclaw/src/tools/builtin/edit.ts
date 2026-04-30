@@ -2,7 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ToolContext, ToolResult } from '../../types/tool.js'
 import { buildTool, type Tool } from '../types.js'
-import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
+import { appendPlanSnapshotForFile } from '../../planboard/planSnapshots.js'
 import { DESCRIPTION, PROMPT } from './editPrompt.js'
 import { isAbsoluteToolPath, toAbsoluteToolPath } from './pathUtils.js'
 import {

@@ -12,7 +12,7 @@ import {
   type SessionPersistedToolResultRecord,
 } from '../session/store.js'
 import { formatTranscript } from '../session/transcript.js'
-import { recoverSessionPlanFile } from '../tasks/planSnapshots.js'
+import { recoverSessionPlanFile } from '../planboard/planSnapshots.js'
 import type { Message } from '../types/message.js'
 import { runInteractiveSessionPrompt } from './interactiveSession.js'
 import type { InteractiveSessionState } from './slashCommands.js'

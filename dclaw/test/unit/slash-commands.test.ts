@@ -18,7 +18,7 @@ import {
   attachPlanBoardToSession,
   createPlanBoard,
   loadPlanBoardForSession,
-} from '../../src/tasks/store.js'
+} from '../../src/planboard/store.js'
 import type {
   SlashCommandContext,
   InteractiveSessionState,

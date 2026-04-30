@@ -37,11 +37,11 @@ import {
 } from '../session/store.js'
 import {
   readPlanFile,
-} from '../tasks/planFiles.js'
+} from '../planboard/planFiles.js'
 import {
   appendPlanSnapshotForFile,
   recoverSessionPlanFile,
-} from '../tasks/planSnapshots.js'
+} from '../planboard/planSnapshots.js'
 import { formatTranscript } from '../session/transcript.js'
 import type { PermissionMode } from '../types/tool.js'
 import type { SkillStatus } from '../skills/enablement.js'

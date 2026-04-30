@@ -11,14 +11,14 @@ import {
   getDefaultPlanFilePath,
   getSessionPlanFilePath,
   readPlanFile,
-} from '../../src/tasks/planFiles.js'
+} from '../../src/planboard/planFiles.js'
 import {
   attachPlanBoardToSession,
   createPlanBoard,
   getOrCreatePlanBoardForSession,
   loadPlanBoard,
   loadPlanBoardForSession,
-} from '../../src/tasks/store.js'
+} from '../../src/planboard/store.js'
 import {
   createSession,
   ensureSessionPlanFile,
@@ -29,7 +29,7 @@ import {
 import {
   createPlanSnapshotMessage,
   recoverSessionPlanFile,
-} from '../../src/tasks/planSnapshots.js'
+} from '../../src/planboard/planSnapshots.js'
 import { createMessage, createTextMessage } from '../../src/types/message.js'
 
 test('plan board store persists and can be linked to a session', async () => {

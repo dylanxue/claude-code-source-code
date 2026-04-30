@@ -315,7 +315,7 @@ Implement the following approved plan:
 
 ### 6.1 废除 tasks/store plan-side API
 
-旧 `src/tasks/*` 中和 PlanBoard 强绑定的 store API 应逐步替换为 session-level plan mode API。
+旧 `src/planboard/*` 中和 PlanBoard 强绑定的 store API 应逐步替换为 session-level plan mode API。
 
 保留或改造的能力：
 
@@ -406,7 +406,7 @@ Implement the following approved plan:
 - [x] `tasks/observability.ts` 拆分或改名为 plan mode/session observability。
 - [x] TUI `PlanModeSnapshot` 改为基于 session plan mode。
 - [x] 删除 PlanBoard brief 展示字段。
-- [x] 删除或废弃 `src/tasks/types.ts` 中 `PlanBoard`。
+- [x] 删除或废弃旧 PlanBoard task/current-step 类型字段。
 
 ### Phase 7: 测试与验证
 

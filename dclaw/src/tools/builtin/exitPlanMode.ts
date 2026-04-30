@@ -1,5 +1,5 @@
-import { readPlanFile } from '../../tasks/planFiles.js'
-import { appendPlanSnapshotForFile } from '../../tasks/planSnapshots.js'
+import { readPlanFile } from '../../planboard/planFiles.js'
+import { appendPlanSnapshotForFile } from '../../planboard/planSnapshots.js'
 import {
   loadSessionMeta,
   updateSessionPlanMode,

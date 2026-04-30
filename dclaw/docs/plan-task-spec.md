@@ -443,9 +443,9 @@ When in plan mode:
 
 ### 10.1 P0
 
-1. `src/tasks/types.ts`
-2. `src/tasks/store.ts`
-3. `src/tasks/taskState.ts`
+1. `src/planboard/store.ts`
+2. `src/taskboard/types.ts`
+3. `src/taskboard/state.ts`
 4. workspace `.dclaw/task-boards/` 持久化
 5. session meta 挂 `taskBoardId`
 6. workspace `.dclaw/plans/` 与 plan file 持久化

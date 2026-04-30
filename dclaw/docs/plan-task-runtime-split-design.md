@@ -1,10 +1,10 @@
 # Plan / Task Runtime Split 设计与落地记录
 
-截至 `2026-04-29`，`dclaw` 的 `plan` / `Plan mode` / execution `TaskBoard` 语义已经完成一轮较大收敛。本文档用于记录：
+截至 `2026-04-30`，`dclaw` 的 `plan` / `Plan mode` / execution `TaskBoard` 语义已经完成一轮较大收敛。本文档用于记录：
 
 1. 当前已经确认的设计结论
 2. 当前代码已经落地到什么程度
-3. 仍然保留的兼容策略与非目标
+3. 仍然保留的历史数据处理与非目标
 
 > 下一轮 Plan Mode 重构决策已经单独记录在 [plan-mode-session-meta-refactor.md](./plan-mode-session-meta-refactor.md)。本文档继续作为当前已落地实现的状态记录；新文档描述下一步目标态。
 
@@ -43,11 +43,12 @@
   - 第 `1` 条自动置为 `in_progress`
 - 同一时刻只允许一条 `in_progress`
 - 如果已有其它 `in_progress` 任务，再开新的一条，直接返回 error
-- execution `TaskBoard` 只活当前 turn
+- execution `TaskBoard` 的 active 语义只活当前 turn
+- execution `TaskBoard` 文件保存在当前 session 目录下，作为最近一次执行批次记录
 - turn 真正结束时：
   - 未完成任务统一转为 `cancelled`
   - board 写入结束状态
-  - board 从 session 上解绑
+- active 状态由 `task-board.json.executionState` 判断
 - 下一轮如果还要继续，重新创建 fresh execution `TaskBoard`
 
 ### 1.4 Turn 结束语义
@@ -77,25 +78,29 @@
 
 ### 2.1 SessionMeta
 
-当前 session 元数据已经拆成双链路：
+当前 `SessionMeta` 不再保存 plan/task board 指针：
 
 ```ts
 type SessionMeta = {
-  planBoardId?: string
-  taskBoardId?: string
+  planMode?: PlanModeState
+  sessionMemory?: ...
+  listedSkillNames?: string[]
+  invokedSkillNames?: string[]
   // ...
 }
 ```
 
 说明：
 
-- `planBoardId` 指向 planning 容器
-- `taskBoardId` 指向当前 turn 的 execution board
-- 读取旧 session 时，仍保留 `taskBoardId -> planBoardId` 的兼容 fallback
+- Plan mode 的 runtime 状态保存在 `planMode`
+- `PlanBoard` 的 id 由 session id 稳定派生为 `board_<sessionId>`
+- execution `TaskBoard` 不通过 session meta 挂接
+- execution `TaskBoard` 固定保存在 `sessions/<sessionId>/task-board.json`
+- 当前是否有 active task board 由 `task-board.json.executionState` 和未完成任务共同判断
 
 ### 2.2 PlanBoard
 
-当前 `PlanBoard` 位于 [dclaw/src/tasks/types.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/tasks/types.ts:1)：
+当前 `PlanBoard` 位于 [dclaw/src/planboard/store.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/planboard/store.ts:1)：
 
 ```ts
 type PlanBoard = {
@@ -181,6 +186,8 @@ type TaskBoard = {
 - execution `TaskBoard` 与 plan file 无关
 - execution `TaskBoard` 不再有 `mode: active/inactive/...`
 - execution `TaskBoard` 只表达执行批次
+- `loadExecutionTaskBoardForSession()` 读取最近一次 session-local board
+- `loadActiveExecutionTaskBoardForSession()` 只在 board 仍 active 且有 unfinished task 时返回
 
 ## 3. 已落地实现
 
@@ -188,7 +195,7 @@ type TaskBoard = {
 
 以下已经落地：
 
-- `dclaw/src/tasks/*` 已收成 plan-side 实现目录
+- `dclaw/src/planboard/*` 是 plan-side 实现目录
 - `PlanBoard` 的 task/current-step 模型已移除
 - `taskState.ts` 已删除
 - `planAttachment.ts` 已删除
@@ -200,7 +207,7 @@ type TaskBoard = {
 
 主要代码入口：
 
-- [dclaw/src/tasks/store.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/tasks/store.ts:1)
+- [dclaw/src/planboard/store.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/planboard/store.ts:1)
 - [dclaw/src/core/planModeReminder.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/core/planModeReminder.ts:1)
 - [dclaw/src/cli/runtime.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/cli/runtime.ts:1)
 - [dclaw/src/cli/replCommands.ts](/Users/dylan/work/claude-code-source-code/dclaw/src/cli/replCommands.ts:1)
@@ -217,6 +224,9 @@ type TaskBoard = {
 - `TaskCreate` 成功时自动启动第 `1` 条
 - `TaskUpdate` 支持 `cancelled`
 - 已有 `in_progress` 时再开另一条会直接报错
+- execution `TaskBoard` 保存在 `sessions/<sessionId>/task-board.json`
+- `TaskCreate` 只在当前 session 存在 active board 时拒绝；旧 board 已 completed/cancelled 时可以覆盖创建 fresh board
+- `TaskList` 只列出 active execution board；没有 active board 时返回空列表
 - `queryLoop` 已加入 `pre-end guard`
 - `queryEngine` 正常和异常结束路径都会 cleanup execution board
 - `compact / resume` 不再恢复 execution board
@@ -240,7 +250,8 @@ type TaskBoard = {
 
 - 必须传 `tasks[]`
 - 必须 `>= 3`
-- 如果当前 session 已有 attached execution board，直接报错
+- 如果当前 session 已有 active execution board，直接报错
+- 如果最近一次 board 已 `completed / cancelled`，允许覆盖创建 fresh board
 - 创建 fresh board
 - 第 `1` 条任务自动 `in_progress`
 - board 同时写入：
@@ -258,16 +269,24 @@ type TaskBoard = {
 - 当最后一条 unfinished task 进入终止态时：
   - `executionState` 自动收束成 `completed` 或 `cancelled`
 
-### 4.3 Turn guard
+### 4.3 TaskList / TaskGet
+
+当前行为：
+
+- `TaskList` 读取 active execution board
+- 没有 active board 时返回空任务列表，并显示 `No active execution tasks found`
+- `TaskGet` 读取 session-local 的最近一次 board，用于按 id 查询当前/最近任务详情
+
+### 4.4 Turn guard
 
 当前 `queryLoop` 已实现：
 
 - 当 assistant 准备以普通文本结束 turn
-- 如果 attached execution board 仍是 active 且有 unfinished task
+- 如果 session-local execution board 仍是 active 且有 unfinished task
 - 且没有命中最终 handoff 条件
 - 则先注入 repair reminder，而不是直接结束
 
-### 4.4 Turn cleanup
+### 4.5 Turn cleanup
 
 当前 `queryEngine` 已实现：
 
@@ -288,7 +307,7 @@ cleanup 行为：
 - 写入：
   - `executionEndedAt`
   - `executionEndReason`
-- 将 `taskBoardId` 从 session 上解绑
+- 不再更新 session meta 中的 task board 指针；active 状态完全来自 board 文件
 
 ## 5. Compact / Resume 策略
 
@@ -311,17 +330,11 @@ execution `TaskBoard` 不再参与：
 
 这部分已经落地，不只是方案目标。
 
-## 6. 兼容策略
+## 6. 历史数据处理
 
-当前仍保留两类兼容：
+当前仍保留一类历史数据处理：
 
-### 6.1 SessionMeta fallback
-
-- 老 session 若只有 `taskBoardId`
-- runtime 会在读取时尝试把它解释为 legacy `PlanBoard`
-- 然后补写到 `planBoardId`
-
-### 6.2 Legacy completed plan-board 退休逻辑
+### 6.1 Legacy completed plan-board 退休逻辑
 
 虽然 `PlanBoard` 自身已经不再有 task 模型，但仍保留了对旧 JSON 的兼容判断：
 
@@ -329,7 +342,7 @@ execution `TaskBoard` 不再参与：
 - 且这些可见 task 全部 `completed`
 - 且 board 处于 `inactive`
 - 且超过退休延迟
-- 则 `loadPlanBoardForSession()` 会自动把它从 session 上解绑
+- 则 `loadPlanBoardForSession()` 会把它视为已退休并返回空
 
 注意：
 
@@ -346,6 +359,8 @@ execution `TaskBoard` 不再参与：
 - `/plan start`
 - `plan -> task materialization`
 - execution task 的 compact/resume 恢复链路
+- `SessionMeta.taskBoardId`
+- workspace 级 `execution-task-boards`
 
 ## 8. 当前非目标
 
